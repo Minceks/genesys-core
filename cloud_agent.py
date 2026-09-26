@@ -1,12 +1,37 @@
 import os
 
 from dotenv import load_dotenv
-from flask import Flask, request, jsonify
+from flask import Flask, jsonify, request
 from flask_cors import CORS
-from github import Github
-from github import GithubException
 
-load_dotenv()
+from agent.orchestrator import run_agent
+from agent.tools import (
+    list_files,
+    read_file,
+    write_file,
+)
+
+
+# =========================================================
+# ENVIRONMENT
+# =========================================================
+
+BASE_DIR = os.path.dirname(
+    os.path.abspath(__file__)
+)
+
+load_dotenv(
+    os.path.join(
+        BASE_DIR,
+        ".env"
+    ),
+    override=True,
+)
+
+
+# =========================================================
+# APP
+# =========================================================
 
 app = Flask(__name__)
 
@@ -19,245 +44,253 @@ CORS(
     }
 )
 
-GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
-REPO_NAME = os.getenv(
-    "GITHUB_REPO",
-    "Minceks/genesys-core"
+
+# =========================================================
+# HEALTH
+# =========================================================
+
+@app.route(
+    "/health",
+    methods=["GET"]
 )
-GITHUB_BRANCH = os.getenv(
-    "GITHUB_BRANCH",
-    "main"
-)
-
-
-def get_repo():
-    if not GITHUB_TOKEN:
-        raise RuntimeError(
-            "GITHUB_TOKEN is missing. Configure it in Railway Variables."
-        )
-
-    github = Github(GITHUB_TOKEN)
-
-    return github.get_repo(REPO_NAME)
-
-
-def clean_path(filename):
-    if not filename:
-        raise ValueError("Filename is required.")
-
-    path = filename.strip().replace("\\", "/")
-
-    while path.startswith("/"):
-        path = path[1:]
-
-    if path.startswith("genesys-pro/"):
-        path = path[len("genesys-pro/"):]
-
-    parts = path.split("/")
-
-    if any(part in ("", ".", "..") for part in parts):
-        raise ValueError("Invalid file path.")
-
-    return "/".join(parts)
-
-
-@app.route("/health", methods=["GET"])
 def health():
+
     return jsonify({
-        "status": "Genesys Cloud Bridge is Online"
+        "status":
+            "Genesys Cloud Bridge is Online",
+
+        "agent":
+            True,
     }), 200
 
 
-@app.route("/list-files", methods=["GET"])
-def list_files():
+# =========================================================
+# PROJECT FILES
+# =========================================================
+
+@app.route(
+    "/list-files",
+    methods=["GET"]
+)
+def http_list_files():
+
     try:
-        repo = get_repo()
 
-        routes = []
-        components = []
+        return jsonify(
+            list_files()
+        ), 200
 
-        def walk(path=""):
-            items = repo.get_contents(
-                path,
-                ref=GITHUB_BRANCH
-            )
-
-            for item in items:
-                if item.type == "dir":
-                    # Don't walk huge dependency/build folders.
-                    if item.name in {
-                        "node_modules",
-                        "dist",
-                        ".git"
-                    }:
-                        continue
-
-                    yield from walk(item.path)
-
-                elif item.type == "file":
-                    yield item.path
-
-        files = list(walk())
-
-        for path in files:
-            if path.startswith("src/routes/"):
-                routes.append(path)
-
-            elif path.startswith("src/components/"):
-                components.append(path)
+    except Exception as error:
 
         return jsonify({
-            "status": "success",
-            "tree": {
-                "routes": sorted(routes),
-                "components": sorted(components)
-            }
-        }), 200
+            "status":
+                "error",
 
-    except Exception as e:
-        print(f"❌ LIST ERROR: {e}")
-
-        return jsonify({
-            "status": "error",
-            "message": str(e)
+            "message":
+                str(error),
         }), 500
 
 
-@app.route("/read-file", methods=["POST"])
-def read_file():
+@app.route(
+    "/read-file",
+    methods=["POST"]
+)
+def http_read_file():
+
     try:
-        data = request.get_json(silent=True) or {}
 
-        path = clean_path(
-            data.get("filename")
+        data = (
+            request.get_json(
+                silent=True
+            )
+            or {}
         )
 
-        repo = get_repo()
-
-        contents = repo.get_contents(
-            path,
-            ref=GITHUB_BRANCH
+        result = read_file(
+            data.get(
+                "filename"
+            )
         )
 
-        if isinstance(contents, list):
-            return jsonify({
-                "status": "error",
-                "message": "Path is a directory, not a file."
-            }), 400
+        return jsonify(
+            result
+        ), 200
 
-        content = contents.decoded_content.decode(
-            "utf-8",
-            errors="replace"
-        )
+    except Exception as error:
 
         return jsonify({
-            "status": "success",
-            "filename": path,
-            "content": content
-        }), 200
+            "status":
+                "error",
 
-    except GithubException as e:
-        status = getattr(e, "status", 500)
-
-        return jsonify({
-            "status": "error",
-            "message": str(e)
-        }), status
-
-    except Exception as e:
-        print(f"❌ READ ERROR: {e}")
-
-        return jsonify({
-            "status": "error",
-            "message": str(e)
+            "message":
+                str(error),
         }), 500
 
 
-@app.route("/write-file", methods=["POST"])
-def write_to_github():
+@app.route(
+    "/write-file",
+    methods=["POST"]
+)
+def http_write_file():
+
     try:
-        data = request.get_json(silent=True) or {}
 
-        filename = data.get("filename")
-        code = data.get("code")
+        data = (
+            request.get_json(
+                silent=True
+            )
+            or {}
+        )
 
-        if not filename:
+        result = write_file(
+            data.get(
+                "filename"
+            ),
+            data.get(
+                "code"
+            ),
+        )
+
+        return jsonify(
+            result
+        ), 200
+
+    except Exception as error:
+
+        return jsonify({
+            "status":
+                "error",
+
+            "message":
+                str(error),
+        }), 500
+
+
+# =========================================================
+# AUTONOMOUS AGENT
+# =========================================================
+
+@app.route(
+    "/agent/run",
+    methods=["POST"]
+)
+def agent_run():
+
+    try:
+
+        data = (
+            request.get_json(
+                silent=True
+            )
+            or {}
+        )
+
+        prompt = (
+            data.get(
+                "prompt"
+            )
+            or ""
+        ).strip()
+
+        project_id = data.get(
+            "projectId"
+        )
+
+        if not prompt:
+
             return jsonify({
-                "status": "error",
-                "message": "Missing 'filename'."
+                "status":
+                    "error",
+
+                "message":
+                    "Missing prompt.",
             }), 400
-
-        if code is None:
-            return jsonify({
-                "status": "error",
-                "message": "Missing 'code'."
-            }), 400
-
-        path = clean_path(filename)
-
-        repo = get_repo()
-
-        # Existing file
-        try:
-            contents = repo.get_contents(
-                path,
-                ref=GITHUB_BRANCH
-            )
-
-            if isinstance(contents, list):
-                raise RuntimeError(
-                    f"{path} is a directory."
-                )
-
-            repo.update_file(
-                path=contents.path,
-                message=f"AI Edit: {path}",
-                content=code,
-                sha=contents.sha,
-                branch=GITHUB_BRANCH
-            )
-
-            action = "UPDATED"
-
-        # New file
-        except GithubException as e:
-            if e.status != 404:
-                raise
-
-            repo.create_file(
-                path=path,
-                message=f"AI Create: {path}",
-                content=code,
-                branch=GITHUB_BRANCH
-            )
-
-            action = "CREATED"
 
         print(
-            f"✅ CLOUD PUSH: {action} {path}"
+            "========================================"
+        )
+
+        print(
+            f"🤖 AGENT REQUEST: {prompt}"
+        )
+
+        result = run_agent(
+            prompt,
+            project_id,
+        )
+
+        print(
+            f"🤖 AGENT RESULT: "
+            f"{result.get('status')}"
+        )
+
+        print(
+            "========================================"
+        )
+
+        return jsonify(
+            result
+        ), 200
+
+    except Exception as error:
+
+        print(
+            f"❌ AGENT ERROR: {error}"
         )
 
         return jsonify({
-            "status": "success",
-            "action": action,
-            "file": path
-        }), 200
+            "status":
+                "error",
 
-    except Exception as e:
-        print(f"❌ CLOUD ERROR: {e}")
-
-        return jsonify({
-            "status": "error",
-            "message": str(e)
+            "message":
+                str(error),
         }), 500
 
 
+# =========================================================
+# LOCAL SERVER
+# =========================================================
+
 if __name__ == "__main__":
+
     port = int(
-        os.environ.get("PORT", 5000)
+        os.environ.get(
+            "PORT",
+            5000
+        )
+    )
+
+    print(
+        "========================================"
+    )
+
+    print(
+        "🚀 GeneSys Execution Agent"
+    )
+
+    print(
+        "📁 Workspace:"
+    )
+
+    print(
+        BASE_DIR
+    )
+
+    print(
+        f"🤖 Model: "
+        f"openai/gpt-oss-120b"
+    )
+
+    print(
+        f"🔐 Groq key loaded: "
+        f"{bool(os.getenv('GROQ_API_KEY'))}"
+    )
+
+    print(
+        "========================================"
     )
 
     app.run(
         host="0.0.0.0",
-        port=port
+        port=port,
     )
