@@ -150,6 +150,11 @@ class BrowserSession:
                     self.console_messages[-200:]
                 )
 
+        self.page.on(
+            "pageerror",
+            handle_page_error,
+        )
+
     # ========================================================
     # SCREENSHOT
     # ========================================================
@@ -174,7 +179,7 @@ class BrowserSession:
         }
 
     # ========================================================
-    # CONSOLE
+    # GET CONSOLE
     # ========================================================
 
     def get_console(
