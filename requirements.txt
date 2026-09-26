@@ -4,3 +4,4 @@ PyGithub
 python-dotenv
 gunicorn
 groq
+playwright
