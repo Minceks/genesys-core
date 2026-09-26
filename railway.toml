@@ -1,0 +1,4 @@
+[deploy]
+startCommand = "gunicorn cloud_agent:app"
+healthcheckPath = "/health"
+healthcheckTimeout = 30
