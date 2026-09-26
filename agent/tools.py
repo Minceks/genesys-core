@@ -1,287 +1,102 @@
-import os
-from pathlib import Path
 from typing import Any
 
+from .daytona_workspace import get_workspace
 from .runner import (
-    PROJECT_ROOT,
     run_build,
     start_preview,
     stop_preview,
 )
 
 
-# =========================================================
-# LIMITS
-# =========================================================
+# ============================================================
+# LIST FILES
+# ============================================================
 
-MAX_READ_CHARS = 50000
-MAX_WRITE_CHARS = 250000
-
-IGNORED_DIRECTORIES = {
-    ".git",
-    "node_modules",
-    "dist",
-    ".cache",
-    ".vite",
-    "coverage",
-    ".venv",
-    "venv",
-}
-
-
-# Files that the agent should never modify directly.
-PROTECTED_FILES = {
-    ".env",
-    ".gitignore",
-    "package-lock.json",
-    "routeTree.gen.ts",
-}
-
-
-# =========================================================
-# PATH SAFETY
-# =========================================================
-
-def safe_path(filename: str) -> Path:
-    if not filename:
-        raise ValueError(
-            "Filename is required."
-        )
-
-    filename = str(filename).strip()
-
-    filename = filename.replace(
-        "\\",
-        "/",
+def list_files(
+    project_id: str = "genesys-project",
+) -> dict[str, Any]:
+    workspace = get_workspace(
+        project_id
     )
 
-    while filename.startswith("/"):
-        filename = filename[1:]
-
-    if filename.startswith(
-        "genesys-pro/"
-    ):
-        filename = filename[
-            len("genesys-pro/"):
-        ]
-
-    root = Path(
-        PROJECT_ROOT
-    ).resolve()
-
-    target = (
-        root / filename
-    ).resolve()
-
-    try:
-        target.relative_to(root)
-    except ValueError:
-        raise ValueError(
-            "Invalid path. "
-            "The file must stay inside the project."
-        )
-
-    return target
+    return workspace.list_files()
 
 
-def relative_path(path: Path) -> str:
-    return path.resolve().relative_to(
-        Path(PROJECT_ROOT).resolve()
-    ).as_posix()
-
-
-# =========================================================
-# LIST FILES
-# =========================================================
-
-def list_files() -> dict[str, Any]:
-
-    root = Path(PROJECT_ROOT)
-
-    files: list[str] = []
-
-    for current_root, dirs, filenames in os.walk(
-        root
-    ):
-
-        # Prevent traversal into ignored directories.
-        dirs[:] = [
-            d
-            for d in dirs
-            if d not in IGNORED_DIRECTORIES
-        ]
-
-        current = Path(
-            current_root
-        )
-
-        for filename in filenames:
-
-            path = current / filename
-
-            try:
-                files.append(
-                    relative_path(path)
-                )
-            except ValueError:
-                continue
-
-    files.sort()
-
-    routes = [
-        path
-        for path in files
-        if path.startswith(
-            "src/routes/"
-        )
-    ]
-
-    components = [
-        path
-        for path in files
-        if path.startswith(
-            "src/components/"
-        )
-    ]
-
-    return {
-        "status": "success",
-        "projectRoot": PROJECT_ROOT,
-        "files": files[:3000],
-        "tree": {
-            "routes": routes,
-            "components": components,
-        },
-    }
-
-
-# =========================================================
+# ============================================================
 # READ FILE
-# =========================================================
+# ============================================================
 
 def read_file(
     filename: str,
+    project_id: str = "genesys-project",
 ) -> dict[str, Any]:
+    workspace = get_workspace(
+        project_id
+    )
 
-    path = safe_path(
+    return workspace.read_file(
         filename
     )
 
-    if not path.exists():
-        raise FileNotFoundError(
-            f"File does not exist: {filename}"
-        )
 
-    if not path.is_file():
-        raise ValueError(
-            f"Not a file: {filename}"
-        )
-
-    content = path.read_text(
-        encoding="utf-8",
-        errors="replace",
-    )
-
-    truncated = False
-
-    if len(content) > MAX_READ_CHARS:
-        content = content[
-            :MAX_READ_CHARS
-        ]
-        truncated = True
-
-    return {
-        "status": "success",
-        "path": relative_path(path),
-        "content": content,
-        "truncated": truncated,
-    }
-
-
-# =========================================================
+# ============================================================
 # WRITE FILE
-# =========================================================
+# ============================================================
 
 def write_file(
     filename: str,
     content: str,
+    project_id: str = "genesys-project",
 ) -> dict[str, Any]:
-
-    path = safe_path(
-        filename
+    workspace = get_workspace(
+        project_id
     )
 
-    relative = relative_path(
-        path
-    )
-
-    # Never allow agent to modify secrets.
-    basename = path.name
-
-    if (
-        basename in PROTECTED_FILES
-        or relative == ".env"
-        or relative.startswith(".env.")
-    ):
-        raise ValueError(
-            f"Protected file cannot be modified by the agent: "
-            f"{relative}"
-        )
-
-    if content is None:
-        raise ValueError(
-            "File content is required."
-        )
-
-    content = str(content)
-
-    if len(content) > MAX_WRITE_CHARS:
-        raise ValueError(
-            f"File exceeds {MAX_WRITE_CHARS} characters."
-        )
-
-    existed = path.exists()
-
-    path.parent.mkdir(
-        parents=True,
-        exist_ok=True,
-    )
-
-    path.write_text(
+    return workspace.write_file(
+        filename,
         content,
-        encoding="utf-8",
     )
 
-    return {
-        "status": "success",
-        "action": "UPDATED"
-        if existed
-        else "CREATED",
-        "file": relative,
-        "bytes": len(
-            content.encode("utf-8")
-        ),
-    }
 
-
-# =========================================================
+# ============================================================
 # BUILD
-# =========================================================
+# ============================================================
 
-def execute_build() -> dict[str, Any]:
-    return run_build()
+def execute_build(
+    project_id: str = "genesys-project",
+) -> dict[str, Any]:
+    return run_build(
+        project_id=project_id
+    )
 
 
-def execute_start_preview() -> dict[str, Any]:
-    return start_preview()
+# ============================================================
+# START PREVIEW
+# ============================================================
+
+def execute_start_preview(
+    project_id: str = "genesys-project",
+) -> dict[str, Any]:
+    return start_preview(
+        project_id=project_id
+    )
 
 
-def execute_stop_preview() -> dict[str, Any]:
-    return stop_preview()
+# ============================================================
+# STOP PREVIEW
+# ============================================================
 
-# =========================================================
-# TOOL DEFINITIONS FOR GROQ
-# =========================================================
+def execute_stop_preview(
+    project_id: str = "genesys-project",
+) -> dict[str, Any]:
+    return stop_preview(
+        project_id=project_id
+    )
+
+
+# ============================================================
+# GROQ TOOLS
+# ============================================================
 
 TOOLS = [
     {
@@ -289,8 +104,8 @@ TOOLS = [
         "function": {
             "name": "list_files",
             "description": (
-                "Inspect the local GeneSys project and list its files. "
-                "Use this before changing the project."
+                "Inspect the current project inside its isolated "
+                "Daytona workspace. Use this once before making changes."
             ),
             "parameters": {
                 "type": "object",
@@ -301,43 +116,12 @@ TOOLS = [
         },
     },
     {
-    "type": "function",
-    "function": {
-        "name": "start_preview",
-        "description": (
-            "Start the local Vite development server so the "
-            "user can interact with the current application."
-        ),
-        "parameters": {
-            "type": "object",
-            "properties": {},
-            "required": [],
-            "additionalProperties": False,
-        },
-    },
-},
-{
-    "type": "function",
-    "function": {
-        "name": "stop_preview",
-        "description": (
-            "Stop the GeneSys-managed local Vite preview server."
-        ),
-        "parameters": {
-            "type": "object",
-            "properties": {},
-            "required": [],
-            "additionalProperties": False,
-        },
-    },
-},
-    {
         "type": "function",
         "function": {
             "name": "read_file",
             "description": (
-                "Read an existing project file. "
-                "Use this before changing an existing file."
+                "Read an existing project file from the isolated "
+                "Daytona workspace."
             ),
             "parameters": {
                 "type": "object",
@@ -350,7 +134,9 @@ TOOLS = [
                         ),
                     }
                 },
-                "required": ["filename"],
+                "required": [
+                    "filename"
+                ],
                 "additionalProperties": False,
             },
         },
@@ -360,8 +146,8 @@ TOOLS = [
         "function": {
             "name": "write_file",
             "description": (
-                "Create or update a project file in the local "
-                "workspace. Write the complete file contents."
+                "Create or update a file inside the isolated "
+                "Daytona workspace. Write complete file contents."
             ),
             "parameters": {
                 "type": "object",
@@ -369,13 +155,13 @@ TOOLS = [
                     "filename": {
                         "type": "string",
                         "description": (
-                            "Path relative to project root."
+                            "Path relative to the project root."
                         ),
                     },
                     "content": {
                         "type": "string",
                         "description": (
-                            "Complete file contents."
+                            "Complete contents of the file."
                         ),
                     },
                 },
@@ -392,9 +178,40 @@ TOOLS = [
         "function": {
             "name": "run_build",
             "description": (
-                "Run the project's production build using "
-                "npm run build. Use this after code changes "
-                "to detect TypeScript, Vite, and compilation errors."
+                "Run npm run build inside the current project's "
+                "isolated Daytona workspace."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": [],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "start_preview",
+            "description": (
+                "Start or reuse the Vite development server inside "
+                "the current project's isolated Daytona workspace "
+                "and return a signed preview URL."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": [],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "stop_preview",
+            "description": (
+                "Stop the Vite preview server for the current project."
             ),
             "parameters": {
                 "type": "object",
@@ -407,9 +224,9 @@ TOOLS = [
 ]
 
 
-# =========================================================
+# ============================================================
 # TOOL DISPATCH
-# =========================================================
+# ============================================================
 
 AVAILABLE_TOOLS = {
     "list_files": list_files,
@@ -424,7 +241,14 @@ AVAILABLE_TOOLS = {
 def execute_tool(
     name: str,
     arguments: dict[str, Any],
+    project_id: str = "genesys-project",
 ) -> dict[str, Any]:
+    """
+    Execute one Daytona-backed tool for the current project.
+
+    project_id is injected by the orchestrator and does not need
+    to be supplied by the model.
+    """
 
     if name not in AVAILABLE_TOOLS:
         raise ValueError(
@@ -436,5 +260,6 @@ def execute_tool(
     ]
 
     return function(
-        **arguments
+        project_id=project_id,
+        **arguments,
     )

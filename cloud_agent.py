@@ -1,10 +1,17 @@
 import os
 
 from dotenv import load_dotenv
-from flask import Flask, jsonify, request
+from flask import (
+    Flask,
+    jsonify,
+    request,
+)
 from flask_cors import CORS
 
-from agent.orchestrator import run_agent
+from agent.orchestrator import (
+    run_agent,
+)
+
 from agent.tools import (
     list_files,
     read_file,
@@ -12,285 +19,455 @@ from agent.tools import (
 )
 
 
-# =========================================================
+# ============================================================
 # ENVIRONMENT
-# =========================================================
+# ============================================================
 
-BASE_DIR = os.path.dirname(
+PROJECT_ROOT = os.path.dirname(
     os.path.abspath(__file__)
 )
 
 load_dotenv(
     os.path.join(
-        BASE_DIR,
-        ".env"
-    ),
-    override=True,
+        PROJECT_ROOT,
+        ".env",
+    )
 )
 
 
-# =========================================================
-# APP
-# =========================================================
+# ============================================================
+# FLASK APP
+# ============================================================
 
-app = Flask(__name__)
+app = Flask(
+    __name__
+)
 
 CORS(
     app,
     resources={
         r"/*": {
-            "origins": "*"
+            "origins": "*",
         }
-    }
+    },
 )
 
 
-# =========================================================
+# ============================================================
+# HELPERS
+# ============================================================
+
+def get_project_id() -> str:
+    """
+    Accept projectId from:
+    - JSON body
+    - query string
+
+    Defaults to the first GeneSys project.
+    """
+
+    data = (
+        request.get_json(
+            silent=True
+        )
+        or {}
+    )
+
+    project_id = (
+        data.get("projectId")
+        or request.args.get(
+            "projectId"
+        )
+        or "genesys-project"
+    )
+
+    return (
+        str(project_id).strip()
+        or "genesys-project"
+    )
+
+
+def get_json_body() -> dict:
+    data = request.get_json(
+        silent=True
+    )
+
+    if not isinstance(
+        data,
+        dict,
+    ):
+        return {}
+
+    return data
+
+
+# ============================================================
 # HEALTH
-# =========================================================
+# ============================================================
 
 @app.route(
     "/health",
-    methods=["GET"]
+    methods=["GET"],
 )
 def health():
+    return jsonify(
+        {
+            "status": (
+                "Genesys Cloud Bridge is Online"
+            ),
+            "agent": True,
+            "daytona": bool(
+                os.getenv(
+                    "DAYTONA_API_KEY"
+                )
+            ),
+            "groq": bool(
+                os.getenv(
+                    "GROQ_API_KEY"
+                )
+            ),
+        }
+    )
 
-    return jsonify({
-        "status":
-            "Genesys Cloud Bridge is Online",
 
-        "agent":
-            True,
-    }), 200
-
-
-# =========================================================
-# PROJECT FILES
-# =========================================================
+# ============================================================
+# LIST FILES
+# ============================================================
 
 @app.route(
     "/list-files",
-    methods=["GET"]
+    methods=["GET"],
 )
-def http_list_files():
-
+def files():
     try:
+        project_id = get_project_id()
+
+        result = list_files(
+            project_id=project_id
+        )
 
         return jsonify(
-            list_files()
-        ), 200
+            result
+        )
 
     except Exception as error:
+        return jsonify(
+            {
+                "status": "error",
+                "message": str(error),
+            }
+        ), 500
 
-        return jsonify({
-            "status":
-                "error",
 
-            "message":
-                str(error),
-        }), 500
-
+# ============================================================
+# READ FILE
+# ============================================================
 
 @app.route(
     "/read-file",
-    methods=["POST"]
+    methods=["GET", "POST"],
 )
-def http_read_file():
-
+def read():
     try:
+        data = get_json_body()
 
-        data = (
-            request.get_json(
-                silent=True
+        filename = (
+            data.get("filename")
+            or request.args.get(
+                "filename"
             )
-            or {}
+        )
+
+        if not filename:
+            return jsonify(
+                {
+                    "status": "error",
+                    "message": (
+                        "filename is required."
+                    ),
+                }
+            ), 400
+
+        project_id = (
+            data.get("projectId")
+            or request.args.get(
+                "projectId"
+            )
+            or "genesys-project"
         )
 
         result = read_file(
-            data.get(
-                "filename"
-            )
+            filename=str(
+                filename
+            ),
+            project_id=str(
+                project_id
+            ),
         )
 
         return jsonify(
             result
-        ), 200
+        )
+
+    except FileNotFoundError as error:
+        return jsonify(
+            {
+                "status": "error",
+                "message": str(error),
+            }
+        ), 404
 
     except Exception as error:
+        return jsonify(
+            {
+                "status": "error",
+                "message": str(error),
+            }
+        ), 500
 
-        return jsonify({
-            "status":
-                "error",
 
-            "message":
-                str(error),
-        }), 500
-
+# ============================================================
+# WRITE FILE
+# ============================================================
 
 @app.route(
     "/write-file",
-    methods=["POST"]
+    methods=["POST"],
 )
-def http_write_file():
-
+def write():
     try:
+        data = get_json_body()
 
-        data = (
-            request.get_json(
-                silent=True
+        filename = data.get(
+            "filename"
+        )
+
+        content = data.get(
+            "content"
+        )
+
+        if not filename:
+            return jsonify(
+                {
+                    "status": "error",
+                    "message": (
+                        "filename is required."
+                    ),
+                }
+            ), 400
+
+        if content is None:
+            return jsonify(
+                {
+                    "status": "error",
+                    "message": (
+                        "content is required."
+                    ),
+                }
+            ), 400
+
+        project_id = (
+            data.get(
+                "projectId"
             )
-            or {}
+            or "genesys-project"
         )
 
         result = write_file(
-            data.get(
-                "filename"
+            filename=str(
+                filename
             ),
-            data.get(
-                "code"
+            content=str(
+                content
+            ),
+            project_id=str(
+                project_id
             ),
         )
 
         return jsonify(
             result
-        ), 200
+        )
 
     except Exception as error:
-
-        return jsonify({
-            "status":
-                "error",
-
-            "message":
-                str(error),
-        }), 500
+        return jsonify(
+            {
+                "status": "error",
+                "message": str(error),
+            }
+        ), 500
 
 
-# =========================================================
-# AUTONOMOUS AGENT
-# =========================================================
+# ============================================================
+# AGENT RUN
+# ============================================================
 
 @app.route(
     "/agent/run",
-    methods=["POST"]
+    methods=["POST"],
 )
 def agent_run():
-
     try:
+        data = get_json_body()
 
-        data = (
-            request.get_json(
-                silent=True
-            )
-            or {}
+        prompt = data.get(
+            "prompt"
         )
 
-        prompt = (
+        if not prompt or not str(
+            prompt
+        ).strip():
+            return jsonify(
+                {
+                    "status": "error",
+                    "message": (
+                        "prompt is required."
+                    ),
+                }
+            ), 400
+
+        project_id = (
             data.get(
-                "prompt"
+                "projectId"
             )
-            or ""
-        ).strip()
-
-        project_id = data.get(
-            "projectId"
+            or "genesys-project"
         )
 
-        if not prompt:
+        project_id = (
+            str(project_id).strip()
+            or "genesys-project"
+        )
 
-            return jsonify({
-                "status":
-                    "error",
-
-                "message":
-                    "Missing prompt.",
-            }), 400
-
+        print()
         print(
             "========================================"
         )
 
         print(
-            f"🤖 AGENT REQUEST: {prompt}"
+            "🤖 AGENT REQUEST: "
+            + str(prompt)
+        )
+
+        print(
+            f"📦 PROJECT: {project_id}"
+        )
+
+        print(
+            "========================================"
         )
 
         result = run_agent(
-            prompt,
-            project_id,
-        )
-
-        print(
-            f"🤖 AGENT RESULT: "
-            f"{result.get('status')}"
-        )
-
-        print(
-            "========================================"
+            prompt=str(
+                prompt
+            ),
+            project_id=project_id,
         )
 
         return jsonify(
             result
-        ), 200
+        )
 
     except Exception as error:
-
         print(
-            f"❌ AGENT ERROR: {error}"
+            f"❌ AGENT HTTP ERROR: {error}"
         )
 
-        return jsonify({
-            "status":
-                "error",
+        return jsonify(
+            {
+                "status": "error",
+                "message": str(error),
+            }
+        ), 500
 
-            "message":
-                str(error),
-        }), 500
+
+# ============================================================
+# ROOT
+# ============================================================
+
+@app.route(
+    "/",
+    methods=["GET"],
+)
+def root():
+    return jsonify(
+        {
+            "name": "GeneSys Cloud Agent",
+            "status": "online",
+            "endpoints": {
+                "health": "/health",
+                "listFiles": "/list-files",
+                "readFile": "/read-file",
+                "writeFile": "/write-file",
+                "agentRun": "/agent/run",
+            },
+        }
+    )
 
 
-# =========================================================
-# LOCAL SERVER
-# =========================================================
+# ============================================================
+# LOCAL DEVELOPMENT
+# ============================================================
 
 if __name__ == "__main__":
+    host = os.getenv(
+        "HOST",
+        "127.0.0.1",
+    )
 
     port = int(
-        os.environ.get(
+        os.getenv(
             "PORT",
-            5000
+            "5000",
         )
     )
 
-    print(
-        "========================================"
-    )
-
+    print()
     print(
         "🚀 GeneSys Execution Agent"
     )
 
     print(
-        "📁 Workspace:"
+        f"📁 PROJECT ROOT: {PROJECT_ROOT}"
     )
 
     print(
-        BASE_DIR
+        "🤖 MODEL: "
+        + os.getenv(
+            "GENESYS_MODEL",
+            "openai/gpt-oss-120b",
+        )
     )
 
     print(
-        f"🤖 Model: "
-        f"openai/gpt-oss-120b"
+        "🔑 GROQ KEY LOADED: "
+        + str(
+            bool(
+                os.getenv(
+                    "GROQ_API_KEY"
+                )
+            )
+        )
     )
 
     print(
-        f"🔐 Groq key loaded: "
-        f"{bool(os.getenv('GROQ_API_KEY'))}"
+        "🔑 DAYTONA KEY LOADED: "
+        + str(
+            bool(
+                os.getenv(
+                    "DAYTONA_API_KEY"
+                )
+            )
+        )
     )
 
     print(
-        "========================================"
+        f"🌐 Server: http://{host}:{port}"
     )
+
+    print()
 
     app.run(
-        host="0.0.0.0",
+        host=host,
         port=port,
+        debug=False,
     )
