@@ -1,0 +1,4 @@
+- Landing Page: Complete
+- Design System: Complete (Blue/Neon/Sora)
+- Next Task: Build the Project Sidebar and User Profile Dropdown.
+- Policy pages created: [x]

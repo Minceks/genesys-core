@@ -1,0 +1,149 @@
+{ createFileRoute } from '@tanstack/react-router';
+import { useEffect, useState } from 'react';
+import { Line } from 'react-chartjs-2';
+import {
+  Chart as ChartJS,
+  CategoryScale,
+  LinearScale,
+  PointElement,
+  LineElement,
+  Title,
+  Tooltip,
+  Legend,
+} from 'chart.js';
+
+// Register chart components
+ChartJS.register(
+  CategoryScale,
+  LinearScale,
+  PointElement,
+  LineElement,
+  Title,
+  Tooltip,
+  Legend
+);
+
+// Types
+type PricePoint = { time: number; price: number };
+
+export const Route = createFileRoute('/crypto')({
+  component: CryptoDashboard,
+});
+
+function CryptoDashboard() {
+  const [prices, setPrices] = useState<PricePoint[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [showModal, setShowModal] = useState(false);
+
+  // Fetch Bitcoin price data from CoinGecko (last 30 days)
+  useEffect(() => {
+    const fetchPrices = async () => {
+      try {
+        const response = await fetch(
+          'https://api.coingecko.com/api/v3/coins/bitcoin/market_chart?vs_currency=usd&days=30&interval=daily'
+        );
+        const data = await response.json();
+        const formatted = data.prices.map((p: [number, number]) => ({
+          time: p[0],
+          price: p[1],
+        }));
+        setPrices(formatted);
+      } catch (e) {
+        setError('Failed to load price data.');
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchPrices();
+  }, []);
+
+  const chartData = {
+    labels: prices.map(p => new Date(p.time).toLocaleDateString()),
+    datasets: [
+      {
+        label: 'BTC/USD',
+        data: prices.map(p => p.price),
+        borderColor: '#00d9ff',
+        backgroundColor: 'rgba(0,217,255,0.2)',
+        tension: 0.3,
+        pointRadius: 0,
+      },
+    ],
+  };
+
+  const chartOptions = {
+    responsive: true,
+    plugins: {
+      legend: { display: false },
+      tooltip: {
+        mode: 'index',
+        intersect: false,
+        callbacks: {
+          label: (ctx: any) => ` $${ctx.formattedValue}`,
+        },
+      },
+    },
+    scales: {
+      x: {
+        grid: { display: false },
+        ticks: { color: '#ccc' },
+      },
+      y: {
+        grid: { color: 'rgba(255,255,255,0.1)' },
+        ticks: { color: '#ccc' },
+      },
+    },
+  };
+
+  return (
+    <div className="min-h-screen bg-gray-900 flex items-center justify-center p-4 font-sora text-white">
+      <div className="w-full max-w-4xl bg-white/5 rounded-xl backdrop-blur-sm border border-white/10 p-6 shadow-lg">
+        <h1 className="text-3xl font-bold text-neon mb-4 text-center">
+          Bitcoin Dashboard
+        </h1>
+
+        {loading ? (
+          <p className="text-center">Loading price chart...</p>
+        ) : error ? (
+          <p className="text-center text-red-400">{error}</p>
+        ) : (
+          <div className="h-80">
+            <Line data={chartData} options={chartOptions as any} />
+          </div>
+        )}
+
+        <div className="flex justify-center mt-6">
+          <button
+            onClick={() => setShowModal(true)}
+            className="px-6 py-3 bg-neon text-gray-900 font-semibold rounded-md shadow-neon hover:shadow-neon-lg transition-all duration-300 transform hover:scale-105 focus:outline-none focus:ring-2 focus:ring-neon focus:ring-offset-2"
+          >
+            Trade
+          </button>
+        </div>
+
+        {showModal && (
+          <div className="fixed inset-0 flex items-center justify-center bg-black/50 backdrop-blur-sm">
+            <div className="bg-gray-800/90 rounded-lg p-8 w-full max-w-md border border-white/10 shadow-lg">
+              <h2 className="text-2xl font-semibold text-neon mb-4 text-center">
+                Trade Bitcoin
+              </h2>
+              <p className="mb-6 text-center">
+                This is a placeholder for the trading interface.
+              </p>
+              <div className="flex justify-center">
+                <button
+                  onClick={() => setShowModal(false)}
+                  className="px-5 py-2 bg-gray-700 text-gray-200 rounded hover:bg-gray-600 transition"
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+---END---

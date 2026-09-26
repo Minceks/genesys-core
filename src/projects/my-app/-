@@ -1,0 +1,40 @@
+import React from 'react';
+import { motion } from 'framer-motion';
+import styles from './Hero.module.css';
+
+const containerVariants = {
+  hidden: {},
+  visible: {
+    transition: {
+      staggerChildren: 0.3,
+    },
+  },
+};
+
+const fadeInUp = {
+  hidden: { opacity: 0, y: 20 },
+  visible: { opacity: 1, y: 0, transition: { duration: 0.8, ease: 'easeOut' } },
+};
+
+const Hero = () => {
+  return (
+    <motion.section
+      className={styles.hero}
+      variants={containerVariants}
+      initial="hidden"
+      animate="visible"
+    >
+      <motion.h1 className={styles.title} variants={fadeInUp}>
+        Welcome to Our Site
+      </motion.h1>
+      <motion.p className={styles.subtitle} variants={fadeInUp}>
+        We provide the best services.
+      </motion.p>
+      <motion.button className={styles.cta} variants={fadeInUp}>
+        Get Started
+      </motion.button>
+    </motion.section>
+  );
+};
+
+export default Hero;
