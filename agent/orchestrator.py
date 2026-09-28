@@ -1478,23 +1478,14 @@ def _build_recovery_context(
 
 def _should_rollback_for_recovery(
     strategy: dict[str, Any],
-    checkpoint_result: dict[str, Any] | None,
+    recovery_checkpoint_id: str | None,
 ) -> bool:
     """
-    Determine whether recovery should restore the most recent
-    successful checkpoint before attempting another repair.
-
-    Rollback is only allowed when a valid checkpoint exists and
-    the recovery strategy is retryable.
+    Determine whether recovery should restore the latest
+    known-good checkpoint before attempting another repair.
     """
 
-    if not checkpoint_result:
-        return False
-
-    if checkpoint_result.get("status") != "success":
-        return False
-
-    if not checkpoint_result.get("checkpointId"):
+    if not recovery_checkpoint_id:
         return False
 
     if not strategy.get("retryable", False):
