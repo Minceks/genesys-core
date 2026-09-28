@@ -1,860 +1,55 @@
+﻿from __future__ import annotations
+
 import json
 import os
 import time
 from typing import Any
 
 from dotenv import load_dotenv
-from groq import Groq
 
+from .ai_provider import (
+    AIResponse,
+    GeminiProvider,
+    GroqProvider,
+)
+from .daytona_workspace import get_workspace
+from .project_intelligence import (
+    scan_project,
+    build_project_context,
+    target_project_files,
+)
+
+from .browser import (
+    BrowserSession,
+    stop_browser,
+)
 from .tools import TOOLS, execute_tool
 
 
-# ============================================================
-# ENVIRONMENT
-# ============================================================
-
-PROJECT_ROOT = os.path.dirname(
-    os.path.dirname(
-        os.path.abspath(__file__)
-    )
-)
-
-load_dotenv(
-    os.path.join(
-        PROJECT_ROOT,
-        ".env",
-    )
-)
-
+load_dotenv()
 
 # ============================================================
-# MODEL CONFIGURATION
+# CONFIGURATION
 # ============================================================
 
-MODEL = os.getenv(
-    "GENESYS_MODEL",
-    "openai/gpt-oss-120b",
-)
+MODEL = os.getenv("GENESYS_MODEL", "openai/gpt-oss-120b")
+GEMINI_MODEL = os.getenv("GENESYS_GEMINI_MODEL", "gemini-3.8-flash")
+
+PROVIDER_NAME = os.getenv(
+    "GENESYS_PROVIDER",
+    "groq",
+).strip().lower()
+
+FALLBACK_PROVIDER = os.getenv(
+    "GENESYS_FALLBACK_PROVIDER",
+    "gemini",
+).strip().lower()
 
 MAX_STEPS = 18
 
-# Moderate output budget so there is room for conversation,
-# tool schemas, and generated file contents under the current
-# organization TPM limit.
 MAX_COMPLETION_TOKENS = 3200
 
-MAX_GROQ_RETRIES = 4
-
-
-# ============================================================
-# CONTEXT COMPACTION
-# ============================================================
-
-SYSTEM_MAX_CHARS = 6000
-USER_MAX_CHARS = 3500
-
-READ_FILE_MAX_CHARS = 3000
-BUILD_OUTPUT_MAX_CHARS = 4500
-LIST_FILES_MAX_CHARS = 2200
-GENERIC_TOOL_MAX_CHARS = 1800
-
-TOOL_ARGUMENT_MAX_CHARS = 1400
-
-MAX_CONVERSATION_CHARS = 10000
-
-
-# ============================================================
-# TOOL INDEX
-# ============================================================
-
-TOOL_BY_NAME: dict[
-    str,
-    dict[str, Any],
-] = {
-    tool["function"]["name"]: tool
-    for tool in TOOLS
-}
-
-
-# ============================================================
-# GROQ CLIENT
-# ============================================================
-
-def get_client() -> Groq:
-    api_key = os.getenv(
-        "GROQ_API_KEY"
-    )
-
-    if not api_key:
-        raise RuntimeError(
-            "GROQ_API_KEY is missing from the environment."
-        )
-
-    return Groq(
-        api_key=api_key
-    )
-
-
-# ============================================================
-# TEXT COMPACTION
-# ============================================================
-
-def compact_text(
-    value: Any,
-    max_chars: int,
-) -> str:
-    text = (
-        value
-        if isinstance(value, str)
-        else str(value)
-    )
-
-    if len(text) <= max_chars:
-        return text
-
-    if max_chars <= 100:
-        return text[:max_chars]
-
-    head = max_chars // 2
-    tail = max_chars - head
-
-    return (
-        text[:head]
-        + "\n\n[... GeneSys context compacted ...]\n\n"
-        + text[-tail:]
-    )
-
-
-# ============================================================
-# TOOL RESULT COMPACTION
-# ============================================================
-
-def compact_tool_result(
-    content: str,
-) -> str:
-    try:
-        data = json.loads(
-            content
-        )
-    except Exception:
-        return compact_text(
-            content,
-            GENERIC_TOOL_MAX_CHARS,
-        )
-
-    if not isinstance(
-        data,
-        dict,
-    ):
-        return compact_text(
-            content,
-            GENERIC_TOOL_MAX_CHARS,
-        )
-
-    # --------------------------------------------------------
-    # read_file
-    # --------------------------------------------------------
-
-    if (
-        "content" in data
-        and "path" in data
-    ):
-        result = dict(data)
-
-        result["content"] = compact_text(
-            data.get(
-                "content",
-                "",
-            ),
-            READ_FILE_MAX_CHARS,
-        )
-
-        return json.dumps(
-            result,
-            ensure_ascii=False,
-        )
-
-    # --------------------------------------------------------
-    # list_files
-    # --------------------------------------------------------
-
-    if "files" in data:
-        result = dict(data)
-
-        files = data.get(
-            "files",
-            [],
-        )
-
-        if isinstance(
-            files,
-            list,
-        ):
-            result["files"] = files[:140]
-
-        tree = data.get(
-            "tree"
-        )
-
-        if isinstance(
-            tree,
-            dict,
-        ):
-            tree_copy = dict(
-                tree
-            )
-
-            if isinstance(
-                tree_copy.get("routes"),
-                list,
-            ):
-                tree_copy["routes"] = (
-                    tree_copy["routes"][:70]
-                )
-
-            if isinstance(
-                tree_copy.get("components"),
-                list,
-            ):
-                tree_copy["components"] = (
-                    tree_copy["components"][:70]
-                )
-
-            result["tree"] = tree_copy
-
-        return compact_text(
-            json.dumps(
-                result,
-                ensure_ascii=False,
-            ),
-            LIST_FILES_MAX_CHARS,
-        )
-
-    # --------------------------------------------------------
-    # run_build
-    # --------------------------------------------------------
-
-    if "output" in data:
-        result = dict(data)
-
-        result["output"] = compact_text(
-            data.get(
-                "output",
-                "",
-            ),
-            BUILD_OUTPUT_MAX_CHARS,
-        )
-
-        return json.dumps(
-            result,
-            ensure_ascii=False,
-        )
-
-    # --------------------------------------------------------
-    # generic
-    # --------------------------------------------------------
-
-    return compact_text(
-        json.dumps(
-            data,
-            ensure_ascii=False,
-        ),
-        GENERIC_TOOL_MAX_CHARS,
-    )
-
-
-# ============================================================
-# ASSISTANT TOOL MESSAGE
-# ============================================================
-
-def build_assistant_tool_message(
-    message: Any,
-) -> dict[str, Any]:
-    """
-    Explicitly reconstruct the assistant tool-call message.
-
-    Do not use model_dump() because SDK responses can contain
-    extra fields that should not be replayed to Groq.
-    """
-
-    tool_calls = (
-        getattr(
-            message,
-            "tool_calls",
-            None,
-        )
-        or []
-    )
-
-    return {
-        "role": "assistant",
-        "content": (
-            message.content
-            if message.content
-            else ""
-        ),
-        "tool_calls": [
-            {
-                "id": call.id,
-                "type": "function",
-                "function": {
-                    "name": call.function.name,
-                    "arguments": call.function.arguments,
-                },
-            }
-            for call in tool_calls
-        ],
-    }
-
-
-# ============================================================
-# ASSISTANT TOOL COMPACTION
-# ============================================================
-
-def compact_assistant_message(
-    message: dict[str, Any],
-) -> dict[str, Any]:
-    result = dict(
-        message
-    )
-
-    tool_calls = result.get(
-        "tool_calls"
-    )
-
-    if not isinstance(
-        tool_calls,
-        list,
-    ):
-        return result
-
-    compacted_calls = []
-
-    for call in tool_calls:
-        call_copy = dict(
-            call
-        )
-
-        function = call.get(
-            "function"
-        )
-
-        if isinstance(
-            function,
-            dict,
-        ):
-            function_copy = dict(
-                function
-            )
-
-            name = function.get(
-                "name"
-            )
-
-            arguments = function.get(
-                "arguments",
-                "{}",
-            )
-
-            # write_file can contain thousands of characters.
-            if name == "write_file":
-                try:
-                    parsed = json.loads(
-                        arguments
-                    )
-
-                    if isinstance(
-                        parsed,
-                        dict,
-                    ):
-                        function_copy[
-                            "arguments"
-                        ] = json.dumps(
-                            {
-                                "filename": parsed.get(
-                                    "filename"
-                                ),
-                                "content": (
-                                    "[file contents omitted "
-                                    "after execution]"
-                                ),
-                            },
-                            ensure_ascii=False,
-                        )
-                    else:
-                        function_copy[
-                            "arguments"
-                        ] = compact_text(
-                            arguments,
-                            TOOL_ARGUMENT_MAX_CHARS,
-                        )
-
-                except Exception:
-                    function_copy[
-                        "arguments"
-                    ] = compact_text(
-                        arguments,
-                        TOOL_ARGUMENT_MAX_CHARS,
-                    )
-
-            else:
-                function_copy[
-                    "arguments"
-                ] = compact_text(
-                    arguments,
-                    TOOL_ARGUMENT_MAX_CHARS,
-                )
-
-            call_copy[
-                "function"
-            ] = function_copy
-
-        compacted_calls.append(
-            call_copy
-        )
-
-    result[
-        "tool_calls"
-    ] = compacted_calls
-
-    return result
-
-
-# ============================================================
-# PREPARE MESSAGES
-# ============================================================
-
-def prepare_messages_for_groq(
-    messages: list[dict[str, Any]],
-) -> list[dict[str, Any]]:
-    """
-    Prepare a compact but structurally valid conversation.
-
-    We preserve:
-      - system prompt
-      - original user request
-      - newest complete interaction blocks
-
-    We compact:
-      - source file contents
-      - build output
-      - file lists
-      - write_file arguments
-    """
-
-    prepared: list[
-        dict[str, Any]
-    ] = []
-
-    for message in messages:
-        role = message.get(
-            "role"
-        )
-
-        # ----------------------------------------------------
-        # SYSTEM
-        # ----------------------------------------------------
-
-        if role == "system":
-            copy = dict(
-                message
-            )
-
-            copy["content"] = compact_text(
-                message.get(
-                    "content",
-                    "",
-                ),
-                SYSTEM_MAX_CHARS,
-            )
-
-            prepared.append(
-                copy
-            )
-
-            continue
-
-        # ----------------------------------------------------
-        # USER
-        # ----------------------------------------------------
-
-        if role == "user":
-            copy = dict(
-                message
-            )
-
-            copy["content"] = compact_text(
-                message.get(
-                    "content",
-                    "",
-                ),
-                USER_MAX_CHARS,
-            )
-
-            prepared.append(
-                copy
-            )
-
-            continue
-
-        # ----------------------------------------------------
-        # ASSISTANT
-        # ----------------------------------------------------
-
-        if role == "assistant":
-            if message.get(
-                "tool_calls"
-            ):
-                prepared.append(
-                    compact_assistant_message(
-                        message
-                    )
-                )
-            else:
-                copy = dict(
-                    message
-                )
-
-                copy["content"] = compact_text(
-                    message.get(
-                        "content",
-                        "",
-                    ),
-                    2200,
-                )
-
-                prepared.append(
-                    copy
-                )
-
-            continue
-
-        # ----------------------------------------------------
-        # TOOL
-        # ----------------------------------------------------
-
-        if role == "tool":
-            copy = dict(
-                message
-            )
-
-            copy["content"] = compact_tool_result(
-                str(
-                    message.get(
-                        "content",
-                        "",
-                    )
-                )
-            )
-
-            prepared.append(
-                copy
-            )
-
-            continue
-
-        prepared.append(
-            dict(message)
-        )
-
-    # --------------------------------------------------------
-    # Fast path
-    # --------------------------------------------------------
-
-    total_chars = sum(
-        len(
-            str(
-                message.get(
-                    "content",
-                    "",
-                )
-            )
-        )
-        + len(
-            str(
-                message.get(
-                    "tool_calls",
-                    "",
-                )
-            )
-        )
-        for message in prepared
-    )
-
-    if total_chars <= MAX_CONVERSATION_CHARS:
-        return prepared
-
-    # --------------------------------------------------------
-    # Preserve first system and first user messages.
-    # --------------------------------------------------------
-
-    base: list[
-        dict[str, Any]
-    ] = []
-
-    first_system = next(
-        (
-            message
-            for message in prepared
-            if message.get("role")
-            == "system"
-        ),
-        None,
-    )
-
-    first_user = next(
-        (
-            message
-            for message in prepared
-            if message.get("role")
-            == "user"
-        ),
-        None,
-    )
-
-    if first_system is not None:
-        base.append(
-            first_system
-        )
-
-    if first_user is not None:
-        base.append(
-            first_user
-        )
-
-    base_ids = {
-        id(message)
-        for message in base
-    }
-
-    remaining = [
-        message
-        for message in prepared
-        if id(message)
-        not in base_ids
-    ]
-
-    remaining_chars = (
-        MAX_CONVERSATION_CHARS
-        - sum(
-            len(
-                str(
-                    message.get(
-                        "content",
-                        "",
-                    )
-                )
-            )
-            for message in base
-        )
-    )
-
-    # --------------------------------------------------------
-    # Group messages into complete turns.
-    # --------------------------------------------------------
-
-    blocks: list[
-        list[dict[str, Any]]
-    ] = []
-
-    current_block: list[
-        dict[str, Any]
-    ] = []
-
-    for message in remaining:
-        role = message.get(
-            "role"
-        )
-
-        # A new assistant/user message begins a new turn block.
-        if (
-            role in {
-                "assistant",
-                "user",
-            }
-            and current_block
-        ):
-            blocks.append(
-                current_block
-            )
-
-            current_block = []
-
-        current_block.append(
-            message
-        )
-
-    if current_block:
-        blocks.append(
-            current_block
-        )
-
-    # --------------------------------------------------------
-    # Keep newest complete blocks.
-    # --------------------------------------------------------
-
-    selected: list[
-        list[dict[str, Any]]
-    ] = []
-
-    for block in reversed(
-        blocks
-    ):
-        block_chars = sum(
-            len(
-                str(
-                    message.get(
-                        "content",
-                        "",
-                    )
-                )
-            )
-            + len(
-                str(
-                    message.get(
-                        "tool_calls",
-                        "",
-                    )
-                )
-            )
-            for message in block
-        )
-
-        if block_chars > remaining_chars:
-            continue
-
-        selected.append(
-            block
-        )
-
-        remaining_chars -= (
-            block_chars
-        )
-
-        if remaining_chars <= 0:
-            break
-
-    selected.reverse()
-
-    final_messages = (
-        base.copy()
-    )
-
-    for block in selected:
-        final_messages.extend(
-            block
-        )
-
-    return final_messages
-
-
-# ============================================================
-# GROQ REQUEST
-# ============================================================
-
-def call_groq_with_retry(
-    client: Groq,
-    messages: list[dict[str, Any]],
-    tools: list[dict[str, Any]],
-):
-    """
-    Call Groq using auto tool selection.
-
-    Mandatory build/preview actions are NOT forced through Groq.
-    Python executes them directly to avoid tool-choice mismatch.
-    """
-
-    prepared_messages = (
-        prepare_messages_for_groq(
-            messages
-        )
-    )
-
-    current_max_tokens = (
-        MAX_COMPLETION_TOKENS
-    )
-
-    for attempt in range(
-        MAX_GROQ_RETRIES
-    ):
-        try:
-            return client.chat.completions.create(
-                model=MODEL,
-                messages=prepared_messages,
-                tools=tools,
-                tool_choice="auto",
-                parallel_tool_calls=False,
-                temperature=0.2,
-                max_completion_tokens=(
-                    current_max_tokens
-                ),
-                reasoning_effort="low",
-                include_reasoning=False,
-            )
-
-        except Exception as error:
-            status_code = getattr(
-                error,
-                "status_code",
-                None,
-            )
-
-            # ------------------------------------------------
-            # Rate limit
-            # ------------------------------------------------
-
-            if status_code == 429:
-                if (
-                    attempt
-                    >= MAX_GROQ_RETRIES - 1
-                ):
-                    raise
-
-                wait_seconds = (
-                    2 ** attempt
-                )
-
-                print(
-                    "⏳ Groq rate limit reached "
-                    f"(429). Retrying in "
-                    f"{wait_seconds}s..."
-                )
-
-                time.sleep(
-                    wait_seconds
-                )
-
-                continue
-
-            # ------------------------------------------------
-            # Request too large
-            # ------------------------------------------------
-
-            if status_code == 413:
-                if current_max_tokens > 1800:
-                    current_max_tokens = 1800
-
-                    print(
-                        "⚠️ Groq request too large. "
-                        "Retrying with smaller completion budget..."
-                    )
-
-                    time.sleep(
-                        1
-                    )
-
-                    continue
-
-                raise RuntimeError(
-                    "Groq request remained too large after "
-                    "context compaction."
-                )
-
-            raise
-
-    raise RuntimeError(
-        "Groq request failed after retries."
-    )
+PROJECT_ID_DEFAULT = "genesys-project"
 
 
 # ============================================================
@@ -862,145 +57,1706 @@ def call_groq_with_retry(
 # ============================================================
 
 SYSTEM_PROMPT = """
-You are GeneSys, an autonomous coding agent working inside an
-isolated Daytona workspace.
+You are GeneSys, an autonomous software engineering agent.
 
-The project is a real Vite + React + TypeScript application using
-TanStack Router.
+Your job is to modify a real software project inside a Daytona workspace.
 
-Do not assume Remix, Next.js, Vue, or another framework.
+You MUST follow this workflow:
 
-IMPORTANT WORKFLOW:
+1. Inspect the project before making changes.
+2. Use list_files first when beginning a task.
+3. Use read_file before modifying an existing file.
+4. Never invent file paths.
+5. Make the smallest correct changes needed for the user's request.
+6. When writing a file, provide its complete intended contents.
+7. Do not repeatedly read the same file unless necessary.
+8. After modifying files, the orchestrator will run the build.
+9. Do NOT call run_build yourself.
+10. Do NOT call start_preview yourself.
+11. The orchestrator controls build and preview lifecycle.
+12. Browser tools MUST actually be used to verify the running application.
+13. If the build fails, inspect the error and repair the code.
+14. Do not claim success merely because files were written.
+15. Runtime/UI verification is required when the application can be launched.
+16. Do not make unnecessary changes to unrelated files.
 
-1. The project has already been inspected by GeneSys before you
-   begin your coding work.
-2. Use read_file to inspect the specific files relevant to the
-   user's request.
-3. Use write_file to implement the requested functionality.
-4. After you make changes, GeneSys itself will automatically run
-   the production build.
-5. If that build fails, GeneSys will give you the actual build
-   output. Read the relevant file, repair the problem with
-   write_file, and let GeneSys run the build again.
-6. Once the build passes, GeneSys itself will automatically start
-   the application preview.
+IMPORTANT TOOL LIMITATION:
 
-TOOL DISCIPLINE:
+There is NO "search" tool available.
 
-- Do NOT call list_files. The project has already been inspected.
-- Do NOT call run_build. GeneSys executes the build automatically
-  after your edits.
-- Do NOT call start_preview. GeneSys starts preview automatically
-  after a successful build.
-- Do NOT repeatedly read the same file without making progress.
-- Use read_file before modifying an existing file when necessary.
-- Use write_file with complete file contents.
+Never call a tool named:
+- search
+- grep
+- ripgrep
+- find
 
-IMPLEMENTATION:
+To locate code or text in the project:
+1. Use list_files to inspect available files.
+2. Use read_file to inspect the relevant file contents.
+3. Do not invent or request tools that are not explicitly provided.
 
-- Build the actual requested feature.
-- Prefer the existing project architecture.
-- Do not rewrite unrelated files.
-- Do not modify .env or protected secrets.
-- Do not fabricate framework files.
-- Use the actual project as the source of truth.
+Available browser verification tools may include:
 
-For interactive applications and games, implement a genuinely
-usable feature with the requested UI, state, controls, and
-responsive behavior.
+- browser_screenshot
+- browser_console
+- browser_click
+- browser_type
+- browser_keypress
 
-When repairing build errors, use the compiler output as evidence.
-Do not guess randomly.
+IMPORTANT:
+The orchestrator controls:
+- build
+- preview
+- browser verification
+
+You control:
+- inspection
+- reasoning
+- file edits
+- repairs
+
+Do not fabricate tool results.
+Do not claim a task is complete without verification.
 """
 
-
 # ============================================================
-# DIRECT TOOL EXECUTION HELPER
+# M6 TASK UNDERSTANDING
 # ============================================================
 
-def execute_direct_tool(
-    tool_name: str,
-    project_id: str,
+def _build_task_understanding(
+    prompt: str,
 ) -> dict[str, Any]:
     """
-    Execute a mandatory infrastructure tool directly from Python.
+    Build a lightweight structured representation of the user's task.
 
-    This intentionally bypasses model tool_choice.
+    This is intentionally deterministic for M6.1.
+    The AI agent still performs the actual reasoning and editing.
     """
 
-    print(
-        f"🔧 TOOL: {tool_name}"
+    text = (prompt or "").strip()
+    lower = text.lower()
+
+    intent = "modify_project"
+
+    if any(
+        word in lower
+        for word in (
+            "fix",
+            "bug",
+            "error",
+            "broken",
+            "crash",
+            "doesn't work",
+            "not working",
+        )
+    ):
+        intent = "fix_bug"
+
+    elif any(
+        word in lower
+        for word in (
+            "add",
+            "create",
+            "implement",
+            "introduce",
+        )
+    ):
+        intent = "add_feature"
+
+    elif any(
+        word in lower
+        for word in (
+            "remove",
+            "delete",
+        )
+    ):
+        intent = "remove_feature"
+
+    elif any(
+        word in lower
+        for word in (
+            "rename",
+            "change",
+            "update",
+            "replace",
+            "modify",
+        )
+    ):
+        intent = "modify_project"
+
+    scope = "project"
+
+    if any(
+        word in lower
+        for word in (
+            "page",
+            "screen",
+            "route",
+        )
+    ):
+        scope = "page"
+
+    if any(
+        word in lower
+        for word in (
+            "component",
+            "button",
+            "navbar",
+            "navigation",
+            "header",
+            "footer",
+            "hero",
+            "card",
+        )
+    ):
+        scope = "component"
+
+    if any(
+        word in lower
+        for word in (
+            "text",
+            "headline",
+            "title",
+            "label",
+            "copy",
+            "wording",
+            "content",
+        )
+    ):
+        change_type = "content"
+
+    elif any(
+        word in lower
+        for word in (
+            "style",
+            "color",
+            "font",
+            "spacing",
+            "layout",
+            "design",
+            "ui",
+            "visual",
+        )
+    ):
+        change_type = "visual"
+
+    elif any(
+        word in lower
+        for word in (
+            "api",
+            "database",
+            "backend",
+            "server",
+            "request",
+            "fetch",
+        )
+    ):
+        change_type = "backend"
+
+    else:
+        change_type = "code"
+
+    risk = "low"
+
+    if change_type in {
+        "backend",
+        "code",
+    }:
+        risk = "medium"
+
+    if any(
+        word in lower
+        for word in (
+            "database",
+            "migration",
+            "authentication",
+            "auth",
+            "security",
+            "payment",
+            "billing",
+        )
+    ):
+        risk = "high"
+
+    return {
+        "intent": intent,
+        "changeType": change_type,
+        "scope": scope,
+        "risk": risk,
+        "request": text,
+    }
+
+# ============================================================
+# TOOL / MESSAGE HELPERS
+# ============================================================
+
+def _safe_json(value: Any) -> str:
+    """
+    Convert a value into compact JSON for model tool messages.
+    """
+    try:
+        return json.dumps(
+            value,
+            ensure_ascii=False,
+            default=str,
+        )
+    except Exception:
+        return str(value)
+
+
+def _build_assistant_tool_message(
+    response: AIResponse,
+) -> dict[str, Any]:
+    """
+    Convert normalized AIResponse tool calls into the internal
+    OpenAI-compatible message representation used by the
+    orchestrator's message history.
+
+    GroqProvider understands this representation directly.
+    GeminiProvider will later serialize it into Gemini's format.
+    """
+
+    tool_calls = []
+
+    for call in response.tool_calls:
+        tool_call = {
+            "id": call.id,
+            "type": "function",
+            "function": {
+                "name": call.name,
+                "arguments": _safe_json(
+                    call.arguments
+                ),
+            },
+        }
+
+        if getattr(
+            call,
+            "thought_signature",
+            None,
+        ) is not None:
+            tool_call[
+                "thought_signature"
+            ] = call.thought_signature
+
+        tool_calls.append(
+            tool_call
+        )
+
+    return {
+        "role": "assistant",
+        "content": response.text or "",
+        "tool_calls": tool_calls,
+    }
+
+
+def _compact_messages(
+    messages: list[dict[str, Any]],
+    max_messages: int = 40,
+) -> list[dict[str, Any]]:
+    """
+    Prevent conversation history from growing without bound.
+
+    Preserve:
+    - system messages
+    - assistant tool-call messages together with their tool results
+    - recent conversation
+
+    Tool-call / tool-result pairs must never be split because
+    Gemini requires function responses to immediately follow
+    the corresponding function call turn.
+    """
+
+    if len(messages) <= max_messages:
+        return messages
+
+    system_messages = [
+        message
+        for message in messages
+        if message.get("role") == "system"
+    ]
+
+    non_system = [
+        message
+        for message in messages
+        if message.get("role") != "system"
+    ]
+
+    keep_count = max_messages - len(system_messages)
+
+    if keep_count <= 0:
+        return system_messages[:1]
+
+    # Build recent history while keeping assistant tool calls
+    # together with their following tool responses.
+    recent: list[dict[str, Any]] = []
+
+    index = len(non_system) - 1
+
+    while index >= 0 and len(recent) < keep_count:
+        message = non_system[index]
+        role = message.get("role")
+
+        if role == "tool":
+            tool_message = message
+
+            if index > 0:
+                previous = non_system[index - 1]
+
+                if (
+                    previous.get("role") == "assistant"
+                    and previous.get("tool_calls")
+                ):
+                    recent.insert(0, tool_message)
+                    recent.insert(0, previous)
+                    index -= 2
+                    continue
+
+        recent.insert(0, message)
+        index -= 1
+
+    # Never start the retained history with a tool response.
+    while recent and recent[0].get("role") == "tool":
+        recent.pop(0)
+
+    return system_messages[:1] + recent
+
+
+# ============================================================
+# PROVIDER
+# ============================================================
+
+def get_provider():
+    """
+    Select the configured AI provider.
+
+    Default:
+        Groq
+
+    Supported:
+        groq
+        gemini
+    """
+
+    provider_name = os.getenv(
+        "GENESYS_PROVIDER",
+        "groq",
+    ).strip().lower()
+
+    if provider_name == "groq":
+        return GroqProvider(
+            model=MODEL,
+        )
+
+    if provider_name == "gemini":
+        return GeminiProvider(
+            model=GEMINI_MODEL,
+        )
+
+    raise RuntimeError(
+        f"Unsupported GENESYS_PROVIDER={provider_name!r}. "
+        f"Expected 'groq' or 'gemini'."
     )
+
+
+# ============================================================
+# TOOL EXECUTION
+# ============================================================
+
+def _execute_agent_tool(
+    tool_name: str,
+    arguments: dict[str, Any],
+    project_id: str,
+) -> Any:
+    """
+    Execute a model-requested tool through the existing GeneSys
+    tool system.
+
+    The existing tools.py remains the source of truth for actual
+    filesystem/browser operations.
+    """
+
+    if not isinstance(arguments, dict):
+        arguments = {}
 
     try:
-        result = execute_tool(
+        return execute_tool(
             tool_name,
-            {},
+            arguments,
             project_id=project_id,
         )
-
-        if not isinstance(
-            result,
-            dict,
-        ):
-            result = {
-                "status": "success",
-                "result": result,
-            }
-
-        print(
-            f"✅ TOOL COMPLETE: "
-            f"{tool_name}"
-        )
-
-        return result
-
-    except Exception as error:
-        result = {
-            "status": "error",
-            "error": str(error),
-        }
-
-        print(
-            f"❌ TOOL ERROR: "
-            f"{tool_name}: {error}"
-        )
-
-        return result
+    except TypeError:
+        # Compatibility fallback for an execute_tool implementation
+        # that does not accept project_id as a keyword.
+        try:
+            return execute_tool(
+                tool_name,
+                arguments,
+                project_id,
+            )
+        except TypeError:
+            return execute_tool(
+                tool_name,
+                arguments,
+            )
 
 
 # ============================================================
-# APPEND DIRECT RESULT TO CONVERSATION
+# RESULT HELPERS
 # ============================================================
 
-def append_direct_result(
-    messages: list[dict[str, Any]],
-    label: str,
-    result: dict[str, Any],
-) -> None:
+def _tool_result_text(result: Any) -> str:
     """
-    Direct tools do not originate from a Groq tool call, so they
-    are represented as user-side execution notes rather than
-    invalid orphaned tool messages.
+    Convert tool output into a model-readable string.
     """
 
-    compacted = compact_tool_result(
-        json.dumps(
+    if isinstance(result, str):
+        return result
+
+    try:
+        return json.dumps(
             result,
             ensure_ascii=False,
+            default=str,
+        )
+    except Exception:
+        return str(result)
+
+
+def _result_status(result: Any) -> str:
+    """
+    Safely extract status from a tool result.
+    """
+
+    if isinstance(result, dict):
+        return str(
+            result.get("status", "")
+        ).lower()
+
+    return ""
+
+# ============================================================
+# M6.2 CHANGE PLANNING
+# ============================================================
+
+def _build_change_plan(
+    task: dict[str, Any],
+    targeted_files: list[str],
+    project_scan: dict[str, Any],
+) -> dict[str, Any]:
+    """
+    Build a deterministic change plan from the normalized task
+    and project intelligence.
+
+    The plan guides the AI agent before it edits files.
+    """
+
+    intent = task.get(
+        "intent",
+        "modify_project",
+    )
+
+    change_type = task.get(
+        "changeType",
+        "code",
+    )
+
+    scope = task.get(
+        "scope",
+        "project",
+    )
+
+    risk = task.get(
+        "risk",
+        "medium",
+    )
+
+    request = task.get(
+        "request",
+        "",
+    )
+
+    entry_chain = project_scan.get(
+        "entryChain",
+        [],
+    )
+
+    steps: list[str] = []
+
+    steps.append(
+        "Inspect the most relevant existing files before editing."
+    )
+
+    if targeted_files:
+        steps.append(
+            "Prioritize the targeted files identified by "
+            "project intelligence."
+        )
+
+    if entry_chain:
+        steps.append(
+            "Use the detected application entry chain to "
+            "understand how the requested area is connected."
+        )
+
+    if intent == "add_feature":
+        steps.append(
+            "Implement the requested feature using the "
+            "existing project structure."
+        )
+
+    elif intent == "remove_feature":
+        steps.append(
+            "Remove only the requested functionality and "
+            "preserve unrelated behavior."
+        )
+
+    elif intent == "fix_bug":
+        steps.append(
+            "Identify the smallest relevant code path and "
+            "repair the underlying issue."
+        )
+
+    else:
+        steps.append(
+            "Make the smallest change that satisfies the "
+            "user's request."
+        )
+
+    if change_type == "content":
+        steps.append(
+            "Prefer changing the source of the requested "
+            "content rather than generated or derived files."
+        )
+
+    elif change_type == "visual":
+        steps.append(
+            "Prefer the existing component or page responsible "
+            "for the requested visual change."
+        )
+
+    elif change_type == "backend":
+        steps.append(
+            "Preserve existing frontend contracts while changing "
+            "the relevant backend or data flow."
+        )
+
+    steps.append(
+        "Do not modify generated files, unrelated files, or "
+        "project infrastructure unless required."
+    )
+
+    steps.append(
+        "After editing, allow the orchestrator to run the "
+        "mandatory build and runtime verification."
+    )
+
+    return {
+        "intent": intent,
+        "changeType": change_type,
+        "scope": scope,
+        "risk": risk,
+        "request": request,
+        "targetedFiles": targeted_files,
+        "entryChain": entry_chain,
+        "steps": steps,
+    }
+
+# ============================================================
+# M6.3 CHANGE PLAN VALIDATION
+# ============================================================
+
+def _validate_change_plan(
+    plan: dict[str, Any],
+    project_scan: dict[str, Any],
+) -> dict[str, Any]:
+    """
+    Validate a deterministic change plan before execution.
+    """
+
+    issues: list[str] = []
+    warnings: list[str] = []
+
+    valid_intents = {
+        "modify_project",
+        "add_feature",
+        "remove_feature",
+        "fix_bug",
+    }
+
+    valid_change_types = {
+        "visual",
+        "content",
+        "backend",
+        "code",
+    }
+
+    valid_scopes = {
+        "project",
+        "page",
+        "component",
+    }
+
+    valid_risks = {
+        "low",
+        "medium",
+        "high",
+    }
+
+    intent = plan.get("intent")
+    change_type = plan.get("changeType")
+    scope = plan.get("scope")
+    risk = plan.get("risk")
+    request = str(
+        plan.get("request", "")
+    ).strip()
+
+    targeted_files = plan.get(
+        "targetedFiles",
+        [],
+    )
+
+    steps = plan.get(
+        "steps",
+        [],
+    )
+
+    source_files = set(
+        project_scan.get(
+            "sourceFiles",
+            [],
         )
     )
 
-    messages.append(
-        {
-            "role": "user",
-            "content": (
-                f"GENESYS EXECUTION RESULT — {label}\n"
-                f"{compacted}"
-            ),
-        }
+    if intent not in valid_intents:
+        issues.append(
+            f"Invalid intent: {intent}"
+        )
+
+    if change_type not in valid_change_types:
+        issues.append(
+            f"Invalid change type: {change_type}"
+        )
+
+    if scope not in valid_scopes:
+        issues.append(
+            f"Invalid scope: {scope}"
+        )
+
+    if risk not in valid_risks:
+        issues.append(
+            f"Invalid risk: {risk}"
+        )
+
+    if not request:
+        issues.append(
+            "Change plan does not contain a user request."
+        )
+
+    if not isinstance(
+        targeted_files,
+        list,
+    ):
+        issues.append(
+            "Targeted files must be a list."
+        )
+        targeted_files = []
+
+    if not isinstance(
+        steps,
+        list,
+    ):
+        issues.append(
+            "Plan steps must be a list."
+        )
+        steps = []
+
+    if not steps:
+        issues.append(
+            "Change plan contains no execution steps."
+        )
+
+    missing_files = [
+        path
+        for path in targeted_files
+        if path not in source_files
+    ]
+
+    if missing_files:
+        warnings.append(
+            "Some targeted files were not found in "
+            "the scanned source files: "
+            + ", ".join(
+                missing_files
+            )
+        )
+
+    protected_files = [
+        path
+        for path in targeted_files
+        if (
+            "routeTree.gen" in path
+            or path.endswith(".gen.ts")
+            or path.endswith(".gen.tsx")
+        )
+    ]
+
+    if protected_files:
+        warnings.append(
+            "Protected/generated files were targeted: "
+            + ", ".join(
+                protected_files
+            )
+            + ". These files should not be modified."
+        )
+
+    if risk == "high":
+        warnings.append(
+            "High-risk change detected. "
+            "The agent should minimize scope and "
+            "avoid unrelated modifications."
+        )
+
+    if (
+        change_type == "backend"
+        and scope == "component"
+    ):
+        warnings.append(
+            "Backend change classified at component scope. "
+            "Verify that the affected data flow is correct."
+        )
+
+    if (
+        change_type == "content"
+        and scope == "project"
+    ):
+        warnings.append(
+            "Content change has project-wide scope. "
+            "Verify that the broader scope is intentional."
+        )
+
+    return {
+        "valid": not issues,
+        "issues": issues,
+        "warnings": warnings,
+        "targetedFilesChecked": len(
+            targeted_files
+        ),
+        "stepsChecked": len(
+            steps
+        ),
+        "protectedFiles": protected_files,
+    }
+
+def _validate_execution(
+    change_plan: dict[str, Any],
+    modified_files: list[str],
+) -> dict[str, Any]:
+    """
+    Validate that the agent's actual file changes stayed within
+    the approved change plan.
+    """
+
+    issues: list[str] = []
+    warnings: list[str] = []
+
+    targeted_files = set(
+        change_plan.get(
+            "targetedFiles",
+            [],
+        )
     )
 
+    modified = set(
+        modified_files or []
+    )
+
+    protected_files = {
+        path
+        for path in modified
+        if (
+            "routeTree.gen" in path
+            or path.endswith(".gen.ts")
+            or path.endswith(".gen.tsx")
+        )
+    }
+
+    unexpected_files = sorted(
+        modified - targeted_files
+    )
+
+    if protected_files:
+        issues.append(
+            "Protected/generated files were modified: "
+            + ", ".join(
+                sorted(protected_files)
+            )
+        )
+
+    if unexpected_files:
+        warnings.append(
+            "Files outside the targeted set were modified: "
+            + ", ".join(
+                unexpected_files
+            )
+        )
+
+    if not modified:
+        issues.append(
+            "No project files were modified."
+        )
+
+    return {
+        "valid": not issues,
+        "issues": issues,
+        "warnings": warnings,
+        "modifiedFiles": sorted(modified),
+        "targetedFiles": sorted(targeted_files),
+        "unexpectedFiles": unexpected_files,
+        "protectedFiles": sorted(protected_files),
+    }
+
+def _summarize_diff(
+    diff_text: str,
+) -> dict[str, Any]:
+    """
+    Summarize a Git diff deterministically.
+
+    This does not use an LLM. It extracts changed files and
+    approximate added/removed line counts directly from the diff.
+    """
+
+    changed_files: list[str] = []
+    added_lines = 0
+    removed_lines = 0
+
+    current_file: str | None = None
+
+    for line in (diff_text or "").splitlines():
+        if line.startswith("diff --git "):
+            parts = line.split()
+
+            if len(parts) >= 4:
+                current_file = parts[2][2:]
+
+                if current_file not in changed_files:
+                    changed_files.append(current_file)
+
+        elif line.startswith("+++ ") or line.startswith("--- "):
+            # File header lines are metadata, not actual changes.
+            continue
+
+        elif line.startswith("+"):
+            added_lines += 1
+
+        elif line.startswith("-"):
+            removed_lines += 1
+
+    return {
+        "filesChanged": len(changed_files),
+        "changedFiles": changed_files,
+        "linesAdded": added_lines,
+        "linesRemoved": removed_lines,
+    }
+def _classify_diff_changes(
+    diff_text: str,
+) -> dict[str, Any]:
+    """
+    Classify changed Git diff lines deterministically.
+
+    This is a heuristic layer used for verification, not
+    as a replacement for semantic understanding.
+    """
+
+    content_keywords = {
+        "headline",
+        "title",
+        "label",
+        "description",
+        "text",
+        "copy",
+        "content",
+        "heading",
+        "paragraph",
+    }
+
+    visual_keywords = {
+        "className",
+        "style",
+        "color",
+        "font",
+        "spacing",
+        "padding",
+        "margin",
+        "width",
+        "height",
+        "grid",
+        "flex",
+        "border",
+        "shadow",
+        "background",
+    }
+
+    changed_lines: list[str] = []
+    categories: set[str] = set()
+
+    for line in (diff_text or "").splitlines():
+        if not line.startswith(("+", "-")):
+            continue
+
+        if line.startswith(("+++", "---")):
+            continue
+
+        content = line[1:].strip()
+
+        if not content:
+            continue
+
+        changed_lines.append(content)
+
+        lower = content.lower()
+
+        if any(
+            keyword.lower() in lower
+            for keyword in content_keywords
+        ):
+            categories.add("content")
+
+        if any(
+            keyword.lower() in lower
+            for keyword in visual_keywords
+        ):
+            categories.add("visual")
+
+        if not any(
+            keyword.lower() in lower
+            for keyword in content_keywords
+        ) and not any(
+            keyword.lower() in lower
+            for keyword in visual_keywords
+        ):
+            categories.add("code")
+
+    return {
+        "categories": sorted(categories),
+        "changedLines": changed_lines,
+    }
+
+def _validate_diff(
+    diff_summary: dict[str, Any],
+    change_plan: dict[str, Any],
+    diff_classification: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """
+    Validate the actual Git diff against the approved change plan.
+    """
+
+    issues: list[str] = []
+    warnings: list[str] = []
+
+    diff_classification = (
+        diff_classification
+        or {}
+    )
+
+    detected_categories = set(
+        diff_classification.get(
+            "categories",
+            [],
+        )
+    )
+
+    expected_change_type = change_plan.get(
+        "changeType",
+        "code",
+    )
+
+    changed_files = set(
+        diff_summary.get(
+            "changedFiles",
+            [],
+        )
+    )
+
+    targeted_files = set(
+        change_plan.get(
+            "targetedFiles",
+            [],
+        )
+    )
+
+    protected_files = {
+        path
+        for path in changed_files
+        if (
+            "routeTree.gen" in path
+            or path.endswith(".gen.ts")
+            or path.endswith(".gen.tsx")
+        )
+    }
+
+    unexpected_files = sorted(
+        changed_files - targeted_files
+    )
+
+    if protected_files:
+        issues.append(
+            "Protected/generated files were modified: "
+            + ", ".join(
+                sorted(protected_files)
+            )
+        )
+
+    if unexpected_files:
+        warnings.append(
+            "Files outside the targeted set were modified: "
+            + ", ".join(
+                unexpected_files
+            )
+        )
+
+    if not changed_files:
+        warnings.append(
+            "Git diff contains no changed files."
+        )
+    
+    if (
+        expected_change_type != "code"
+        and detected_categories
+        and expected_change_type not in detected_categories
+    ):
+        warnings.append(
+            "Diff categories do not clearly match "
+            f"the planned change type "
+            f"'{expected_change_type}': "
+            + ", ".join(
+                sorted(detected_categories)
+            )
+        )
+
+    return {
+        "valid": not issues,
+        "issues": issues,
+        "warnings": warnings,
+        "changedFiles": sorted(changed_files),
+        "targetedFiles": sorted(targeted_files),
+        "unexpectedFiles": unexpected_files,
+        "protectedFiles": sorted(protected_files),
+        "linesAdded": diff_summary.get(
+            "linesAdded",
+            0,
+        ),
+        "linesRemoved": diff_summary.get(
+            "linesRemoved",
+            0,
+        ),
+    }
+def _classify_failure(
+    failure_result: dict[str, Any] | None,
+    failure_context: str = "",
+) -> dict[str, Any]:
+    """
+    Classify an agent failure deterministically.
+
+    This function does not use an LLM. It inspects the failure
+    context and result to determine which recovery category
+    should handle the failure.
+    """
+
+    result = failure_result or {}
+
+    error_text = " ".join(
+        str(
+            value
+        )
+        for value in (
+            result.get("error", ""),
+            result.get("output", ""),
+            result.get("message", ""),
+            failure_context,
+        )
+        if value
+    ).lower()
+
+    if any(
+        keyword in error_text
+        for keyword in (
+            "build",
+            "tsc",
+            "typescript",
+            "vite",
+            "compile",
+            "compilation",
+            "syntaxerror",
+            "syntax error",
+        )
+    ):
+        failure_type = "build"
+
+    elif any(
+        keyword in error_text
+        for keyword in (
+            "preview",
+            "server",
+            "connection refused",
+            "econnrefused",
+            "port",
+        )
+    ):
+        failure_type = "preview"
+
+    elif any(
+        keyword in error_text
+        for keyword in (
+            "browser",
+            "playwright",
+            "page",
+            "console",
+            "screenshot",
+            "navigation",
+        )
+    ):
+        failure_type = "browser"
+
+    elif any(
+        keyword in error_text
+        for keyword in (
+            "diff",
+            "git diff",
+            "changed files",
+            "protected/generated",
+        )
+    ):
+        failure_type = "diff"
+
+    elif any(
+        keyword in error_text
+        for keyword in (
+            "execution",
+            "tool",
+            "write_file",
+            "read_file",
+            "list_files",
+        )
+    ):
+        failure_type = "execution"
+
+    else:
+        failure_type = "unknown"
+
+    return {
+        "failureType": failure_type,
+        "message": (
+            str(
+                result.get(
+                    "error",
+                    result.get(
+                        "message",
+                        "",
+                    ),
+                )
+            )
+        ),
+        "context": failure_context,
+    }
+def _build_recovery_strategy(
+    failure: dict[str, Any],
+) -> dict[str, Any]:
+    """
+    Build a deterministic recovery strategy from a classified
+    failure.
+
+    This function does not use an LLM. It decides which recovery
+    actions are appropriate for the failure category.
+    """
+
+    failure_type = failure.get(
+        "failureType",
+        "unknown",
+    )
+
+    strategies: dict[str, dict[str, Any]] = {
+        "build": {
+            "strategy": "repair_build",
+            "description": (
+                "Inspect the build failure, identify the affected "
+                "source code, make the smallest repair, and rebuild."
+            ),
+            "actions": [
+                "Inspect the build error output.",
+                "Identify the relevant source file.",
+                "Make the smallest necessary repair.",
+                "Run the mandatory build again.",
+            ],
+            "retryable": True,
+        },
+        "preview": {
+            "strategy": "recover_preview",
+            "description": (
+                "Recover the preview environment and verify that "
+                "the application starts correctly."
+            ),
+            "actions": [
+                "Inspect the preview failure.",
+                "Check whether the preview process is running.",
+                "Restart or recover the preview if necessary.",
+                "Verify the preview again.",
+            ],
+            "retryable": True,
+        },
+        "browser": {
+            "strategy": "repair_runtime",
+            "description": (
+                "Inspect browser/runtime failures and repair the "
+                "affected application behavior."
+            ),
+            "actions": [
+                "Inspect browser verification output.",
+                "Inspect browser console errors.",
+                "Identify the affected source code.",
+                "Make the smallest necessary repair.",
+                "Run browser verification again.",
+            ],
+            "retryable": True,
+        },
+        "diff": {
+            "strategy": "repair_scope",
+            "description": (
+                "Correct changes that fall outside the approved "
+                "change plan."
+            ),
+            "actions": [
+                "Inspect the Git diff.",
+                "Identify unexpected or protected files.",
+                "Revert unrelated changes.",
+                "Re-check the Git diff.",
+            ],
+            "retryable": True,
+        },
+        "execution": {
+            "strategy": "retry_execution",
+            "description": (
+                "Recover from an agent tool or execution failure."
+            ),
+            "actions": [
+                "Inspect the failed tool result.",
+                "Determine whether the operation can be retried.",
+                "Retry the operation with the smallest valid input.",
+            ],
+            "retryable": True,
+        },
+        "unknown": {
+            "strategy": "inspect_failure",
+            "description": (
+                "Inspect the failure before attempting recovery."
+            ),
+            "actions": [
+                "Inspect the failure details.",
+                "Determine the affected subsystem.",
+                "Avoid making speculative changes.",
+            ],
+            "retryable": False,
+        },
+    }
+
+    strategy = strategies.get(
+        failure_type,
+        strategies["unknown"],
+    )
+
+    return {
+        "failureType": failure_type,
+        "strategy": strategy["strategy"],
+        "description": strategy["description"],
+        "actions": strategy["actions"],
+        "retryable": strategy["retryable"],
+    }
+def _build_recovery_context(
+    failure: dict[str, Any],
+    strategy: dict[str, Any],
+    task_understanding: dict[str, Any] | None = None,
+    change_plan: dict[str, Any] | None = None,
+    failure_result: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """
+    Build a compact, structured context for a recovery attempt.
+
+    This keeps recovery deterministic and gives the repairing agent
+    the evidence it needs without dumping unrelated state.
+    """
+
+    task_understanding = (
+        task_understanding
+        or {}
+    )
+
+    change_plan = (
+        change_plan
+        or {}
+    )
+
+    failure_result = (
+        failure_result
+        or {}
+    )
+
+    failure_type = failure.get(
+        "failureType",
+        "unknown",
+    )
+
+    message = failure.get(
+        "message",
+        "",
+    )
+
+    raw_output = failure_result.get(
+        "output",
+        "",
+    )
+
+    if not raw_output:
+        raw_output = failure_result.get(
+            "error",
+            "",
+        )
+
+    if not raw_output:
+        raw_output = failure_result.get(
+            "message",
+            "",
+        )
+
+    # Keep recovery context bounded.
+    output = str(
+        raw_output or ""
+    )[-12000:]
+
+    return {
+        "failureType": failure_type,
+        "strategy": strategy.get(
+            "strategy",
+            "inspect_failure",
+        ),
+        "retryable": strategy.get(
+            "retryable",
+            False,
+        ),
+        "failureMessage": message,
+        "failureOutput": output,
+        "recoveryActions": strategy.get(
+            "actions",
+            [],
+        ),
+        "task": {
+            "intent": task_understanding.get(
+                "intent",
+            ),
+            "changeType": task_understanding.get(
+                "changeType",
+            ),
+            "scope": task_understanding.get(
+                "scope",
+            ),
+            "request": task_understanding.get(
+                "request",
+            ),
+        },
+        "changePlan": {
+            "targetedFiles": change_plan.get(
+                "targetedFiles",
+                [],
+            ),
+            "changeType": change_plan.get(
+                "changeType",
+            ),
+            "scope": change_plan.get(
+                "scope",
+            ),
+        },
+    }
+
+def _should_rollback_for_recovery(
+    strategy: dict[str, Any],
+    checkpoint_result: dict[str, Any] | None,
+) -> bool:
+    """
+    Determine whether recovery should restore the most recent
+    successful checkpoint before attempting another repair.
+
+    Rollback is only allowed when a valid checkpoint exists and
+    the recovery strategy is retryable.
+    """
+
+    if not checkpoint_result:
+        return False
+
+    if checkpoint_result.get("status") != "success":
+        return False
+
+    if not checkpoint_result.get("checkpointId"):
+        return False
+
+    if not strategy.get("retryable", False):
+        return False
+
+    return True
+
+def _can_attempt_recovery(
+    recovery_attempts: int,
+    max_recovery_attempts: int,
+    strategy: dict[str, Any],
+) -> bool:
+    """
+    Determine whether another recovery attempt is allowed.
+    """
+
+    if not strategy.get(
+        "retryable",
+        False,
+    ):
+        return False
+
+    if recovery_attempts >= max_recovery_attempts:
+        return False
+
+    return True
+
+
+def _build_recovery_prompt(
+    recovery_context: dict[str, Any],
+) -> str:
+    """
+    Convert structured recovery context into a focused repair
+    instruction for the agent.
+    """
+
+    failure_type = recovery_context.get(
+        "failureType",
+        "unknown",
+    )
+
+    strategy = recovery_context.get(
+        "strategy",
+        "inspect_failure",
+    )
+
+    failure_message = recovery_context.get(
+        "failureMessage",
+        "",
+    )
+
+    failure_output = recovery_context.get(
+        "failureOutput",
+        "",
+    )
+
+    actions = recovery_context.get(
+        "recoveryActions",
+        [],
+    )
+
+    task = recovery_context.get(
+        "task",
+        {},
+    )
+
+    change_plan = recovery_context.get(
+        "changePlan",
+        {},
+    )
+
+    action_text = "\n".join(
+        f"- {action}"
+        for action in actions
+    )
+
+    targeted_files = "\n".join(
+        f"- {path}"
+        for path in change_plan.get(
+            "targetedFiles",
+            [],
+        )
+    )
+
+    return f"""
+RECOVERY ATTEMPT
+
+A previous execution step failed.
+
+Failure type:
+{failure_type}
+
+Recovery strategy:
+{strategy}
+
+Original request:
+{task.get("request", "")}
+
+Failure message:
+{failure_message}
+
+Failure output:
+{failure_output}
+
+Approved targeted files:
+{targeted_files}
+
+Recovery actions:
+{action_text}
+
+Instructions:
+- Fix the underlying failure.
+- Make the smallest necessary change.
+- Do not modify unrelated files.
+- Do not modify generated files.
+- Do not change the user's requested behavior.
+- After repairing the issue, stop and allow the orchestrator
+  to perform verification again.
+""".strip()
+
+def _validate_recovery(
+    failure_type: str,
+    verification_result: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """
+    Determine whether a recovery attempt successfully resolved
+    the original failure.
+
+    This function is deterministic and does not use an LLM.
+    """
+
+    result = verification_result or {}
+
+    status = _result_status(
+        result
+    )
+
+    if failure_type == "build":
+        passed = (
+            status == "success"
+            and result.get(
+                "success",
+                True,
+            )
+        )
+
+    elif failure_type == "preview":
+        passed = (
+            status == "success"
+            and result.get(
+                "success",
+                True,
+            )
+        )
+
+    elif failure_type == "browser":
+        passed = (
+            status == "success"
+            and result.get(
+                "success",
+                True,
+            )
+        )
+
+    elif failure_type == "diff":
+        passed = (
+            status == "success"
+            and result.get(
+                "valid",
+                False,
+            )
+        )
+
+    elif failure_type == "execution":
+        passed = (
+            status == "success"
+        )
+
+    else:
+        passed = (
+            status == "success"
+        )
+
+    return {
+        "failureType": failure_type,
+        "validated": passed,
+        "status": status,
+    }
+
+def _build_recovery_limits(
+    recovery_attempts: int,
+    max_recovery_attempts: int = 2,
+) -> dict[str, Any]:
+    """
+    Build deterministic recovery retry-limit information.
+    """
+
+    if max_recovery_attempts < 0:
+        max_recovery_attempts = 0
+
+    if recovery_attempts < 0:
+        recovery_attempts = 0
+
+    exhausted = (
+        recovery_attempts
+        >= max_recovery_attempts
+    )
+
+    remaining = max(
+        0,
+        max_recovery_attempts
+        - recovery_attempts,
+    )
+
+    return {
+        "attempts": recovery_attempts,
+        "maxAttempts": max_recovery_attempts,
+        "remainingAttempts": remaining,
+        "exhausted": exhausted,
+    }
+
+def _build_recovery_report(
+    attempted: bool,
+    recovery_attempts: int,
+    failure: dict[str, Any] | None = None,
+    strategy: dict[str, Any] | None = None,
+    validation: dict[str, Any] | None = None,
+    limits: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """
+    Build a compact structured recovery report.
+    """
+
+    failure = failure or {}
+    strategy = strategy or {}
+    validation = validation or {}
+    limits = limits or {}
+
+    return {
+        "attempted": attempted,
+        "attempts": recovery_attempts,
+        "failureType": failure.get(
+            "failureType",
+            "unknown",
+        ),
+        "strategy": strategy.get(
+            "strategy",
+            "none",
+        ),
+        "validated": validation.get(
+            "validated",
+            False,
+        ),
+        "remainingAttempts": limits.get(
+            "remainingAttempts",
+            0,
+        ),
+        "exhausted": limits.get(
+            "exhausted",
+            False,
+        ),
+    }
 
 # ============================================================
 # MAIN AGENT
@@ -1008,194 +1764,658 @@ def append_direct_result(
 
 def run_agent(
     prompt: str,
-    project_id: str = "genesys-project",
+    project_id: str = PROJECT_ID_DEFAULT,
 ) -> dict[str, Any]:
 
+    prompt = (prompt or "").strip()
+
+    if not prompt:
+        return {
+            "status": "error",
+            "message": "Prompt is required.",
+            "text": "Please provide a task.",
+            "agent": "genesys",
+            "steps": 0,
+            "modifiedFiles": [],
+            "buildAttempted": False,
+            "buildPassed": False,
+        }
+
+    print()
+    print("=" * 40)
+    print("🤖 AGENT REQUEST:", prompt)
+    print("📦 PROJECT:", project_id)
+    print("=" * 40)
+
     # --------------------------------------------------------
-    # Validate
+    # M6 TASK UNDERSTANDING
     # --------------------------------------------------------
 
-    if not prompt or not str(
+    task_understanding = _build_task_understanding(
         prompt
-    ).strip():
-        raise ValueError(
-            "Prompt is required."
-        )
-
-    project_id = (
-        str(project_id).strip()
-        or "genesys-project"
     )
 
-    client = get_client()
+    print("🧠 Task understanding:")
+    print(
+        json.dumps(
+            task_understanding,
+            indent=2,
+            ensure_ascii=False,
+        )
+    )
 
     # --------------------------------------------------------
-    # Conversation
+    # STATE
     # --------------------------------------------------------
 
-    messages: list[
-        dict[str, Any]
-    ] = [
+    provider = get_provider()
+
+    workspace = get_workspace(
+        project_id
+    )
+
+    browser = BrowserSession(
+        project_id=project_id
+    )
+
+    recovery_checkpoint_id = None
+
+    checkpoint_list = (
+        workspace.list_checkpoints()
+        if hasattr(workspace, "list_checkpoints")
+        else {}
+    )
+
+    checkpoints = checkpoint_list.get(
+        "checkpoints",
+        []
+    ) if checkpoint_list.get("status") == "success" else []
+
+    if checkpoints:
+        recovery_checkpoint_id = checkpoints[0].get(
+        "checkpointId"
+    )
+
+    messages: list[dict[str, Any]] = [
         {
             "role": "system",
             "content": SYSTEM_PROMPT,
         },
         {
             "role": "user",
-            "content": (
-                f"Project ID: {project_id}\n\n"
-                f"User request:\n{prompt}"
-            ),
+            "content": prompt,
         },
     ]
 
-    # --------------------------------------------------------
-    # State
-    # --------------------------------------------------------
+    modified_files: list[str] = []
 
     inspected = False
-
     build_attempted = False
-
     build_passed = False
-
     preview_started = False
+    browser_verified = False
+    verification_complete = False
 
     changed_since_build = False
 
-    modified_files: list[
-        str
-    ] = []
+    recovery_attempts = 0
+    max_recovery_attempts = 2
+    recovery_report = None
+    last_recovery_prompt = None
+    recovery_failure_type: str | None = None
+    recovery_strategy: dict[str, Any] | None = None
+    recovery_waiting_for_model = False
+    checkpoint_result: dict[str, Any] | None = None
+    recovery_checkpoint_id: str | None = None
 
-    steps: list[
-        dict[str, Any]
-    ] = []
+    def _create_success_checkpoint() -> dict[str, Any]:
+        nonlocal checkpoint_result
+
+        checkpoint_result = workspace.create_checkpoint(
+            "Successful autonomous task completion"
+        )
+
+        if checkpoint_result.get("status") != "success":
+            print(
+                "❌ CHECKPOINT CREATION FAILED:"
+            )
+            print(
+                checkpoint_result
+            )
+
+            raise RuntimeError(
+                "Task verification succeeded, "
+                "but automatic checkpoint creation failed."
+            )
+
+        print(
+            "📦 CHECKPOINT CREATED:"
+        )
+        print(
+            checkpoint_result
+        )
+
+        return checkpoint_result
+
+    changed_since_build = False
+
+    preview_url: str | None = None
 
     last_answer = ""
 
+    steps_used = 0
+
     last_tool_name: str | None = None
+    repeated_tool_count = 0
 
-    consecutive_same_tool_calls = 0
+    MAX_REPAIR_ATTEMPTS = 3
+    repair_attempts = 0
+    self_healing_attempted = False
+    last_failure_type: str | None = None
 
-    # ========================================================
-    # STEP 1 — DIRECT PROJECT INSPECTION
-    # ========================================================
-    #
-    # No reason to spend a Groq call asking it to choose
-    # list_files. Python simply performs the required inspection.
-    #
+    # --------------------------------------------------------
+    # MANDATORY INITIAL INSPECTION
+    # --------------------------------------------------------
 
-    print(
-        "🔎 Performing mandatory project inspection..."
-    )
+    print("🔎 Performing mandatory project inspection...")
+    print("🔧 TOOL: list_files")
 
-    inspection = execute_direct_tool(
-        "list_files",
-        project_id,
-    )
+    try:
+        inspection_result = _execute_agent_tool(
+            "list_files",
+            {},
+            project_id,
+        )
 
-    steps.append(
-        {
-            "tool": "list_files",
-            "status": (
-                "success"
-                if inspection.get(
-                    "status"
-                ) != "error"
-                else "error"
-            ),
-            "result": inspection,
-        }
-    )
+        print("✅ TOOL COMPLETE: list_files")
 
-    if inspection.get(
-        "status"
-    ) == "error":
+        if recovery_waiting_for_model:
+            recovery_waiting_for_model = False
+
+    except Exception as exc:
+        print(
+            "❌ INITIAL INSPECTION FAILED:",
+            exc,
+        )
+
         return {
             "status": "error",
-            "answer": (
-                "GeneSys could not inspect the Daytona project: "
-                f"{inspection.get('error', 'Unknown error')}"
+            "message": (
+                "Initial project inspection failed."
             ),
-            "steps": steps,
-            "modifiedFiles": modified_files,
+            "text": (
+                f"Unable to inspect project: {exc}"
+            ),
+            "agent": "genesys",
+            "steps": 0,
+            "modifiedFiles": [],
             "buildAttempted": False,
             "buildPassed": False,
-            "projectId": project_id,
         }
 
     inspected = True
+    
+    # --------------------------------------------------------
+    # M5 WORKSPACE CONTEXT
+    # --------------------------------------------------------
 
-    append_direct_result(
-        messages,
-        "PROJECT INSPECTION",
-        inspection,
-    )
+    try:
+        workspace_context = workspace.state()
 
-    print(
-        "🔎 Project inspection complete."
-    )
-
-    # ========================================================
-    # MAIN LOOP
-    # ========================================================
-
-    for step_number in range(
-        2,
-        MAX_STEPS + 1,
-    ):
-
-        print(
-            f"🤖 Agent step "
-            f"{step_number}/{MAX_STEPS}"
+        workspace_context_text = (
+            "WORKSPACE CONTEXT\n\n"
+            f"Project ID: "
+            f"{workspace_context.get('projectId')}\n"
+            f"Sandbox ID: "
+            f"{workspace_context.get('sandboxId')}\n"
+            f"Sandbox Name: "
+            f"{workspace_context.get('sandboxName')}\n"
+            f"State: "
+            f"{workspace_context.get('state')}\n"
+            f"Recoverable: "
+            f"{workspace_context.get('recoverable')}\n"
+            f"Project Root: "
+            f"{workspace_context.get('projectRoot')}"
         )
 
-        # ====================================================
-        # MANDATORY BUILD
-        # ====================================================
-        #
-        # Once the model has changed files, Python owns the build.
-        #
+        print("🧩 Workspace context:")
+        print(workspace_context_text)
 
-        if (
-            changed_since_build
-        ):
+    except Exception as exc:
+        workspace_context_text = (
+            "WORKSPACE CONTEXT\n\n"
+            "Workspace state could not be determined."
+        )
+
+        print(
+            "⚠️ WORKSPACE CONTEXT FAILED:",
+            exc,
+        )
+
+    messages.append(
+        {
+            "role": "system",
+            "content": workspace_context_text,
+        }
+    )
+
+    messages.append(
+        {
+        "role": "system",
+        "content": (
+            "MANDATORY PROJECT INSPECTION\n\n"
+            "The agent has already performed the mandatory "
+            "list_files inspection.\n\n"
+            "Inspection result:\n"
+            + _tool_result_text(
+                inspection_result
+            )
+        ),
+    }
+)
+
+    print("🔎 Project inspection complete.")
+
+    # --------------------------------------------------------
+    # M4 PROJECT INTELLIGENCE
+    # --------------------------------------------------------
+
+    print("🧠 Running project intelligence scan...")
+
+    try:
+        project_scan = scan_project(workspace)
+
+        project_context = build_project_context(
+            project_scan
+        )
+
+        targeted_files = target_project_files(
+            prompt,
+            project_scan,
+        )
+
+        print("🎯 Targeted files:")
+
+        if targeted_files:
+            for path in targeted_files:
+                print(f"   - {path}")
+        else:
+            print("   - None detected")
+
+        print("✅ Project intelligence complete.")
+        print(project_context)
+
+    except Exception as exc:
+        project_scan = {
+            "status": "error",
+            "message": str(exc),
+        }
+
+        project_context = (
+            "PROJECT CONTEXT\n\n"
+            "Project intelligence scan failed. "
+            "Continue using normal project inspection."
+        )
+
+        targeted_files = []
+
+        print(
+            "⚠️ PROJECT INTELLIGENCE FAILED:",
+            exc,
+        )
+
+    messages.append(
+        {
+            "role": "system",
+            "content": project_context,
+        }
+    )
+
+    if targeted_files:
+            targeting_context = (
+            "TARGETED FILES\n\n"
+            "These files are the most relevant starting points "
+            "for the user's task. Inspect them first when "
+            "appropriate. Do not assume they must be modified.\n\n"
+            + "\n".join(
+                f"- {path}"
+                for path in targeted_files
+            )
+        )
+
+            messages.append(
+            {
+                "role": "system",
+                "content": targeting_context,
+            }
+        )
+
+    # --------------------------------------------------------
+    # M6.2 CHANGE PLAN
+    # --------------------------------------------------------
+
+    change_plan = _build_change_plan(
+        task_understanding,
+        targeted_files,
+        project_scan,
+    )
+
+    print("📋 Change plan:")
+    print(
+        json.dumps(
+            change_plan,
+            indent=2,
+            ensure_ascii=False,
+        )
+    )
+
+    messages.append(
+        {
+            "role": "system",
+            "content": (
+                "CHANGE PLAN\n\n"
+                "Before editing the project, follow this "
+                "structured change plan.\n\n"
+                + _safe_json(
+                    change_plan
+                )
+                + "\n\n"
+                "IMPORTANT:\n"
+                "- Treat this as an execution plan, not permission "
+                "to modify every listed file.\n"
+                "- Inspect relevant files before editing.\n"
+                "- Prefer the smallest correct change.\n"
+                "- NEVER modify protected or generated files such as "
+                "routeTree.gen.ts, *.gen.ts, or *.gen.tsx.\n"
+                "- Do not modify unrelated files.\n"
+                "- The orchestrator controls build and runtime "
+                "verification."
+            ),
+        }
+    )
+
+    # --------------------------------------------------------
+    # M6.3 CHANGE PLAN VALIDATION
+    # --------------------------------------------------------
+
+    plan_validation = _validate_change_plan(
+        change_plan,
+        project_scan,
+    )
+
+    print("🔍 Change plan validation:")
+    print(
+        json.dumps(
+            plan_validation,
+            indent=2,
+            ensure_ascii=False,
+        )
+    )
+
+    if not plan_validation["valid"]:
+        print(
+            "❌ CHANGE PLAN INVALID:"
+        )
+
+        return {
+            "status": "error",
+            "message": (
+                "Generated change plan failed validation."
+            ),
+            "planValidation": plan_validation,
+            "taskUnderstanding": task_understanding,
+            "changePlan": change_plan,
+            "agent": "genesys",
+            "steps": 0,
+            "modifiedFiles": [],
+            "buildAttempted": False,
+            "buildPassed": False,
+        }
+
+        # --------------------------------------------------------
+    # AGENT LOOP
+    # --------------------------------------------------------
+
+    for step in range(1, MAX_STEPS + 1):
+
+        steps_used = step
+
+        if verification_complete:
+            print(
+                "✅ Verification complete. Ending agent loop."
+            )
+            break
+
+        # ----------------------------------------------------
+        # COMPACTION
+        # ----------------------------------------------------
+
+        messages = _compact_messages(
+            messages
+        )
+
+        print(
+            f"🤖 Agent step {step}/{MAX_STEPS}"
+        )
+
+        # ----------------------------------------------------
+        # FORCE BUILD AFTER FILE CHANGES
+        # ----------------------------------------------------
+
+        if changed_since_build and not recovery_waiting_for_model:
+            print(
+                "📝 Files changed. "
+                "Next action will be the mandatory build."
+            )
+
+            # --------------------------------------------------------
+            # M6.4 EXECUTION VALIDATION
+            # --------------------------------------------------------
+
+            execution_validation = _validate_execution(
+                change_plan,
+                modified_files,
+            )
+
+            print("🛡️ Execution validation:")
+            print(
+                json.dumps(
+                    execution_validation,
+                    indent=2,
+                    ensure_ascii=False,
+                )
+            )
+
+            if not execution_validation["valid"]:
+                print(
+                    "❌ EXECUTION VALIDATION FAILED:"
+                )
+
+                return {
+                    "status": "error",
+                    "message": (
+                        "Agent execution failed "
+                        "plan validation."
+                    ),
+                    "executionValidation": execution_validation,
+                    "taskUnderstanding": task_understanding,
+                    "changePlan": change_plan,
+                    "planValidation": plan_validation,
+                    "agent": "genesys",
+                    "steps": steps_used,
+                    "modifiedFiles": modified_files,
+                    "buildAttempted": False,
+                    "buildPassed": False,
+                }
+
+            # --------------------------------------------------------
+            # M6.5 DIFF VERIFICATION
+            # --------------------------------------------------------
+
+            print(
+                "🔎 Collecting Git diff..."
+            )
+
+            try:
+                diff_result = workspace.get_diff()
+            except Exception as exc:
+                diff_result = {
+                    "status": "error",
+                    "success": False,
+                    "error": str(exc),
+                }
+
+            diff_status = _result_status(
+                diff_result
+            )
+
+            if diff_status != "success":
+                print(
+                    "❌ DIFF COLLECTION FAILED:"
+                )
+
+                return {
+                    "status": "error",
+                    "message": (
+                        "Agent execution completed, "
+                        "but Git diff collection failed."
+                    ),
+                    "diffResult": diff_result,
+                    "taskUnderstanding": task_understanding,
+                    "changePlan": change_plan,
+                    "planValidation": plan_validation,
+                    "executionValidation": execution_validation,
+                    "agent": "genesys",
+                    "steps": steps_used,
+                    "modifiedFiles": modified_files,
+                    "buildAttempted": False,
+                    "buildPassed": False,
+                }
+
+            diff_summary = _summarize_diff(
+                diff_result.get(
+                    "diff",
+                    "",
+                )
+            )
+
+            diff_classification = _classify_diff_changes(
+                diff_result.get(
+                    "diff",
+                    "",
+                )
+            )
+
+            print(
+                "🧭 Diff classification:"
+            )
+
+            print(
+                json.dumps(
+                    diff_classification,
+                    indent=2,
+                    ensure_ascii=False,
+                )
+            )
+
+            print(
+                "📊 Diff summary:"
+            )
+
+            print(
+                json.dumps(
+                    diff_summary,
+                    indent=2,
+                    ensure_ascii=False,
+                )
+            )
+
+            diff_validation = _validate_diff(
+                diff_summary,
+                change_plan,
+                diff_classification,
+            )
+
+            print(
+                "🔍 Diff validation:"
+            )
+
+            print(
+                json.dumps(
+                    diff_validation,
+                    indent=2,
+                    ensure_ascii=False,
+                )
+            )
+
+            if not diff_validation["valid"]:
+                print(
+                    "❌ DIFF VALIDATION FAILED:"
+                )
+
+                return {
+                    "status": "error",
+                    "message": (
+                        "Actual Git diff failed "
+                        "change plan validation."
+                    ),
+                    "diffSummary": diff_summary,
+                    "diffValidation": diff_validation,
+                    "taskUnderstanding": task_understanding,
+                    "changePlan": change_plan,
+                    "planValidation": plan_validation,
+                    "executionValidation": execution_validation,
+                    "agent": "genesys",
+                    "steps": steps_used,
+                    "modifiedFiles": modified_files,
+                    "buildAttempted": False,
+                    "buildPassed": False,
+                }
+
+            print(
+                "✅ DIFF VALIDATION PASSED"
+            )
+
             print(
                 "🏗️ Running mandatory build..."
             )
 
-            build_result = (
-                execute_direct_tool(
-                    "run_build",
-                    project_id,
-                )
-            )
-
-            steps.append(
-                {
-                    "tool": "run_build",
-                    "status": (
-                        "success"
-                        if build_result.get(
-                            "success"
-                        ) is True
-                        else "error"
-                    ),
-                    "result": build_result,
-                }
+            print(
+                "🔧 TOOL: run_build"
             )
 
             build_attempted = True
 
-            append_direct_result(
-                messages,
-                "BUILD",
-                build_result,
+            try:
+                build_result = (
+                    workspace.run_build()
+                )
+
+            except Exception as exc:
+                build_result = {
+                    "status": "error",
+                    "error": str(exc),
+                }
+
+            print(
+                "🏗️ BUILD RESULT:"
             )
 
-            if build_result.get(
-                "success"
-            ) is True:
+            print(
+                _tool_result_text(
+                    build_result
+                )
+            )
+
+            build_status = _result_status(
+                build_result
+            )
+
+            # ------------------------------------------------
+            # BUILD SUCCESS
+            # ------------------------------------------------
+
+            if build_status == "success":
 
                 build_passed = True
                 changed_since_build = False
@@ -1204,492 +2424,1221 @@ def run_agent(
                     "🏗️ BUILD PASSED"
                 )
 
+                validation = _validate_recovery(  
+                    recovery_failure_type,
+                    build_result,
+                )
+
+                recovery_report = _build_recovery_report(
+                    attempted=True,
+                    recovery_attempts=recovery_attempts,
+                    failure={
+                        "failureType": recovery_failure_type,
+                    },
+                    strategy=recovery_strategy,
+                    validation=validation,
+                    limits=_build_recovery_limits(
+                        recovery_attempts,
+                        max_recovery_attempts,
+                    ),
+                )
+
+                print(
+                    "♻️ Recovery validation:"
+                )
+                print(
+                    validation
+                )
+
+                recovery_failure_type = None
+                recovery_strategy = None    
+
+            # ------------------------------------------------
+            # BUILD FAILURE / SELF-HEALING
+            # ------------------------------------------------
+
             else:
 
                 build_passed = False
-                changed_since_build = False
 
                 print(
                     "❌ BUILD FAILED"
                 )
 
-                # ------------------------------------------------
-                # The next model turn becomes a repair turn.
-                # ------------------------------------------------
+                failure = _classify_failure(
+                    build_result,
+                    "mandatory build",
+                )
+
+                strategy = (
+                    _build_recovery_strategy(
+                        failure
+                    )
+                )
+
+                limits = (
+                    _build_recovery_limits(
+                        recovery_attempts=recovery_attempts,
+                        max_recovery_attempts=max_recovery_attempts,
+                    )
+                )
+
+                if not _can_attempt_recovery(
+                    recovery_attempts=recovery_attempts,
+                    max_recovery_attempts=max_recovery_attempts,
+                    strategy=strategy,
+                ):
+
+                    recovery_report = (
+                        _build_recovery_report(
+                            attempted=False,
+                            recovery_attempts=recovery_attempts,
+                            failure=failure,
+                            strategy=strategy,
+                            limits=limits,
+                        )
+                    )
+
+                    return {
+                        "status": "error",
+                        "message": (
+                            "Build failed and recovery "
+                            "attempts are exhausted."
+                        ),
+                        "recovery": recovery_report,
+                        "buildResult": build_result,
+                    }
+
+                recovery_attempts += 1
+
+                recovery_failure_type = failure.get(
+                    "failureType",
+                    "unknown",
+                )
+
+                recovery_strategy = strategy
+
+                recovery_context = (
+                    _build_recovery_context(
+                        failure=failure,
+                        strategy=strategy,
+                        task_understanding=task_understanding,
+                        change_plan=change_plan,
+                        failure_result=build_result,
+                    )
+                )
+
+                last_recovery_prompt = (
+                    _build_recovery_prompt(
+                        recovery_context
+                    )
+                )
+                recovery_waiting_for_model = True
+
+                recovery_report = (
+                    _build_recovery_report(
+                        attempted=True,
+                        recovery_attempts=recovery_attempts,
+                        failure=failure,
+                        strategy=strategy,
+                        limits=_build_recovery_limits(
+                            recovery_attempts,
+                            max_recovery_attempts,
+                        ),
+                    )
+                )
+
+                print(
+                    "♻️ Recovery prepared:"
+                )
+
+                print(
+                    json.dumps(
+                        recovery_report,
+                        indent=2,
+                        ensure_ascii=False,
+                    )
+                )
+
+                print(
+                    "\n🛠️ Recovery Prompt:\n"
+                )
+
+                print(
+                    last_recovery_prompt
+                )
+
+                # --------------------------------------------
+                # MAX REPAIR ATTEMPTS REACHED
+                # --------------------------------------------
+
+                if (
+                    repair_attempts
+                    >= MAX_REPAIR_ATTEMPTS
+                ):
+
+                    print(
+                        "❌ MAX SELF-HEALING "
+                        "ATTEMPTS REACHED"
+                    )
+
+                    return {
+                        "status": "error",
+                        "message": (
+                            "Build failed after maximum "
+                            "self-healing attempts."
+                        ),
+                        "text": (
+                            last_answer
+                            or (
+                                "Build could not be "
+                                "repaired."
+                            )
+                        ),
+                        "agent": "genesys",
+                        "provider": PROVIDER_NAME,
+                        "model": (
+                            GEMINI_MODEL
+                            if PROVIDER_NAME == "gemini"
+                            else MODEL
+                        ),
+                        "steps": steps_used,
+                        "modifiedFiles": modified_files,
+                        "buildAttempted": build_attempted,
+                        "buildPassed": build_passed,
+                        "previewStarted": preview_started,
+                        "browserVerified": browser_verified,
+                        "previewUrl": preview_url,
+                        "errorType": "build",
+                        "repairAttempts": repair_attempts,
+                        "maxRepairAttempts": (
+                            MAX_REPAIR_ATTEMPTS
+                        ),
+                        "selfHealing": {
+                            "attempted": (
+                                self_healing_attempted
+                            ),
+                            "attempts": (
+                                repair_attempts
+                            ),
+                            "maxAttempts": (
+                                MAX_REPAIR_ATTEMPTS
+                            ),
+                            "recovered": False,
+                            "failureType": (
+                                last_failure_type
+                            ),
+                        },
+                    }
+
+                # --------------------------------------------
+                # SEND BUILD FAILURE TO MODEL
+                # --------------------------------------------
 
                 messages.append(
                     {
                         "role": "user",
                         "content": (
-                            "The latest production build FAILED. "
-                            "Repair the project using the actual "
-                            "build output above. Read the relevant "
-                            "file(s) and use write_file to correct "
-                            "the problem. Do not finish until you "
-                            "have made the repair."
+                            "The mandatory build failed.\n\n"
+                            f"SELF-HEALING ATTEMPT: "
+                            f"{repair_attempts}/"
+                            f"{MAX_REPAIR_ATTEMPTS}\n\n"
+                            "FAILURE TYPE: BUILD\n\n"
+                            "BUILD RESULT:\n"
+                            + _tool_result_text(
+                                build_result
+                            )
+                            + "\n\n"
+                            "Inspect the build error and "
+                            "repair the project. After "
+                            "repairing the files, the "
+                            "orchestrator will automatically "
+                            "rebuild the application."
                         ),
                     }
                 )
 
                 continue
 
-        # ====================================================
-        # MANDATORY PREVIEW
-        # ====================================================
+        # ----------------------------------------------------
+        # START PREVIEW AFTER SUCCESSFUL BUILD
+        # ----------------------------------------------------
 
         if (
-            build_passed
-            and modified_files
+            build_attempted
+            and build_passed
             and not preview_started
         ):
+
             print(
                 "🌐 Starting mandatory application preview..."
             )
 
-            preview_result = (
-                execute_direct_tool(
-                    "start_preview",
-                    project_id,
-                )
+            print(
+                "🔧 TOOL: start_preview"
             )
 
-            steps.append(
-                {
-                    "tool": "start_preview",
-                    "status": (
-                        "success"
-                        if preview_result.get(
-                            "status"
-                        ) == "success"
-                        else "error"
-                    ),
-                    "result": preview_result,
+            try:
+
+                preview_result = (
+                    workspace.start_preview()
+                )
+
+            except Exception as exc:
+
+                preview_result = {
+                    "status": "error",
+                    "error": str(exc),
                 }
+
+            print(
+                "🌐 PREVIEW RESULT:"
             )
 
-            append_direct_result(
-                messages,
-                "PREVIEW",
-                preview_result,
-            )
-
-            if (
-                preview_result.get(
-                    "status"
+            print(
+                _tool_result_text(
+                    preview_result
                 )
-                == "success"
-            ):
+            )
+
+            preview_status = _result_status(
+                preview_result
+            )
+
+            # ------------------------------------------------
+            # PREVIEW SUCCESS
+            # ------------------------------------------------
+
+            if preview_status == "success":
+
                 preview_started = True
+
+                preview_url = (
+                    preview_result.get("url")
+                    if isinstance(
+                        preview_result,
+                        dict,
+                    )
+                    else None
+                )
 
                 print(
                     "🌐 PREVIEW STARTED"
                 )
 
+            # ------------------------------------------------
+            # PREVIEW FAILURE / SELF-HEALING
+            # ------------------------------------------------
+
             else:
-                return {
-                    "status": "error",
-                    "answer": (
-                        "The project built successfully, but "
-                        "the application preview could not be started: "
-                        f"{preview_result.get('error') or preview_result.get('message') or 'Unknown error'}"
-                    ),
-                    "steps": steps,
-                    "modifiedFiles": modified_files,
-                    "buildAttempted": build_attempted,
-                    "buildPassed": build_passed,
-                    "projectId": project_id,
-                }
 
-            # ------------------------------------------------
-            # We have completed the actual work.
-            # Return without another Groq call.
-            # ------------------------------------------------
+                print(
+                    "❌ PREVIEW FAILED"
+                )
 
-            last_answer = (
-                last_answer
-                or "GeneSys completed the requested change."
-            )
+                repair_attempts += 1
+                self_healing_attempted = True
+                last_failure_type = "preview"
+
+                print(
+                    f"🔧 SELF-HEALING ATTEMPT "
+                    f"{repair_attempts}/"
+                    f"{MAX_REPAIR_ATTEMPTS}"
+                )
+
+                # --------------------------------------------
+                # MAX REPAIR ATTEMPTS REACHED
+                # --------------------------------------------
+
+                if (
+                    repair_attempts
+                    >= MAX_REPAIR_ATTEMPTS
+                ):
+
+                    print(
+                        "❌ MAX SELF-HEALING "
+                        "ATTEMPTS REACHED"
+                    )
+
+                    return {
+                        "status": "error",
+                        "message": (
+                            "Application preview failed "
+                            "after maximum self-healing "
+                            "attempts."
+                        ),
+                        "text": (
+                            last_answer
+                            or (
+                                "Application preview "
+                                "could not be started."
+                            )
+                        ),
+                        "agent": "genesys",
+                        "provider": PROVIDER_NAME,
+                        "model": (
+                            GEMINI_MODEL
+                            if PROVIDER_NAME == "gemini"
+                            else MODEL
+                        ),
+                        "steps": steps_used,
+                        "modifiedFiles": modified_files,
+                        "buildAttempted": build_attempted,
+                        "buildPassed": build_passed,
+                        "previewStarted": preview_started,
+                        "browserVerified": browser_verified,
+                        "previewUrl": preview_url,
+                        "errorType": "preview",
+                        "repairAttempts": repair_attempts,
+                        "maxRepairAttempts": (
+                            MAX_REPAIR_ATTEMPTS
+                        ),
+                        "selfHealing": {
+                            "attempted": (
+                                self_healing_attempted
+                            ),
+                            "attempts": (
+                                repair_attempts
+                            ),
+                            "maxAttempts": (
+                                MAX_REPAIR_ATTEMPTS
+                            ),
+                            "recovered": False,
+                            "failureType": (
+                                last_failure_type
+                            ),
+                        },
+                    }
+
+                # --------------------------------------------
+                # RESET PREVIEW STATE
+                # --------------------------------------------
+
+                preview_started = False
+                preview_url = None
+                browser_verified = False
+
+                try:
+                    stop_browser(project_id)
+                except Exception:
+                    pass
+
+                # --------------------------------------------
+                # SEND PREVIEW FAILURE TO MODEL
+                # --------------------------------------------
+
+                messages.append(
+                    {
+                        "role": "user",
+                        "content": (
+                            "The application build passed, "
+                            "but the application preview "
+                            "failed to start.\n\n"
+                            f"SELF-HEALING ATTEMPT: "
+                            f"{repair_attempts}/"
+                            f"{MAX_REPAIR_ATTEMPTS}\n\n"
+                            "FAILURE TYPE: PREVIEW\n\n"
+                            "PREVIEW RESULT:\n"
+                            + _tool_result_text(
+                                preview_result
+                            )
+                            + "\n\n"
+                            "Inspect the project and repair "
+                            "the application startup or "
+                            "runtime problem. After repairing "
+                            "the files, the orchestrator will "
+                            "rebuild and attempt the preview "
+                            "again."
+                        ),
+                    }
+                )
+
+                continue
+
+        # ----------------------------------------------------
+        # BROWSER VERIFICATION
+        # ----------------------------------------------------
+
+        if (
+            preview_started
+            and not browser_verified
+            and preview_url
+        ):
 
             print(
-                "🤖 AGENT RESULT: success"
+                "🧪 Running browser verification..."
+            )
+
+            screenshot_result = None
+            console_result = None
+
+            try:
+                print(
+                    "🔧 TOOL: browser_screenshot"
+                )
+
+                screenshot_result = execute_tool(
+                    "browser_screenshot",
+                    {},
+                    project_id=project_id,
+                )
+
+                print(
+                    "✅ TOOL COMPLETE: browser_screenshot"
+                )
+
+                print(
+                    "🔧 TOOL: browser_console"
+                )
+
+                console_result = execute_tool(
+                    "browser_console",
+                    {},
+                    project_id=project_id,
+                )
+
+                print(
+                    "✅ TOOL COMPLETE: browser_console"
+                )
+
+                runtime_errors = False
+
+                if isinstance(
+                    console_result,
+                    dict,
+                ):
+                    runtime_errors = bool(
+                        console_result.get(
+                            "hasRuntimeErrors",
+                            False,
+                        )
+                    )
+
+                if runtime_errors:
+
+                    page_errors = []
+                    console_errors = []
+
+                    if isinstance(
+                        console_result,
+                        dict,
+                    ):
+                        page_errors = (
+                            console_result.get(
+                                "pageErrors",
+                                [],
+                            )
+                        )
+
+                        console_errors = (
+                            console_result.get(
+                                "consoleErrors",
+                                [],
+                            )
+                        )
+
+                    raise RuntimeError(
+                        "Browser runtime errors detected.\n\n"
+                        "PAGE ERRORS:\n"
+                        + json.dumps(
+                            page_errors,
+                            indent=2,
+                            ensure_ascii=False,
+                        )
+                        + "\n\n"
+                        "CONSOLE ERRORS:\n"
+                        + json.dumps(
+                            console_errors,
+                            indent=2,
+                            ensure_ascii=False,
+                        )
+                    )
+
+                browser_verified = True
+                verification_complete = True
+
+                print(
+                    "🧪 BROWSER VERIFICATION PASSED"
+                )
+
+                messages.append(
+                    {
+                        "role": "user",
+                        "content": (
+                            "Browser verification "
+                            "completed successfully.\n\n"
+                            "SCREENSHOT RESULT:\n"
+                            + _tool_result_text(
+                                screenshot_result
+                            )
+                            + "\n\n"
+                            "CONSOLE RESULT:\n"
+                            + _tool_result_text(
+                                console_result
+                            )
+                        ),
+                    }
+                )
+
+                if verification_complete:
+
+                    _create_success_checkpoint()
+
+                print(
+                        "🤖 AGENT RESULT: success"
+                    )
+
+                return {
+                        "status": "success",
+                        "message": (
+                            "Agent completed the requested change "
+                            "and verification successfully."
+                        ),
+                        "text": (
+                            last_answer
+                            or "Agent completed the requested change."
+                        ),
+                        "agent": "genesys",
+                        "provider": PROVIDER_NAME,
+                        "model": (
+                            GEMINI_MODEL
+                            if PROVIDER_NAME == "gemini"
+                            else MODEL
+                        ),
+                        "steps": steps_used,
+                        "modifiedFiles": modified_files,
+                        "buildAttempted": build_attempted,
+                        "buildPassed": build_passed,
+                        "previewStarted": preview_started,
+                        "browserVerified": browser_verified,
+                        "previewUrl": preview_url,
+                        "checkpoint": checkpoint_result,
+                }
+
+            except Exception as exc:
+
+                repair_attempts += 1
+                self_healing_attempted = True
+                last_failure_type = (
+                    "browser_runtime"
+                )
+
+                browser_verified = False
+
+                print(
+                    "❌ BROWSER VERIFICATION FAILED:",
+                    exc,
+                )
+
+                print(
+                    f"🔧 SELF-HEALING ATTEMPT "
+                    f"{repair_attempts}/"
+                    f"{MAX_REPAIR_ATTEMPTS}"
+                )
+
+                # --------------------------------------------
+                # MAX REPAIR ATTEMPTS
+                # --------------------------------------------
+
+                if (
+                    repair_attempts
+                    >= MAX_REPAIR_ATTEMPTS
+                ):
+
+                    print(
+                        "❌ MAX SELF-HEALING "
+                        "ATTEMPTS REACHED"
+                    )
+
+                    return {
+                        "status": "error",
+                        "message": (
+                            "Browser verification failed "
+                            "after maximum self-healing "
+                            "attempts."
+                        ),
+                        "text": (
+                            last_answer
+                            or (
+                                "Browser verification "
+                                "could not be repaired."
+                            )
+                        ),
+                        "agent": "genesys",
+                        "provider": PROVIDER_NAME,
+                        "model": (
+                            GEMINI_MODEL
+                            if PROVIDER_NAME == "gemini"
+                            else MODEL
+                        ),
+                        "steps": steps_used,
+                        "modifiedFiles": modified_files,
+                        "buildAttempted": build_attempted,
+                        "buildPassed": build_passed,
+                        "previewStarted": preview_started,
+                        "browserVerified": browser_verified,
+                        "previewUrl": preview_url,
+                        "errorType": "browser_runtime",
+                        "repairAttempts": repair_attempts,
+                        "maxRepairAttempts": (
+                            MAX_REPAIR_ATTEMPTS
+                        ),
+                        "selfHealing": {
+                            "attempted": (
+                                self_healing_attempted
+                            ),
+                            "attempts": (
+                                repair_attempts
+                            ),
+                            "maxAttempts": (
+                                MAX_REPAIR_ATTEMPTS
+                            ),
+                            "recovered": False,
+                            "failureType": (
+                                last_failure_type
+                            ),
+                        },
+                    }
+
+                # --------------------------------------------
+                # RESET BROWSER / PREVIEW STATE
+                # --------------------------------------------
+
+                preview_started = False
+                preview_url = None
+                browser_verified = False
+
+                try:
+                    stop_browser(project_id)
+                except Exception:
+                    pass
+
+                # --------------------------------------------
+                # SEND FAILURE BACK TO MODEL
+                # --------------------------------------------
+
+                messages.append(
+                    {
+                        "role": "user",
+                        "content": (
+                            "Browser verification failed.\n\n"
+                            f"SELF-HEALING ATTEMPT: "
+                            f"{repair_attempts}/"
+                            f"{MAX_REPAIR_ATTEMPTS}\n\n"
+                            "FAILURE TYPE: "
+                            "BROWSER_RUNTIME\n\n"
+                            "ERROR:\n"
+                            + str(exc)
+                            + "\n\n"
+                            "SCREENSHOT RESULT:\n"
+                            + _tool_result_text(
+                                screenshot_result
+                            )
+                            + "\n\n"
+                            "CONSOLE RESULT:\n"
+                            + _tool_result_text(
+                                console_result
+                            )
+                            + "\n\n"
+                            "Inspect the application and "
+                            "repair the runtime or UI problem. "
+                            "After repairing the files, the "
+                            "orchestrator will automatically "
+                            "rebuild, restart the preview, "
+                            "and run browser verification again."
+                        ),
+                    }
+                )
+
+                continue
+
+        # ----------------------------------------------------
+        # SUCCESS CONDITION
+        # ----------------------------------------------------
+
+        if (
+            inspected
+            and build_attempted
+            and build_passed
+            and preview_started
+            and browser_verified
+        ):
+
+            _create_success_checkpoint()
+
+            print(
+                 "🤖 AGENT RESULT: success"
             )
 
             return {
                 "status": "success",
-                "answer": last_answer,
-                "steps": steps,
+                "message": (
+                    "Task completed successfully."
+                ),
+                "text": (
+                    last_answer
+                    or "Task completed successfully."
+                ),
+                "agent": "genesys",
+                "provider": PROVIDER_NAME,
+                "model": (
+                    GEMINI_MODEL
+                    if PROVIDER_NAME == "gemini"
+                    else MODEL
+                ),
+                "steps": steps_used,
                 "modifiedFiles": modified_files,
                 "buildAttempted": build_attempted,
                 "buildPassed": build_passed,
-                "projectId": project_id,
+                "previewStarted": preview_started,
+                "browserVerified": browser_verified,
+                "previewUrl": preview_url,
+                "checkpoint": checkpoint_result,
             }
 
-        # ====================================================
-        # CHOOSE MODEL TOOL SET
-        # ====================================================
-        #
-        # The model is only allowed to inspect/edit here.
-        # Infrastructure actions are handled by Python.
-        #
+        # ----------------------------------------------------
+        # M7 RECOVERY PROMPT INJECTION
+        # ----------------------------------------------------
 
-        if inspected:
+        if last_recovery_prompt:
 
-            allowed_tools = [
-                TOOL_BY_NAME["read_file"],
-                TOOL_BY_NAME["write_file"],
-            ]
+            print(
+                "♻️ Injecting recovery prompt..."
+            )
 
-        else:
-            allowed_tools = [
-                TOOL_BY_NAME["list_files"]
-            ]
+            messages.append(
+                {
+                    "role": "system",
+                    "content": (
+                        last_recovery_prompt
+                    ),
+                }
+            )
+
+            last_recovery_prompt = None
 
         # ----------------------------------------------------
-        # Call Groq
+        # ASK AI PROVIDER FOR NEXT ACTION
         # ----------------------------------------------------
 
         try:
-            response = (
-                call_groq_with_retry(
-                    client,
-                    messages,
-                    allowed_tools,
-                )
+
+            response = provider.generate(
+                messages,
+                TOOLS,
             )
 
-        except Exception as error:
+        except Exception as exc:
+
+            error_text = str(exc)
+
             print(
-                f"❌ AGENT ERROR: {error}"
+                "❌ AI REQUEST FAILED:"
+            )
+            print(
+                error_text
             )
 
-            return {
-                "status": "error",
-                "answer": (
-                    "GeneSys encountered an agent error: "
-                    f"{error}"
-                ),
-                "steps": steps,
-                "modifiedFiles": modified_files,
-                "buildAttempted": build_attempted,
-                "buildPassed": build_passed,
-                "projectId": project_id,
-            }
+            # ------------------------------------------------
+            # PROVIDER FALLBACK: GROQ -> GEMINI
+            # ------------------------------------------------
 
-        choice = (
-            response.choices[0]
-        )
+            if PROVIDER_NAME == "groq":
 
-        message = choice.message
+                print(
+                    "⚠️ Groq failed. Falling back to Gemini..."
+                )
+
+                try:
+
+                    fallback_provider = GeminiProvider(
+                        model=GEMINI_MODEL,
+                    )
+
+                    response = fallback_provider.generate(
+                        messages,
+                        TOOLS,
+                    )
+
+                    print(
+                        "✅ Gemini fallback succeeded."
+                    )
+
+                except Exception as fallback_exc:
+
+                    fallback_error = str(
+                        fallback_exc
+                    )
+
+                    print(
+                        "❌ Gemini fallback also failed:"
+                    )
+                    print(
+                        fallback_error
+                    )
+
+                    return {
+                        "status": "error",
+                        "message": (
+                            "AI provider request failed."
+                        ),
+                        "text": (
+                            f"Groq failed: {error_text}\n"
+                            f"Gemini fallback failed: "
+                            f"{fallback_error}"
+                        ),
+                        "agent": "genesys",
+                        "provider": PROVIDER_NAME,
+                        "model": (
+                            GEMINI_MODEL
+                            if PROVIDER_NAME == "gemini"
+                            else MODEL
+                        ),
+                        "steps": steps_used,
+                        "modifiedFiles": modified_files,
+                        "buildAttempted": build_attempted,
+                        "buildPassed": build_passed,
+                        "previewStarted": preview_started,
+                        "browserVerified": browser_verified,
+                        "errorType": "ai_request",
+                    }
+
+            else:
+
+                # Existing behavior for non-Groq providers
+                return {
+                    "status": "error",
+                    "message": (
+                        "AI provider request failed."
+                    ),
+                    "text": error_text,
+                    "agent": "genesys",
+                    "provider": PROVIDER_NAME,
+                    "model": (
+                        GEMINI_MODEL
+                        if PROVIDER_NAME == "gemini"
+                        else MODEL
+                    ),
+                    "steps": steps_used,
+                    "modifiedFiles": modified_files,
+                    "buildAttempted": build_attempted,
+                    "buildPassed": build_passed,
+                    "previewStarted": preview_started,
+                    "browserVerified": browser_verified,
+                    "errorType": "ai_request",
+                }
+
+        # ----------------------------------------------------
+        # NORMALIZED RESPONSE
+        # ----------------------------------------------------
 
         last_answer = (
-            message.content
-            if message.content
+            response.text
+            if response.text
             else last_answer
         )
 
         tool_calls = (
-            getattr(
-                message,
-                "tool_calls",
-                None,
-            )
+            response.tool_calls
             or []
         )
 
-        # ====================================================
-        # MODEL TOOL CALLS
-        # ====================================================
+        # ----------------------------------------------------
+        # NO TOOL CALL
+        # ----------------------------------------------------
 
-        if tool_calls:
+        if not tool_calls:
 
-            assistant_message = (
-                build_assistant_tool_message(
-                    message
+            # If the application has already passed all
+            # mandatory checks, return success.
+            if (
+                build_attempted
+                and build_passed
+                and preview_started
+                and browser_verified
+            ):
+
+                _create_success_checkpoint()
+
+                print(
+                    "🤖 AGENT RESULT: success"
                 )
-            )
 
+                return {
+                    "status": "success",
+                    "message": (
+                        "Task completed successfully."
+                    ),
+                    "text": (
+                        last_answer
+                        or "Task completed successfully."
+                    ),
+                    "agent": "genesys",
+                    "provider": PROVIDER_NAME,
+                    "model": (
+                        GEMINI_MODEL
+                        if PROVIDER_NAME == "gemini"
+                        else MODEL
+                    ),
+                    "steps": steps_used,
+                    "modifiedFiles": modified_files,
+                    "buildAttempted": build_attempted,
+                    "buildPassed": build_passed,
+                    "previewStarted": preview_started,
+                    "browserVerified": browser_verified,
+                    "previewUrl": preview_url,
+                    "checkpoint": checkpoint_result,
+                }
+
+            # Otherwise the model stopped before completing
+            # the required workflow.
             messages.append(
-                assistant_message
+                {
+                    "role": "user",
+                    "content": (
+                        "Continue the task. "
+                        "You have not yet completed the "
+                        "required implementation and "
+                        "verification workflow."
+                    ),
+                }
             )
 
-            wrote_file_this_turn = False
+            continue
 
-            for tool_call in tool_calls:
+        # ----------------------------------------------------
+        # ASSISTANT TOOL MESSAGE
+        # ----------------------------------------------------
 
-                tool_name = (
-                    tool_call.function.name
+        assistant_message = (
+            _build_assistant_tool_message(
+                response
+            )
+        )
+
+        messages.append(
+            assistant_message
+        )
+
+        # ----------------------------------------------------
+        # EXECUTE TOOL CALLS
+        # ----------------------------------------------------
+
+        for tool_call in tool_calls:
+
+            tool_name = tool_call.name
+
+            arguments = (
+                tool_call.arguments
+                if isinstance(
+                    tool_call.arguments,
+                    dict,
+                )
+                else {}
+            )
+
+            # ----------------------------------------------
+            # REPETITION DETECTION
+            # ----------------------------------------------
+
+            if tool_name == last_tool_name:
+                repeated_tool_count += 1
+            else:
+                last_tool_name = tool_name
+                repeated_tool_count = 1
+
+            if repeated_tool_count >= 3:
+
+                messages.append(
+                    {
+                        "role": "user",
+                        "content": (
+                            f"You have called "
+                            f"{tool_name} repeatedly "
+                            f"({repeated_tool_count} times). "
+                            "Do not repeatedly inspect the "
+                            "same information. "
+                            "Use what you already learned "
+                            "and continue implementing or "
+                            "verifying the task."
+                        ),
+                    }
                 )
 
-                raw_arguments = (
-                    tool_call.function.arguments
-                    or "{}"
-                )
+                       # ----------------------------------------------
+            # LIFECYCLE TOOLS ARE ORCHESTRATOR CONTROLLED
+            # ----------------------------------------------
+
+            if tool_name in {
+                "run_build",
+                "start_preview",
+                "stop_preview",
+            }:
+
+                result = {
+                    "status": "error",
+                    "error": (
+                        f"{tool_name} is controlled by "
+                        "the GeneSys orchestrator and "
+                        "must not be called by the model."
+                    ),
+                }
+
+            else:
 
                 print(
                     f"🔧 TOOL: {tool_name}"
                 )
 
-                # ------------------------------------------------
-                # Only read_file/write_file are expected here.
-                # ------------------------------------------------
+                try:
 
-                if tool_name not in {
-                    "read_file",
-                    "write_file",
-                }:
-                    result = {
-                        "status": "error",
-                        "error": (
-                            f"Tool '{tool_name}' is not allowed "
-                            "during the coding phase."
-                        ),
-                    }
-
-                    print(
-                        f"❌ TOOL BLOCKED: "
-                        f"{tool_name}"
+                    result = _execute_agent_tool(
+                        tool_name,
+                        arguments,
+                        project_id,
                     )
 
-                else:
+                    print(
+                        "✅ TOOL COMPLETE:",
+                        tool_name,
+                    )
 
-                    # --------------------------------------------
-                    # Parse arguments
-                    # --------------------------------------------
+                    if recovery_waiting_for_model:
+                        recovery_waiting_for_model = False
 
-                    try:
-                        arguments = json.loads(
-                            raw_arguments
-                        )
+                except Exception as exc:
 
-                        if not isinstance(
-                            arguments,
-                            dict,
-                        ):
-                            raise ValueError(
-                                "Tool arguments must be a JSON object."
-                            )
+                    print(
+                        "❌ TOOL FAILED:",
+                        tool_name,
+                        exc,
+                    )
 
-                    except Exception as error:
-                        result = {
-                            "status": "error",
-                            "error": (
-                                f"Invalid tool arguments: "
-                                f"{error}"
-                            ),
-                        }
-
-                        print(
-                            "❌ TOOL ARGUMENT ERROR: "
-                            f"{error}"
-                        )
-
-                    else:
-
-                        # ----------------------------------------
-                        # Repetition tracking
-                        # ----------------------------------------
-
-                        if (
-                            tool_name
-                            == last_tool_name
-                        ):
-                            consecutive_same_tool_calls += 1
-                        else:
-                            consecutive_same_tool_calls = 1
-
-                        last_tool_name = tool_name
-
-                        # ----------------------------------------
-                        # Execute
-                        # ----------------------------------------
-
-                        try:
-                            result = execute_tool(
-                                tool_name,
-                                arguments,
-                                project_id=project_id,
-                            )
-
-                            if not isinstance(
-                                result,
-                                dict,
-                            ):
-                                result = {
-                                    "status": "success",
-                                    "result": result,
-                                }
-
-                            succeeded = (
-                                result.get(
-                                    "status"
-                                )
-                                != "error"
-                            )
-
-                            # ------------------------------------
-                            # WRITE FILE
-                            # ------------------------------------
-
-                            if (
-                                tool_name
-                                == "write_file"
-                                and succeeded
-                            ):
-                                wrote_file_this_turn = True
-                                changed_since_build = True
-
-                                file_name = (
-                                    result.get(
-                                        "file"
-                                    )
-                                )
-
-                                if (
-                                    file_name
-                                    and file_name
-                                    not in modified_files
-                                ):
-                                    modified_files.append(
-                                        file_name
-                                    )
-
-                            print(
-                                f"✅ TOOL COMPLETE: "
-                                f"{tool_name}"
-                            )
-
-                        except Exception as error:
-                            result = {
-                                "status": "error",
-                                "error": str(error),
-                            }
-
-                            print(
-                                f"❌ TOOL ERROR: "
-                                f"{tool_name}: "
-                                f"{error}"
-                            )
-
-                # ------------------------------------------------
-                # Tell model what happened.
-                # ------------------------------------------------
-
-                steps.append(
-                    {
+                    result = {
+                        "status": "error",
+                        "error": str(exc),
                         "tool": tool_name,
-                        "status": (
-                            "success"
-                            if result.get(
-                                "status"
-                            ) != "error"
-                            else "error"
-                        ),
-                        "result": result,
                     }
+
+            # ----------------------------------------------
+            # TRACK MODIFIED FILES
+            # ----------------------------------------------
+
+            if tool_name in {
+                "write_file",
+                "create_file",
+                "edit_file",
+            }:
+
+                changed_since_build = True
+
+                # Any file change invalidates the previous
+                # build, preview, and browser verification.
+                build_passed = False
+                preview_started = False
+                preview_url = None
+                browser_verified = False
+
+                # Force a fresh Playwright session after
+                # a repair so stale pages and console errors
+                # cannot affect the next verification cycle.
+                try:
+                    stop_browser(project_id)
+                except Exception:
+                    pass
+
+                file_path = (
+                    arguments.get("path")
+                    or arguments.get("file_path")
+                    or arguments.get("filename")
                 )
 
-                messages.append(
-                    {
-                        "role": "tool",
-                        "tool_call_id": (
-                            tool_call.id
-                        ),
-                        "name": tool_name,
-                        "content": json.dumps(
-                            result,
-                            ensure_ascii=False,
-                        ),
-                    }
+            # ----------------------------------------------
+            # TRACK MODIFIED FILES
+            # ----------------------------------------------
+
+            if tool_name in {
+                "write_file",
+                "create_file",
+                "edit_file",
+            }:
+
+                changed_since_build = True
+
+                file_path = (
+                    arguments.get("path")
+                    or arguments.get("file_path")
+                    or arguments.get("filename")
                 )
 
-            # ----------------------------------------------------
-            # If model wrote something, next loop MUST build.
-            # ----------------------------------------------------
+                if file_path:
+                    if (
+                        file_path
+                        not in modified_files
+                    ):
+                        modified_files.append(
+                            file_path
+                        )
 
-            if wrote_file_this_turn:
-                print(
-                    "📝 Files changed. "
-                    "Next action will be the mandatory build."
-                )
+                # If a tool reports changed files,
+                # collect those too.
+                if isinstance(
+                    result,
+                    dict,
+                ):
 
-                continue
+                    changed = (
+                        result.get(
+                            "modifiedFiles"
+                        )
+                        or result.get(
+                            "modified_files"
+                        )
+                        or []
+                    )
 
-            # ----------------------------------------------------
-            # Detect repetitive inspection.
-            # ----------------------------------------------------
+                    if isinstance(
+                        changed,
+                        list,
+                    ):
+                        for path in changed:
+                            if (
+                                path
+                                not in modified_files
+                            ):
+                                modified_files.append(
+                                    path
+                                )
 
-            if (
-                consecutive_same_tool_calls
-                >= 3
-            ):
-                messages.append(
-                    {
-                        "role": "user",
-                        "content": (
-                            "You have repeated the same tool "
-                            "multiple times without making progress. "
-                            "Stop rereading the same file. "
-                            "Use the information already available "
-                            "and make the requested change with "
-                            "write_file."
-                        ),
-                    }
-                )
+            # ----------------------------------------------
+            # ADD TOOL RESULT TO HISTORY
+            # ----------------------------------------------
 
-            continue
-
-        # ====================================================
-        # MODEL RETURNED TEXT WITHOUT A TOOL CALL
-        # ====================================================
-
-        # ----------------------------------------------------
-        # If changes already exist, build will happen at the
-        # beginning of the next loop.
-        # ----------------------------------------------------
-
-        if changed_since_build:
-            print(
-                "⚠️ Model returned text after changes. "
-                "The mandatory build will run next."
-            )
-
-            continue
-
-        # ----------------------------------------------------
-        # Repair phase
-        #
-        # If the model has not called write_file after a failed
-        # build, force it back into the repair workflow.
-        # ----------------------------------------------------
-
-        if (
-            build_attempted
-            and not build_passed
-        ):
             messages.append(
                 {
-                    "role": "assistant",
-                    "content": last_answer,
-                }
-            )
-
-            messages.append(
-                {
-                    "role": "user",
-                    "content": (
-                        "The build is still failing and no repair "
-                        "has been written yet. You MUST inspect "
-                        "the relevant file and use write_file to "
-                        "repair the build. Do not finish with text."
+                    "role": "tool",
+                    "tool_call_id": tool_call.id,
+                    "name": tool_name,
+                    "content": _tool_result_text(
+                        result
                     ),
                 }
             )
 
-            continue
+        # ----------------------------------------------------
+        # COMPACT AFTER TOOL EXECUTION
+        # ----------------------------------------------------
 
-        # ----------------------------------------------------
-        # No modifications required.
-        # ----------------------------------------------------
+        messages = _compact_messages(
+            messages
+        )
+
+    # ========================================================
+    # VERIFICATION COMPLETE
+    # ========================================================
+
+    if verification_complete:
+        _create_success_checkpoint()
 
         print(
             "🤖 AGENT RESULT: success"
@@ -1697,35 +3646,60 @@ def run_agent(
 
         return {
             "status": "success",
-            "answer": (
-                last_answer
-                or "GeneSys completed the request."
+            "message": (
+                "Agent completed the requested change "
+                "and verification successfully."
             ),
-            "steps": steps,
+            "text": (
+                last_answer
+                or "Agent completed the requested change."
+            ),
+            "agent": "genesys",
+            "provider": PROVIDER_NAME,
+            "model": (
+                GEMINI_MODEL
+                if PROVIDER_NAME == "gemini"
+                else MODEL
+            ),
+            "steps": steps_used,
             "modifiedFiles": modified_files,
             "buildAttempted": build_attempted,
             "buildPassed": build_passed,
-            "projectId": project_id,
+            "previewStarted": preview_started,
+            "browserVerified": browser_verified,
+            "previewUrl": preview_url,
         }
 
     # ========================================================
-    # MAX STEPS
+    # MAX STEPS REACHED
     # ========================================================
 
     print(
-        "⚠️ AGENT STOPPED: "
-        "maximum step limit reached."
+        "🤖 AGENT RESULT: max_steps_reached"
     )
 
     return {
-        "status": "stopped",
-        "answer": (
-            "GeneSys reached the maximum number of "
-            "agent steps before completing the request."
+        "status": "error",
+        "message": (
+            "Agent reached the maximum number "
+            "of steps before completing verification."
         ),
-        "steps": steps,
+        "text": (
+            last_answer
+            or "Agent reached the maximum step limit."
+        ),
+        "agent": "genesys",
+        "provider": PROVIDER_NAME,
+        "model": (
+            GEMINI_MODEL
+            if PROVIDER_NAME == "gemini"
+            else MODEL
+        ),
+        "steps": steps_used,
         "modifiedFiles": modified_files,
         "buildAttempted": build_attempted,
         "buildPassed": build_passed,
-        "projectId": project_id,
+        "previewStarted": preview_started,
+        "browserVerified": browser_verified,
+        "previewUrl": preview_url,
     }
