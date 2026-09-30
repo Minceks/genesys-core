@@ -5,13 +5,12 @@ import os
 import time
 from typing import Any
 
-from dotenv import load_dotenv
-
 from .ai_provider import (
     AIResponse,
     GeminiProvider,
     GroqProvider,
 )
+from .config import load_settings
 from .daytona_workspace import get_workspace
 from .project_intelligence import (
     scan_project,
@@ -26,24 +25,16 @@ from .browser import (
 from .tools import TOOLS, execute_tool
 
 
-load_dotenv()
-
 # ============================================================
 # CONFIGURATION
 # ============================================================
 
-MODEL = os.getenv("GENESYS_MODEL", "openai/gpt-oss-120b")
-GEMINI_MODEL = os.getenv("GENESYS_GEMINI_MODEL", "gemini-3.8-flash")
+settings = load_settings()
 
-PROVIDER_NAME = os.getenv(
-    "GENESYS_PROVIDER",
-    "groq",
-).strip().lower()
-
-FALLBACK_PROVIDER = os.getenv(
-    "GENESYS_FALLBACK_PROVIDER",
-    "gemini",
-).strip().lower()
+MODEL = settings.genesys_model
+GEMINI_MODEL = settings.genesys_gemini_model
+PROVIDER_NAME = settings.provider_name
+FALLBACK_PROVIDER = settings.fallback_provider
 
 MAX_STEPS = 18
 
@@ -438,10 +429,7 @@ def get_provider():
         gemini
     """
 
-    provider_name = os.getenv(
-        "GENESYS_PROVIDER",
-        "groq",
-    ).strip().lower()
+    provider_name = settings.provider_name
 
     if provider_name == "groq":
         return GroqProvider(
@@ -1823,9 +1811,14 @@ def run_agent(
     ) if checkpoint_list.get("status") == "success" else []
 
     if checkpoints:
-        recovery_checkpoint_id = checkpoints[0].get(
-        "checkpointId"
-    )
+        first_checkpoint = checkpoints[0]
+
+        if isinstance(first_checkpoint, dict):
+            recovery_checkpoint_id = first_checkpoint.get(
+                "checkpointId"
+            )
+        elif isinstance(first_checkpoint, str):
+            recovery_checkpoint_id = first_checkpoint
 
     messages: list[dict[str, Any]] = [
         {
@@ -1857,7 +1850,6 @@ def run_agent(
     recovery_strategy: dict[str, Any] | None = None
     recovery_waiting_for_model = False
     checkpoint_result: dict[str, Any] | None = None
-    recovery_checkpoint_id: str | None = None
 
     def _create_success_checkpoint() -> dict[str, Any]:
         nonlocal checkpoint_result
@@ -2500,6 +2492,42 @@ def run_agent(
                         "buildResult": build_result,
                     }
 
+                should_rollback = (
+                    _should_rollback_for_recovery(
+                        strategy=strategy,
+                        recovery_checkpoint_id=recovery_checkpoint_id,
+                    )
+                )
+
+                rollback_result = None
+
+                if should_rollback:
+                    rollback_result = (
+                        workspace.rollback_to_checkpoint(
+                            recovery_checkpoint_id
+                        )
+                    )
+
+                    if rollback_result.get("status") != "success":
+                        return {
+                            "status": "error",
+                            "message": (
+                                "Recovery could not start because "
+                                "rollback to the known-good checkpoint "
+                                "failed."
+                            ),
+                            "recovery": recovery_report,
+                            "buildResult": build_result,
+                            "rollback": rollback_result,
+                        }
+
+                    print(
+                        "↩️ Rolled back to recovery checkpoint:"
+                    )
+                    print(
+                        recovery_checkpoint_id
+                    )
+
                 recovery_attempts += 1
 
                 recovery_failure_type = failure.get(
@@ -2538,6 +2566,16 @@ def run_agent(
                         ),
                     )
                 )
+                if recovery_report["exhausted"]:
+                        return {
+                            "status": "error",
+                            "message": (
+                                "Build failed and recovery "
+                                "attempts are exhausted."
+                            ),
+                            "recovery": recovery_report,
+                            "buildResult": build_result,
+                        }
 
                 print(
                     "♻️ Recovery prepared:"

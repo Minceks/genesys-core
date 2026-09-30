@@ -1,4 +1,5 @@
 from typing import Any
+import threading
 
 from playwright.sync_api import (
     Browser,
@@ -31,6 +32,12 @@ class BrowserSession:
 
     The application itself runs inside Daytona.
     Playwright connects to the signed external preview URL.
+
+    Browser sessions are recoverable:
+    if Playwright/page/browser dies, GeneSys recreates the session.
+
+    Playwright's sync API is thread-sensitive, so the session is
+    also recreated if it is accessed from a different thread.
     """
 
     def __init__(
@@ -50,14 +57,70 @@ class BrowserSession:
 
         self.console_messages: list[dict[str, Any]] = []
 
+        # Playwright sync objects are thread-sensitive.
+        self.owner_thread_id: int | None = None
+
+    # ========================================================
+    # SESSION HEALTH
+    # ========================================================
+
+    def _is_alive(self) -> bool:
+        """
+        Check whether the current Playwright session is still usable.
+        """
+
+        if (
+            self.playwright is None
+            or self.browser is None
+            or self.context is None
+            or self.page is None
+        ):
+            return False
+
+        # Playwright sync API objects must stay on the thread
+        # where they were created.
+        current_thread_id = threading.get_ident()
+
+        if (
+            self.owner_thread_id is not None
+            and self.owner_thread_id != current_thread_id
+        ):
+            return False
+
+        try:
+            if not self.browser.is_connected():
+                return False
+
+            if self.page.is_closed():
+                return False
+
+            # Lightweight operation to catch dead connections.
+            _ = self.page.url
+
+            return True
+
+        except Exception:
+            return False
+
     # ========================================================
     # START
     # ========================================================
 
     def start(self) -> Page:
+        """
+        Start or reuse the browser session and navigate to the
+        current Daytona preview URL.
+        """
 
-        if self.page is not None:
-            return self.page
+        current_thread_id = threading.get_ident()
+
+        # Reuse a healthy session on the same thread.
+        if self._is_alive():
+            return self.page  # type: ignore[return-value]
+
+        # A stale, dead, or thread-owned-by-another-thread session
+        # must be destroyed before recreating it.
+        self._cleanup_session()
 
         workspace = get_workspace(
             self.project_id
@@ -74,39 +137,52 @@ class BrowserSession:
 
         self.playwright = sync_playwright().start()
 
-        self.browser = (
-            self.playwright.chromium.launch(
-                headless=True,
+        try:
+            self.browser = (
+                self.playwright.chromium.launch(
+                    headless=True,
+                )
             )
-        )
 
-        self.context = (
-            self.browser.new_context(
-                viewport={
-                    "width": VIEWPORT_WIDTH,
-                    "height": VIEWPORT_HEIGHT,
-                },
+            # Daytona preview URLs use dynamically generated HTTPS
+            # proxy certificates. Playwright must ignore certificate
+            # validation errors for these sandbox preview URLs.
+            self.context = (
+                self.browser.new_context(
+                    viewport={
+                        "width": VIEWPORT_WIDTH,
+                        "height": VIEWPORT_HEIGHT,
+                    },
+                    ignore_https_errors=True,
+                )
             )
-        )
 
-        self.page = self.context.new_page()
+            self.owner_thread_id = current_thread_id
 
-        self.page.set_default_timeout(
-            DEFAULT_TIMEOUT_MS
-        )
+            self.page = self.context.new_page()
 
-        self._attach_console_listener()
+            self.page.set_default_timeout(
+                DEFAULT_TIMEOUT_MS
+            )
 
-        self.page.goto(
-            url,
-            wait_until="domcontentloaded",
-            timeout=30000,
-        )
+            self._attach_console_listener()
 
-        return self.page
+            self.page.goto(
+                url,
+                wait_until="domcontentloaded",
+                timeout=30000,
+            )
+
+            return self.page
+
+        except Exception:
+            # If startup itself fails, make sure no partially-created
+            # Playwright objects remain cached.
+            self._cleanup_session()
+            raise
 
     # ========================================================
-    # CONSOLE
+    # CONSOLE LISTENER
     # ========================================================
 
     def _attach_console_listener(
@@ -125,7 +201,6 @@ class BrowserSession:
                 }
             )
 
-            # Keep the session bounded.
             if len(self.console_messages) > 200:
                 self.console_messages = (
                     self.console_messages[-200:]
@@ -165,10 +240,23 @@ class BrowserSession:
 
         page = self.start()
 
-        image = page.screenshot(
-            type="png",
-            full_page=True,
-        )
+        try:
+            image = page.screenshot(
+                type="png",
+                full_page=True,
+            )
+
+        except Exception:
+            # The page may have died between start() and screenshot().
+            # Recreate the browser session and retry once.
+            self._cleanup_session()
+
+            page = self.start()
+
+            image = page.screenshot(
+                type="png",
+                full_page=True,
+            )
 
         return {
             "status": "success",
@@ -188,11 +276,30 @@ class BrowserSession:
 
         self.start()
 
+        messages = list(
+            self.console_messages
+        )
+
+        page_errors = [
+            message
+            for message in messages
+            if message.get("type") == "pageerror"
+        ]
+
+        console_errors = [
+            message
+            for message in messages
+            if message.get("type") == "error"
+        ]
+
         return {
             "status": "success",
             "projectId": self.project_id,
-            "messages": list(
-                self.console_messages
+            "messages": messages,
+            "pageErrors": page_errors,
+            "consoleErrors": console_errors,
+            "hasRuntimeErrors": bool(
+                page_errors or console_errors
             ),
         }
 
@@ -207,9 +314,20 @@ class BrowserSession:
 
         page = self.start()
 
-        page.locator(
-            selector
-        ).click()
+        try:
+            page.locator(
+                selector
+            ).click()
+
+        except Exception:
+            # Retry once with a fresh browser session.
+            self._cleanup_session()
+
+            page = self.start()
+
+            page.locator(
+                selector
+            ).click()
 
         return {
             "status": "success",
@@ -220,27 +338,52 @@ class BrowserSession:
         }
 
     # ========================================================
-    # TYPE
-    # ========================================================
+# TYPE
+# ========================================================
 
-    def type(
-        self,
-        selector: str,
-        text: str,
-    ) -> dict[str, Any]:
+def type(
+    self,
+    selector: str,
+    text: str,
+) -> dict[str, Any]:
+
+    page = self.start()
+
+    try:
+        locator = page.locator(selector)
+
+        locator.fill(text)
+
+    except Exception as error:
+        message = str(error)
+
+        if (
+            "cannot be filled" in message
+            or "not editable" in message
+            or "waiting for locator" in message
+        ):
+            return {
+                "status": "error",
+                "success": False,
+                "projectId": self.project_id,
+                "action": "type",
+                "selector": selector,
+                "message": message,
+            }
+
+        self._cleanup_session()
 
         page = self.start()
 
-        page.locator(
-            selector
-        ).fill(text)
+        page.locator(selector).fill(text)
 
-        return {
-            "status": "success",
-            "projectId": self.project_id,
-            "action": "type",
-            "selector": selector,
-        }
+    return {
+        "status": "success",
+        "success": True,
+        "projectId": self.project_id,
+        "action": "type",
+        "selector": selector,
+    }
 
     # ========================================================
     # KEYPRESS
@@ -253,9 +396,19 @@ class BrowserSession:
 
         page = self.start()
 
-        page.keyboard.press(
-            key
-        )
+        try:
+            page.keyboard.press(
+                key
+            )
+
+        except Exception:
+            self._cleanup_session()
+
+            page = self.start()
+
+            page.keyboard.press(
+                key
+            )
 
         return {
             "status": "success",
@@ -265,6 +418,43 @@ class BrowserSession:
         }
 
     # ========================================================
+    # CLEANUP
+    # ========================================================
+
+    def _cleanup_session(
+        self,
+    ) -> None:
+
+        # Close the context first.
+        if self.context is not None:
+            try:
+                self.context.close()
+            except Exception:
+                pass
+
+        # Then close the browser.
+        if self.browser is not None:
+            try:
+                self.browser.close()
+            except Exception:
+                pass
+
+        # Finally stop Playwright.
+        if self.playwright is not None:
+            try:
+                self.playwright.stop()
+            except Exception:
+                pass
+
+        self.page = None
+        self.context = None
+        self.browser = None
+        self.playwright = None
+        self.owner_thread_id = None
+
+        self.console_messages.clear()
+
+    # ========================================================
     # STOP
     # ========================================================
 
@@ -272,21 +462,7 @@ class BrowserSession:
         self,
     ) -> None:
 
-        if self.context is not None:
-            self.context.close()
-
-        if self.browser is not None:
-            self.browser.close()
-
-        if self.playwright is not None:
-            self.playwright.stop()
-
-        self.page = None
-        self.context = None
-        self.browser = None
-        self.playwright = None
-
-        self.console_messages.clear()
+        self._cleanup_session()
 
 
 # ============================================================

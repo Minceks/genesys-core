@@ -1,30 +1,58 @@
+import inspect
 from typing import Any
 
-from .daytona_workspace import get_workspace
+from .browser import get_browser
+
+import inspect
+
+from .daytona_workspace import (
+    get_workspace,
+)
+
+print(
+    "🔥🔥🔥 TOOLS LOADED FROM:",
+    __file__,
+)
+
+print(
+    "🔥🔥🔥 DAYTONA MODULE FILE:",
+    inspect.getfile(get_workspace),
+)
+
 from .runner import (
     run_build,
     start_preview,
     stop_preview,
+    get_project_diff,
+    reset_project,
+    workspace_state,
 )
 
 
 # ============================================================
-# LIST FILES
+# FILESYSTEM TOOLS
 # ============================================================
 
 def list_files(
     project_id: str = "genesys-project",
 ) -> dict[str, Any]:
+
     workspace = get_workspace(
         project_id
     )
 
+    print(
+        "🔥 ACTIVE WORKSPACE LIST_FILES:",
+        workspace.list_files.__func__.__code__.co_firstlineno,
+    )
+
+    print(
+        "🔥 ACTIVE WORKSPACE CLASS:",
+        workspace.__class__,
+    )
+
     return workspace.list_files()
 
-
-# ============================================================
-# READ FILE
-# ============================================================
 
 def read_file(
     filename: str,
@@ -38,10 +66,6 @@ def read_file(
         filename
     )
 
-
-# ============================================================
-# WRITE FILE
-# ============================================================
 
 def write_file(
     filename: str,
@@ -59,7 +83,7 @@ def write_file(
 
 
 # ============================================================
-# BUILD
+# BUILD / PREVIEW TOOLS
 # ============================================================
 
 def execute_build(
@@ -70,10 +94,6 @@ def execute_build(
     )
 
 
-# ============================================================
-# START PREVIEW
-# ============================================================
-
 def execute_start_preview(
     project_id: str = "genesys-project",
 ) -> dict[str, Any]:
@@ -82,10 +102,6 @@ def execute_start_preview(
     )
 
 
-# ============================================================
-# STOP PREVIEW
-# ============================================================
-
 def execute_stop_preview(
     project_id: str = "genesys-project",
 ) -> dict[str, Any]:
@@ -93,9 +109,130 @@ def execute_stop_preview(
         project_id=project_id
     )
 
+def execute_get_project_diff(
+    project_id: str = "genesys-project",
+) -> dict[str, Any]:
+    return get_project_diff(project_id)
+
+def execute_reset_project(
+    project_id: str = "genesys-project",
+) -> dict[str, Any]:
+    return reset_project(
+        project_id=project_id
+    )
+
+
+def execute_rollback_to_checkpoint(
+    checkpoint_id: str,
+    project_id: str = "genesys-project",
+) -> dict[str, Any]:
+    workspace = get_workspace(project_id)
+
+    return workspace.rollback_to_checkpoint(
+        checkpoint_id
+    )
+
+
+def execute_workspace_state(
+    project_id: str = "genesys-project",
+) -> dict[str, Any]:
+    return workspace_state(
+        project_id=project_id
+    )
+
 
 # ============================================================
-# GROQ TOOLS
+# BROWSER TOOLS
+# ============================================================
+
+def browser_screenshot(
+    project_id: str = "genesys-project",
+) -> dict[str, Any]:
+    """
+    Capture a screenshot of the currently running Daytona
+    preview using the persistent Playwright browser session.
+    """
+
+    browser = get_browser(
+        project_id
+    )
+
+    return browser.screenshot()
+
+
+def browser_console(
+    project_id: str = "genesys-project",
+) -> dict[str, Any]:
+    """
+    Return console messages captured by the persistent
+    Playwright browser session.
+    """
+
+    browser = get_browser(
+        project_id
+    )
+
+    return browser.get_console()
+
+
+def browser_click(
+    selector: str,
+    project_id: str = "genesys-project",
+) -> dict[str, Any]:
+    """
+    Click an element in the running application using
+    a CSS selector.
+    """
+
+    browser = get_browser(
+        project_id
+    )
+
+    return browser.click(
+        selector
+    )
+
+
+def browser_type(
+    selector: str,
+    text: str,
+    project_id: str = "genesys-project",
+) -> dict[str, Any]:
+    """
+    Fill an input or textarea in the running application
+    using a CSS selector.
+    """
+
+    browser = get_browser(
+        project_id
+    )
+
+    return browser.type(
+        selector,
+        text,
+    )
+
+
+def browser_keypress(
+    key: str,
+    project_id: str = "genesys-project",
+) -> dict[str, Any]:
+    """
+    Press a keyboard key in the currently focused browser
+    element.
+    """
+
+    browser = get_browser(
+        project_id
+    )
+
+    return browser.keypress(
+        key
+    )
+
+
+# ============================================================
+# AI TOOL SCHEMAS
 # ============================================================
 
 TOOLS = [
@@ -104,8 +241,9 @@ TOOLS = [
         "function": {
             "name": "list_files",
             "description": (
-                "Inspect the current project inside its isolated "
-                "Daytona workspace. Use this once before making changes."
+                "Inspect the current project inside its "
+                "isolated Daytona workspace. Use this once "
+                "before making changes."
             ),
             "parameters": {
                 "type": "object",
@@ -120,8 +258,8 @@ TOOLS = [
         "function": {
             "name": "read_file",
             "description": (
-                "Read an existing project file from the isolated "
-                "Daytona workspace."
+                "Read an existing project file from the "
+                "isolated Daytona workspace."
             ),
             "parameters": {
                 "type": "object",
@@ -132,7 +270,7 @@ TOOLS = [
                             "Path relative to the project root, "
                             "for example src/routes/build.tsx."
                         ),
-                    }
+                    },
                 },
                 "required": [
                     "filename"
@@ -178,8 +316,8 @@ TOOLS = [
         "function": {
             "name": "run_build",
             "description": (
-                "Run npm run build inside the current project's "
-                "isolated Daytona workspace."
+                "Run npm run build inside the current "
+                "project's isolated Daytona workspace."
             ),
             "parameters": {
                 "type": "object",
@@ -194,9 +332,9 @@ TOOLS = [
         "function": {
             "name": "start_preview",
             "description": (
-                "Start or reuse the Vite development server inside "
-                "the current project's isolated Daytona workspace "
-                "and return a signed preview URL."
+                "Start or reuse the Vite development server "
+                "inside the current project's isolated Daytona "
+                "workspace and return a signed preview URL."
             ),
             "parameters": {
                 "type": "object",
@@ -211,7 +349,8 @@ TOOLS = [
         "function": {
             "name": "stop_preview",
             "description": (
-                "Stop the Vite preview server for the current project."
+                "Stop the Vite preview server for the current "
+                "project."
             ),
             "parameters": {
                 "type": "object",
@@ -221,22 +360,216 @@ TOOLS = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "browser_screenshot",
+            "description": (
+                "Capture a screenshot of the currently running "
+                "application preview using Playwright."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": [],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "browser_console",
+            "description": (
+                "Read console messages and page errors captured "
+                "from the currently running application preview."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": [],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "browser_click",
+            "description": (
+                "Click an element in the currently running "
+                "application using a CSS selector."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "selector": {
+                        "type": "string",
+                        "description": (
+                            "CSS selector for the element to click, "
+                            "for example #start-game or button."
+                        ),
+                    },
+                },
+                "required": [
+                    "selector"
+                ],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "browser_type",
+            "description": (
+                "Fill a text input or textarea in the currently "
+                "running application using a specific CSS selector. "
+                "Do NOT use the generic selector 'input' because it "
+                "may match buttons or other non-editable inputs. "
+                "Prefer selectors such as 'input[type=\"text\"]', "
+                "'input[placeholder=\"...\"]', '#element-id', "
+                "or 'textarea'."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "selector": {
+                        "type": "string",
+                        "description": (
+                            "CSS selector for the input or "
+                            "textarea."
+                        ),
+                    },
+                    "text": {
+                        "type": "string",
+                        "description": (
+                            "Text to enter into the field."
+                        ),
+                    },
+                },
+                "required": [
+                    "selector",
+                    "text",
+                ],
+                "additionalProperties": False,
+            },
+        },
+    },
+        {
+        "type": "function",
+        "function": {
+            "name": "browser_keypress",
+            "description": (
+                "Press a keyboard key in the currently focused "
+                "browser element."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "key": {
+                        "type": "string",
+                        "description": (
+                            "Keyboard key to press, for example "
+                            "Enter, Escape, ArrowUp, or Space."
+                        ),
+                    },
+                },
+                "required": [
+                    "key"
+                ],
+                "additionalProperties": False,
+            },
+        },
+    },
+
+    # ========================================================
+    # M6.5 — PROJECT DIFF
+    # ========================================================
+
+    {
+        "type": "function",
+        "function": {
+            "name": "get_project_diff",
+            "description": (
+                "Return the current Git diff for the project "
+                "workspace. Use this to inspect exactly what "
+                "source changes were made before completing "
+                "a task."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "project_id": {
+                        "type": "string",
+                        "description": (
+                            "Project ID to inspect."
+                        ),
+                    },
+                },
+                "required": [],
+                "additionalProperties": False,
+            },
+        },
+    },
+
+        {
+        "type": "function",
+        "function": {
+            "name": "rollback_to_checkpoint",
+            "description": (
+                "Restore the project workspace to a specific "
+                "GeneSys checkpoint. Use this only when an "
+                "explicit checkpoint ID is available."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "checkpoint_id": {
+                        "type": "string",
+                        "description": (
+                            "Exact GeneSys checkpoint ID to restore, "
+                            "for example genesys-checkpoint-1234567890."
+                        ),
+                    },
+                },
+                "required": [
+                    "checkpoint_id"
+                ],
+                "additionalProperties": False,
+            },
+        },
+    },
 ]
 
 
 # ============================================================
-# TOOL DISPATCH
+# AVAILABLE TOOL IMPLEMENTATIONS
 # ============================================================
 
 AVAILABLE_TOOLS = {
     "list_files": list_files,
     "read_file": read_file,
     "write_file": write_file,
+    "rollback_to_checkpoint": execute_rollback_to_checkpoint,
+
     "run_build": execute_build,
     "start_preview": execute_start_preview,
     "stop_preview": execute_stop_preview,
+
+    "browser_screenshot": browser_screenshot,
+    "browser_console": browser_console,
+    "browser_click": browser_click,
+    "browser_type": browser_type,
+    "browser_keypress": browser_keypress,
+
+    "get_project_diff": execute_get_project_diff,
 }
 
+
+# ============================================================
+# TOOL EXECUTION
+# ============================================================
 
 def execute_tool(
     name: str,
@@ -244,10 +577,10 @@ def execute_tool(
     project_id: str = "genesys-project",
 ) -> dict[str, Any]:
     """
-    Execute one Daytona-backed tool for the current project.
+    Execute one tool for the current project.
 
-    project_id is injected by the orchestrator and does not need
-    to be supplied by the model.
+    project_id is injected by the orchestrator and does not
+    need to be supplied by the model.
     """
 
     if name not in AVAILABLE_TOOLS:
@@ -258,6 +591,13 @@ def execute_tool(
     function = AVAILABLE_TOOLS[
         name
     ]
+
+    arguments = dict(arguments)
+
+    arguments.pop(
+        "project_id",
+        None,
+    )
 
     return function(
         project_id=project_id,
