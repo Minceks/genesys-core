@@ -2,6 +2,8 @@ import hashlib
 import importlib
 import logging
 
+from daytona import Daytona
+
 from .config import load_settings
 
 logger = logging.getLogger(__name__)
