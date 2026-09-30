@@ -328,7 +328,9 @@ def _build_assistant_tool_message(
         ) is not None:
             tool_call[
                 "thought_signature"
-            ] = call.thought_signature
+            ] = _safe_json(
+                call.thought_signature
+            )
 
         tool_calls.append(
             tool_call
