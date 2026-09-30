@@ -1,23 +1,26 @@
-import hashlib
-import os
-import shlex
-import time
-from pathlib import PurePosixPath
-from typing import Any
-from dotenv import load_dotenv
+import importlib
+import logging
 
-load_dotenv()
+from .config import load_settings
 
-from daytona import (
-    Daytona,
-    CreateSandboxFromSnapshotParams,
-    SessionExecuteRequest,
-)
+logger = logging.getLogger(__name__)
+
+try:
+    daytona = importlib.import_module("daytona")
+    DAYTONA_AVAILABLE = True
+except ModuleNotFoundError:
+    daytona = None
+    DAYTONA_AVAILABLE = False
+    logger.warning(
+        "Daytona SDK is not installed. Daytona workspace features are disabled."
+    )
 
 
 # ============================================================
 # CONFIG
 # ============================================================
+
+settings = load_settings()
 
 REPO_URL = (
     "https://github.com/Minceks/genesys-core.git"
@@ -39,7 +42,6 @@ SANDBOX_AUTO_DELETE_MINUTES = 1440
 MAX_READ_CHARS = 50000
 MAX_WRITE_CHARS = 250000
 
-
 # ============================================================
 # DAYTONA CLIENT
 # ============================================================
@@ -51,11 +53,9 @@ def get_daytona() -> Daytona:
     global _daytona
 
     if _daytona is None:
-        if not os.getenv(
-            "DAYTONA_API_KEY"
-        ):
+        if not settings.daytona_api_key:
             raise RuntimeError(
-                "DAYTONA_API_KEY is missing from the environment."
+                "DAYTONA_API_KEY is missing from configuration."
             )
 
         _daytona = Daytona()
@@ -212,71 +212,216 @@ class DaytonaWorkspace:
         )
 
     # ========================================================
-    # GET OR CREATE SANDBOX
+    # ENSURE SANDBOX IS RUNNING
     # ========================================================
 
-    def _get_or_create(self):
+    def _ensure_sandbox_running(
+        self,
+    ) -> None:
+
+        print(
+            "🔥 ENSURE SANDBOX RUNNING CALLED"
+        )
+
+        self.sandbox = self.client.get(
+            self.name
+        )
+
+        self.sandbox.refresh_data()
+
+        state = str(
+            getattr(
+                self.sandbox,
+                "state",
+                "",
+            )
+        ).lower()
+
+        print(
+            "🔎 DAYTONA SANDBOX STATE:",
+            state,
+        )
+
+        print(
+            "🔎 DAYTONA SANDBOX ID:",
+            self.sandbox.id,
+        )
+
+        if "started" not in state:
+
+            recoverable = bool(
+                getattr(
+                    self.sandbox,
+                    "recoverable",
+                    False,
+                )
+            )
+
+            if (
+                "error" in state
+                and recoverable
+            ):
+                print(
+                    "🔄 RECOVERING DAYTONA SANDBOX..."
+                )
+
+                self.sandbox.recover(
+                    timeout=60
+                )
+
+            else:
+                print(
+                    "▶️ STARTING DAYTONA SANDBOX..."
+                )
+
+                self.sandbox.start(
+                    timeout=60
+                )
+
+        # Verify the lifecycle operation actually completed.
+        self.sandbox.refresh_data()
+
+        final_state = str(
+            getattr(
+                self.sandbox,
+                "state",
+                "",
+            )
+        ).lower()
+
+        print(
+            "🔎 DAYTONA FINAL SANDBOX STATE:",
+            final_state,
+        )
+
+        if "started" not in final_state:
+            raise RuntimeError(
+                "Daytona sandbox failed to start. "
+                f"Final state: {final_state}"
+            )
+
+        print(
+            "✅ DAYTONA SANDBOX CONFIRMED RUNNING"
+        )
+
+# ========================================================
+# GET OR CREATE SANDBOX
+# ========================================================
+
+def _get_or_create(self):
+
+    print(
+        "🔎 GETTING DAYTONA SANDBOX:",
+        self.name,
+        flush=True,
+    )
+
+    try:
+        sandbox = self.client.get(
+            self.name
+        )
+
+        print(
+            "📦 DAYTONA SANDBOX FOUND:",
+            sandbox.id,
+            flush=True,
+        )
+
         try:
-            sandbox = self.client.get(
-                self.name
-            )
-
+            sandbox.refresh_data()
+        except Exception as error:
             print(
-                "📦 Reusing Daytona sandbox: "
-                f"{sandbox.id}"
+                "⚠️ SANDBOX REFRESH FAILED:",
+                repr(error),
+                flush=True,
             )
 
-            try:
-                sandbox.refresh_data()
-            except Exception:
-                pass
+        state = str(
+            getattr(
+                sandbox,
+                "state",
+                "",
+            )
+        ).lower()
 
-            state = str(
+        print(
+            "🔎 DAYTONA SANDBOX STATE:",
+            state,
+            flush=True,
+        )
+
+        if "started" not in state:
+
+            recoverable = bool(
                 getattr(
                     sandbox,
-                    "state",
-                    "",
+                    "recoverable",
+                    False,
                 )
-            ).lower()
-
-            if "started" not in state:
-                recoverable = bool(
-                    getattr(
-                        sandbox,
-                        "recoverable",
-                        False,
-                    )
-                )
-
-                if (
-                    "error" in state
-                    and recoverable
-                ):
-                    print(
-                        "🔄 Recovering Daytona sandbox..."
-                    )
-
-                    sandbox.recover(
-                        timeout=60
-                    )
-
-                else:
-                    print(
-                        f"▶️ Starting sandbox "
-                        f"(state={state})..."
-                    )
-
-                    sandbox.start(
-                        timeout=60
-                    )
-
-            return sandbox
-
-        except Exception:
-            # If the named sandbox doesn't exist, create it.
-            print(
-                "🚀 Creating new Daytona sandbox..."
             )
+
+            if (
+                "error" in state
+                and recoverable
+            ):
+                print(
+                    "🔄 RECOVERING DAYTONA SANDBOX:",
+                    sandbox.id,
+                    flush=True,
+                )
+
+                sandbox.recover(
+                    timeout=60
+                )
+
+            else:
+                print(
+                    "▶️ STARTING DAYTONA SANDBOX:",
+                    sandbox.id,
+                    flush=True,
+                )
+
+                sandbox.start(
+                    timeout=60
+                )
+
+            sandbox.refresh_data()
+
+        final_state = str(
+            getattr(
+                sandbox,
+                "state",
+                "",
+            )
+        ).lower()
+
+        print(
+            "🔎 FINAL DAYTONA SANDBOX STATE:",
+            final_state,
+            flush=True,
+        )
+
+        if "started" not in final_state:
+            raise RuntimeError(
+                "Daytona sandbox did not start. "
+                f"Final state: {final_state}"
+            )
+
+        print(
+            "✅ DAYTONA SANDBOX READY:",
+            sandbox.id,
+            flush=True,
+        )
+
+        return sandbox
+
+    except Exception as error:
+
+        print(
+            "ℹ️ DAYTONA GET FAILED — CREATING SANDBOX:",
+            repr(error),
+            flush=True,
+        )
 
         sandbox = self.client.create(
             CreateSandboxFromSnapshotParams(
@@ -290,6 +435,71 @@ class DaytonaWorkspace:
                 ),
             ),
             timeout=120,
+        )
+
+        print(
+            "📦 DAYTONA SANDBOX CREATED:",
+            sandbox.id,
+            flush=True,
+        )
+
+        try:
+            sandbox.refresh_data()
+        except Exception:
+            pass
+
+        state = str(
+            getattr(
+                sandbox,
+                "state",
+                "",
+            )
+        ).lower()
+
+        print(
+            "🔎 NEW SANDBOX STATE:",
+            state,
+            flush=True,
+        )
+
+        if "started" not in state:
+
+            print(
+                "▶️ STARTING NEW DAYTONA SANDBOX:",
+                sandbox.id,
+                flush=True,
+            )
+
+            sandbox.start(
+                timeout=60
+            )
+
+            sandbox.refresh_data()
+
+        final_state = str(
+            getattr(
+                sandbox,
+                "state",
+                "",
+            )
+        ).lower()
+
+        print(
+            "🔎 NEW SANDBOX FINAL STATE:",
+            final_state,
+            flush=True,
+        )
+
+        if "started" not in final_state:
+            raise RuntimeError(
+                "New Daytona sandbox did not start. "
+                f"Final state: {final_state}"
+            )
+
+        print(
+            "✅ NEW DAYTONA SANDBOX READY:",
+            sandbox.id,
+            flush=True,
         )
 
         self._clone_project(
@@ -307,6 +517,63 @@ class DaytonaWorkspace:
         sandbox,
     ) -> None:
 
+        print(
+            "🔥 CLONE PROJECT: ensuring sandbox is running"
+        )
+
+        try:
+            sandbox.refresh_data()
+        except Exception as error:
+            print(
+                "⚠️ CLONE PROJECT REFRESH FAILED:",
+                repr(error),
+            )
+
+        state = str(
+            getattr(
+                sandbox,
+                "state",
+                "",
+            )
+        ).lower()
+
+        print(
+            "🔎 CLONE PROJECT SANDBOX STATE:",
+            state,
+        )
+
+        if "started" not in state:
+
+            print(
+                "▶️ CLONE PROJECT: starting sandbox"
+            )
+
+            sandbox.start(
+                timeout=60
+            )
+
+            sandbox.refresh_data()
+
+        final_state = str(
+            getattr(
+                sandbox,
+                "state",
+                "",
+            )
+        ).lower()
+
+        print(
+            "🔎 CLONE PROJECT FINAL STATE:",
+            final_state,
+        )
+
+        if "started" not in final_state:
+            raise RuntimeError(
+                "Daytona sandbox is not running "
+                "after creation/start. "
+                f"State: {final_state}"
+            )
+
         command = (
             "mkdir -p workspace && "
             f"rm -rf "
@@ -320,28 +587,55 @@ class DaytonaWorkspace:
             command,
             timeout=180,
         )
-
-        if result.exit_code != 0:
-            raise RuntimeError(
-                "Failed to clone GeneSys repository:\n"
-                f"{result.result}"
-            )
-
-        install = sandbox.process.exec(
-            "npm install",
-            cwd=REMOTE_PROJECT_ROOT,
-            timeout=300,
-        )
-
-        if install.exit_code != 0:
-            raise RuntimeError(
-                "npm install failed in Daytona sandbox:\n"
-                f"{install.result}"
-            )
-
     # ========================================================
     # INFO
     # ========================================================
+
+    def state(
+        self,
+    ) -> dict[str, Any]:
+        """
+        Return the current lifecycle state of the workspace.
+        """
+
+        try:
+            self.sandbox.refresh_data()
+        except Exception:
+            pass
+
+        raw_state = str(
+            getattr(
+                self.sandbox,
+                "state",
+                "",
+            )
+        ).lower()
+
+        if "started" in raw_state:
+            status = "running"
+        elif "stopped" in raw_state:
+            status = "stopped"
+        elif "error" in raw_state:
+            status = "error"
+        else:
+            status = raw_state or "unknown"
+
+        return {
+            "status": "success",
+            "projectId": self.project_id,
+            "sandboxId": self.sandbox.id,
+            "sandboxName": self.sandbox.name,
+            "state": status,
+            "rawState": raw_state,
+            "recoverable": bool(
+                getattr(
+                    self.sandbox,
+                    "recoverable",
+                    False,
+                )
+            ),
+            "projectRoot": REMOTE_PROJECT_ROOT,
+        }
 
     def info(
         self,
@@ -362,6 +656,8 @@ class DaytonaWorkspace:
     def list_files(
         self,
     ) -> dict[str, Any]:
+
+        self._ensure_sandbox_running()
 
         command = (
             "find "
@@ -406,7 +702,6 @@ class DaytonaWorkspace:
                 continue
 
         files.sort()
-
         files = files[:3000]
 
         routes = [
@@ -627,6 +922,276 @@ class DaytonaWorkspace:
             ),
         }
 
+    # ========================================================
+    # M6.5 — PROJECT DIFF
+    # ========================================================
+
+    def get_diff(
+        self,
+    ) -> dict[str, Any]:
+        result = self.sandbox.process.exec(
+            "git diff -- . ':!package-lock.json'",
+            cwd=REMOTE_PROJECT_ROOT,
+            timeout=60,
+        )
+
+        output = result.result or ""
+
+        if result.exit_code != 0:
+            return {
+                "status": "error",
+                "success": False,
+                "exitCode": result.exit_code,
+                "output": output[-30000:],
+                "projectId": self.project_id,
+                "sandboxId": self.sandbox.id,
+            }
+
+        return {
+            "status": "success",
+            "success": True,
+            "exitCode": 0,
+            "diff": output[-50000:],
+            "projectId": self.project_id,
+            "sandboxId": self.sandbox.id,
+        }
+
+    # ========================================================
+    # RESET PROJECT
+    # ========================================================
+
+    def reset_project(
+        self,
+    ) -> dict[str, Any]:
+        """
+        Reset the project working tree to origin/main.
+
+        The Daytona sandbox itself is preserved.
+        Environment files are preserved.
+        """
+
+        command = (
+            "git fetch origin main && "
+            "git reset --hard origin/main && "
+            "git clean -fd "
+            "-e '.env' "
+            "-e '.env.*'"
+        )
+
+        result = self.sandbox.process.exec(
+            command,
+            cwd=REMOTE_PROJECT_ROOT,
+            timeout=120,
+        )
+
+        output = result.result or ""
+
+        if result.exit_code != 0:
+            return {
+                "status": "error",
+                "success": False,
+                "exitCode": result.exit_code,
+                "output": output[-30000:],
+                "projectId": self.project_id,
+                "sandboxId": self.sandbox.id,
+            }
+
+        return {
+            "status": "success",
+            "success": True,
+            "exitCode": 0,
+            "output": output[-30000:],
+            "projectId": self.project_id,
+            "sandboxId": self.sandbox.id,
+            "resetTo": "origin/main",
+        }
+
+    # ========================================================
+    # M8 — VERSIONING / RECOVERY
+    # ========================================================
+
+    def create_checkpoint(
+        self,
+        description: str = "",
+    ) -> dict[str, Any]:
+
+        checkpoint_id = (
+            f"genesys-checkpoint-{int(time.time())}"
+        )
+
+        safe_description = (
+            description.strip()
+            or "GeneSys autonomous checkpoint"
+        )
+
+        commands = [
+            (
+                "git config user.name "
+                "'GeneSys Agent'"
+            ),
+            (
+                "git config user.email "
+                "'genesys@localhost'"
+            ),
+            "git add -A",
+            (
+                "git commit --allow-empty "
+                f"-m {shlex.quote(safe_description)}"
+            ),
+        ]
+
+        for command in commands:
+
+            result = self.sandbox.process.exec(
+                command,
+                cwd=REMOTE_PROJECT_ROOT,
+                timeout=120,
+            )
+
+            output = result.result or ""
+
+            if result.exit_code != 0:
+                return {
+                    "status": "error",
+                    "success": False,
+                    "exitCode": result.exit_code,
+                    "output": output[-30000:],
+                    "projectId": self.project_id,
+                    "sandboxId": self.sandbox.id,
+                }
+
+        tag_result = self.sandbox.process.exec(
+            (
+                "git tag -f "
+                f"{shlex.quote(checkpoint_id)}"
+            ),
+            cwd=REMOTE_PROJECT_ROOT,
+            timeout=30,
+        )
+
+        tag_output = tag_result.result or ""
+
+        if tag_result.exit_code != 0:
+            return {
+                "status": "error",
+                "success": False,
+                "exitCode": tag_result.exit_code,
+                "output": tag_output[-30000:],
+                "projectId": self.project_id,
+                "sandboxId": self.sandbox.id,
+            }
+
+        commit_result = self.sandbox.process.exec(
+            "git rev-parse HEAD",
+            cwd=REMOTE_PROJECT_ROOT,
+            timeout=30,
+        )
+
+        commit_hash = (
+            (commit_result.result or "")
+            .strip()
+        )
+
+        return {
+            "status": "success",
+            "success": True,
+            "checkpointId": checkpoint_id,
+            "commit": commit_hash,
+            "description": safe_description,
+            "projectId": self.project_id,
+            "sandboxId": self.sandbox.id,
+        }
+
+    def list_checkpoints(
+        self,
+    ) -> dict[str, Any]:
+
+        result = self.sandbox.process.exec(
+            (
+                "git tag --list "
+                "'genesys-checkpoint-*' "
+                "--sort=-creatordate"
+            ),
+            cwd=REMOTE_PROJECT_ROOT,
+            timeout=30,
+        )
+
+        output = result.result or ""
+
+        if result.exit_code != 0:
+            return {
+                "status": "error",
+                "success": False,
+                "exitCode": result.exit_code,
+                "output": output[-30000:],
+                "projectId": self.project_id,
+                "sandboxId": self.sandbox.id,
+            }
+
+        checkpoints = [
+            tag.strip()
+            for tag in output.splitlines()
+            if tag.strip()
+        ]
+
+        return {
+            "status": "success",
+            "success": True,
+            "checkpoints": checkpoints,
+            "count": len(checkpoints),
+            "projectId": self.project_id,
+            "sandboxId": self.sandbox.id,
+        }
+
+    def rollback_to_checkpoint(
+        self,
+        checkpoint_id: str,
+    ) -> dict[str, Any]:
+
+        if not checkpoint_id:
+            return {
+                "status": "error",
+                "success": False,
+                "message": (
+                    "checkpoint_id is required."
+                ),
+            }
+
+        command = (
+            "git reset --hard "
+            f"{shlex.quote(checkpoint_id)} && "
+            "git clean -fd "
+            "-e '.env' "
+            "-e '.env.*'"
+        )
+
+        result = self.sandbox.process.exec(
+            command,
+            cwd=REMOTE_PROJECT_ROOT,
+            timeout=120,
+        )
+
+        output = result.result or ""
+
+        if result.exit_code != 0:
+            return {
+                "status": "error",
+                "success": False,
+                "exitCode": result.exit_code,
+                "output": output[-30000:],
+                "projectId": self.project_id,
+                "sandboxId": self.sandbox.id,
+            }
+
+        return {
+            "status": "success",
+            "success": True,
+            "checkpointId": checkpoint_id,
+            "output": output[-30000:],
+            "projectId": self.project_id,
+            "sandboxId": self.sandbox.id,
+        }
+        
     # ========================================================
     # BUILD
     # ========================================================
@@ -871,6 +1436,7 @@ _workspaces: dict[
     DaytonaWorkspace,
 ] = {}
 
+print("🔧 Daytona workspace module loaded")
 
 def get_workspace(
     project_id: str = "genesys-project",
@@ -881,11 +1447,27 @@ def get_workspace(
         or "genesys-project"
     )
 
+    print(
+        "🔧 GET WORKSPACE:",
+        key,
+    )
+
     if key not in _workspaces:
+        print(
+            "🆕 CREATING WORKSPACE OBJECT:",
+            key,
+        )
+
         _workspaces[key] = (
             DaytonaWorkspace(
                 key
             )
+        )
+
+    else:
+        print(
+            "♻️ REUSING WORKSPACE OBJECT:",
+            key,
         )
 
     return _workspaces[key]

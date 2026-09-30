@@ -1,4 +1,6 @@
 import os
+from collections import defaultdict
+from datetime import datetime
 
 from dotenv import load_dotenv
 from flask import (
@@ -51,6 +53,14 @@ CORS(
         }
     },
 )
+
+
+# ============================================================
+# BROWSER CONSOLE STORAGE
+# ============================================================
+
+MAX_LOGS_PER_PROJECT = 500
+browser_logs = defaultdict(list)
 
 
 # ============================================================
@@ -399,6 +409,8 @@ def root():
                 "readFile": "/read-file",
                 "writeFile": "/write-file",
                 "agentRun": "/agent/run",
+                "browserConsole": "/browser-console",
+                "getBrowserLogs": "/browser-logs",
             },
         }
     )
@@ -471,3 +483,164 @@ if __name__ == "__main__":
         port=port,
         debug=False,
     )
+
+# ============================================================
+# BROWSER CONSOLE LOGGING
+# ============================================================
+
+MAX_BROWSER_LOG_LENGTH = 20000
+
+
+@app.route(
+    "/browser-console",
+    methods=["POST", "OPTIONS"],
+)
+def browser_console():
+    """
+    Endpoint to receive browser console logs from client-side script.
+    
+    Expected JSON:
+    {
+        "level": "error|warn|log|info|debug",
+        "message": "log message",
+        "url": "page url",
+        "userAgent": "browser user agent",
+        "timestamp": "ISO timestamp",
+        "projectId": "optional project id"
+    }
+    """
+    if request.method == "OPTIONS":
+        return ("", 204)
+
+    data = get_json_body()
+    project_id = (
+        data.get("projectId")
+        or "genesys-project"
+    )
+
+    level = str(
+        data.get("level", "log")
+    ).lower()
+
+    message = str(
+        data.get("message", "")
+    )
+
+    if len(message) > MAX_BROWSER_LOG_LENGTH:
+        message = (
+            message[:MAX_BROWSER_LOG_LENGTH]
+            + "..."
+        )
+
+    url = str(
+        data.get("url", "")
+    )
+
+    user_agent = str(
+        data.get("userAgent", "")
+    )
+
+    timestamp = str(
+        data.get("timestamp", "")
+    )
+
+    # Store the log
+    log_entry = {
+        "level": level,
+        "message": message,
+        "url": url,
+        "userAgent": user_agent,
+        "timestamp": timestamp,
+        "receivedAt": datetime.utcnow().isoformat(),
+    }
+
+    browser_logs[project_id].append(log_entry)
+
+    # Keep only recent logs
+    if len(browser_logs[project_id]) > MAX_LOGS_PER_PROJECT:
+        browser_logs[project_id] = (
+            browser_logs[project_id][-MAX_LOGS_PER_PROJECT:]
+        )
+
+    # Log to server console
+    app.logger.warning(
+        "[BROWSER:%s] %s | url=%s | timestamp=%s",
+        level.upper(),
+        message,
+        url,
+        timestamp,
+    )
+
+    return jsonify(
+        {
+            "status": "ok",
+            "projectId": project_id,
+        }
+    )
+
+
+@app.route(
+    "/browser-logs",
+    methods=["GET"],
+)
+def get_browser_logs():
+    """
+    Get stored browser console logs for a project.
+    
+    Query params:
+    - projectId: optional, defaults to 'genesys-project'
+    - limit: optional, number of recent logs to return (default: 50)
+    - level: optional, filter by log level (error, warn, log, etc)
+    """
+    project_id = get_project_id()
+    limit = int(
+        request.args.get("limit", 50)
+    )
+    level_filter = (
+        request.args.get("level", "").lower()
+    )
+
+    logs = browser_logs.get(project_id, [])
+
+    # Filter by level if specified
+    if level_filter:
+        logs = [
+            log for log in logs
+            if log["level"] == level_filter
+        ]
+
+    # Return recent logs
+    recent_logs = logs[-limit:]
+
+    return jsonify(
+        {
+            "status": "success",
+            "projectId": project_id,
+            "total": len(logs),
+            "returned": len(recent_logs),
+            "logs": recent_logs,
+        }
+    )
+
+
+@app.route(
+    "/browser-logs/clear",
+    methods=["POST"],
+)
+def clear_browser_logs():
+    """
+    Clear stored browser console logs for a project.
+    """
+    project_id = get_project_id()
+
+    if project_id in browser_logs:
+        del browser_logs[project_id]
+
+    return jsonify(
+        {
+            "status": "success",
+            "projectId": project_id,
+            "message": "Logs cleared",
+        }
+    )
+
