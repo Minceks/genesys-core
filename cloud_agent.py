@@ -471,3 +471,61 @@ if __name__ == "__main__":
         port=port,
         debug=False,
     )
+
+# ============================================================
+# BROWSER CONSOLE
+# ============================================================
+
+MAX_BROWSER_LOG_LENGTH = 20000
+
+
+@app.route(
+    "/browser-console",
+    methods=["POST", "OPTIONS"],
+)
+def browser_console():
+    if request.method == "OPTIONS":
+        return ("", 204)
+
+    data = get_json_body()
+
+    level = str(
+        data.get("level", "error")
+    ).lower()
+
+    message = str(
+        data.get("message", "")
+    )
+
+    if len(message) > MAX_BROWSER_LOG_LENGTH:
+        message = (
+            message[:MAX_BROWSER_LOG_LENGTH]
+            + "..."
+        )
+
+    url = str(
+        data.get("url", "")
+    )
+
+    user_agent = str(
+        data.get("userAgent", "")
+    )
+
+    timestamp = str(
+        data.get("timestamp", "")
+    )
+
+    app.logger.warning(
+        "[BROWSER:%s] %s | url=%s | userAgent=%s | timestamp=%s",
+        level.upper(),
+        message,
+        url,
+        user_agent,
+        timestamp,
+    )
+
+    return jsonify(
+        {
+            "status": "ok",
+        }
+    )
