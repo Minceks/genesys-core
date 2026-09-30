@@ -144,6 +144,11 @@ def compact_text(
 def compact_tool_result(
     content: str,
 ) -> str:
+    if isinstance(content, bytes):
+        content = content.decode(
+            "utf-8",
+            errors="replace",
+        )
     try:
         data = json.loads(content)
     except Exception:
@@ -179,6 +184,7 @@ def compact_tool_result(
         return json.dumps(
             result,
             ensure_ascii=False,
+            default=str,
         )
 
     # --------------------------------------------------------
@@ -223,6 +229,7 @@ def compact_tool_result(
             json.dumps(
                 result,
                 ensure_ascii=False,
+                default=str,
             ),
             LIST_FILES_MAX_CHARS,
         )
@@ -245,6 +252,7 @@ def compact_tool_result(
         return json.dumps(
             result,
             ensure_ascii=False,
+            default=str,
         )
 
     # --------------------------------------------------------
@@ -262,15 +270,16 @@ def compact_tool_result(
             None,
         )
 
-        if isinstance(image, str):
-            result["imageBytes"] = (
-                len(image) // 2
-            )
+        if isinstance(image, (bytes, bytearray)):
+            result["imageBytes"] = len(image)
+        elif isinstance(image, str):
+            result["imageBytes"] = len(image) // 2
 
         return compact_text(
             json.dumps(
                 result,
                 ensure_ascii=False,
+                default=str,
             ),
             GENERIC_TOOL_MAX_CHARS,
         )
@@ -283,6 +292,7 @@ def compact_tool_result(
         json.dumps(
             data,
             ensure_ascii=False,
+            default=str,
         ),
         GENERIC_TOOL_MAX_CHARS,
     )
