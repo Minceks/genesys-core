@@ -1,6 +1,7 @@
 ﻿import hashlib
 import importlib
 import logging
+import shlex
 
 from daytona import Daytona
 
