@@ -3268,6 +3268,10 @@ def run_agent(
                 error_text
             )
 
+            import traceback
+
+            traceback.print_exc()
+
             # ------------------------------------------------
             # PROVIDER FALLBACK: GROQ -> GEMINI
             # ------------------------------------------------
