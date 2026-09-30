@@ -1,6 +1,8 @@
 import importlib
 import logging
 
+from .config import load_settings
+
 logger = logging.getLogger(__name__)
 
 try:
@@ -12,12 +14,6 @@ except ModuleNotFoundError:
     logger.warning(
         "Daytona SDK is not installed. Daytona workspace features are disabled."
     )
-
-
-print(
-    "🔥🔥🔥 DAYTONA WORKSPACE FILE LOADED:",
-    __file__,
-)
 
 
 # ============================================================
