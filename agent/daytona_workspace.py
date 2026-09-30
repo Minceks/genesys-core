@@ -1,4 +1,4 @@
-import hashlib
+﻿import hashlib
 import importlib
 import logging
 
@@ -311,75 +311,164 @@ class DaytonaWorkspace:
 # GET OR CREATE SANDBOX
 # ========================================================
 
-def _get_or_create(self):
-
-    print(
-        "🔎 GETTING DAYTONA SANDBOX:",
-        self.name,
-        flush=True,
-    )
-
-    try:
-        sandbox = self.client.get(
-            self.name
-        )
+    def _get_or_create(self):
 
         print(
-            "📦 DAYTONA SANDBOX FOUND:",
-            sandbox.id,
+            "🔎 GETTING DAYTONA SANDBOX:",
+            self.name,
             flush=True,
         )
 
         try:
-            sandbox.refresh_data()
-        except Exception as error:
+            sandbox = self.client.get(
+                self.name
+            )
+
             print(
-                "⚠️ SANDBOX REFRESH FAILED:",
+                "📦 DAYTONA SANDBOX FOUND:",
+                sandbox.id,
+                flush=True,
+            )
+
+            try:
+                sandbox.refresh_data()
+            except Exception as error:
+                print(
+                    "⚠️ SANDBOX REFRESH FAILED:",
+                    repr(error),
+                    flush=True,
+                )
+
+            state = str(
+                getattr(
+                    sandbox,
+                    "state",
+                    "",
+                )
+            ).lower()
+
+            print(
+                "🔎 DAYTONA SANDBOX STATE:",
+                state,
+                flush=True,
+            )
+
+            if "started" not in state:
+
+                recoverable = bool(
+                    getattr(
+                        sandbox,
+                        "recoverable",
+                        False,
+                    )
+                )
+
+                if (
+                    "error" in state
+                    and recoverable
+                ):
+                    print(
+                        "🔄 RECOVERING DAYTONA SANDBOX:",
+                        sandbox.id,
+                        flush=True,
+                    )
+
+                    sandbox.recover(
+                        timeout=60
+                    )
+
+                else:
+                    print(
+                        "▶️ STARTING DAYTONA SANDBOX:",
+                        sandbox.id,
+                        flush=True,
+                    )
+
+                    sandbox.start(
+                        timeout=60
+                    )
+
+                sandbox.refresh_data()
+
+            final_state = str(
+                getattr(
+                    sandbox,
+                    "state",
+                    "",
+                )
+            ).lower()
+
+            print(
+                "🔎 FINAL DAYTONA SANDBOX STATE:",
+                final_state,
+                flush=True,
+            )
+
+            if "started" not in final_state:
+                raise RuntimeError(
+                    "Daytona sandbox did not start. "
+                    f"Final state: {final_state}"
+                )
+
+            print(
+                "✅ DAYTONA SANDBOX READY:",
+                sandbox.id,
+                flush=True,
+            )
+
+            return sandbox
+
+        except Exception as error:
+
+            print(
+                "ℹ️ DAYTONA GET FAILED — CREATING SANDBOX:",
                 repr(error),
                 flush=True,
             )
 
-        state = str(
-            getattr(
-                sandbox,
-                "state",
-                "",
+            sandbox = self.client.create(
+                CreateSandboxFromSnapshotParams(
+                    name=self.name,
+                    language="javascript",
+                    auto_stop_interval=(
+                        SANDBOX_AUTO_STOP_MINUTES
+                    ),
+                    auto_delete_interval=(
+                        SANDBOX_AUTO_DELETE_MINUTES
+                    ),
+                ),
+                timeout=120,
             )
-        ).lower()
 
-        print(
-            "🔎 DAYTONA SANDBOX STATE:",
-            state,
-            flush=True,
-        )
+            print(
+                "📦 DAYTONA SANDBOX CREATED:",
+                sandbox.id,
+                flush=True,
+            )
 
-        if "started" not in state:
+            try:
+                sandbox.refresh_data()
+            except Exception:
+                pass
 
-            recoverable = bool(
+            state = str(
                 getattr(
                     sandbox,
-                    "recoverable",
-                    False,
+                    "state",
+                    "",
                 )
+            ).lower()
+
+            print(
+                "🔎 NEW SANDBOX STATE:",
+                state,
+                flush=True,
             )
 
-            if (
-                "error" in state
-                and recoverable
-            ):
-                print(
-                    "🔄 RECOVERING DAYTONA SANDBOX:",
-                    sandbox.id,
-                    flush=True,
-                )
+            if "started" not in state:
 
-                sandbox.recover(
-                    timeout=60
-                )
-
-            else:
                 print(
-                    "▶️ STARTING DAYTONA SANDBOX:",
+                    "▶️ STARTING NEW DAYTONA SANDBOX:",
                     sandbox.id,
                     flush=True,
                 )
@@ -388,128 +477,39 @@ def _get_or_create(self):
                     timeout=60
                 )
 
-            sandbox.refresh_data()
+                sandbox.refresh_data()
 
-        final_state = str(
-            getattr(
-                sandbox,
-                "state",
-                "",
-            )
-        ).lower()
-
-        print(
-            "🔎 FINAL DAYTONA SANDBOX STATE:",
-            final_state,
-            flush=True,
-        )
-
-        if "started" not in final_state:
-            raise RuntimeError(
-                "Daytona sandbox did not start. "
-                f"Final state: {final_state}"
-            )
-
-        print(
-            "✅ DAYTONA SANDBOX READY:",
-            sandbox.id,
-            flush=True,
-        )
-
-        return sandbox
-
-    except Exception as error:
-
-        print(
-            "ℹ️ DAYTONA GET FAILED — CREATING SANDBOX:",
-            repr(error),
-            flush=True,
-        )
-
-        sandbox = self.client.create(
-            CreateSandboxFromSnapshotParams(
-                name=self.name,
-                language="javascript",
-                auto_stop_interval=(
-                    SANDBOX_AUTO_STOP_MINUTES
-                ),
-                auto_delete_interval=(
-                    SANDBOX_AUTO_DELETE_MINUTES
-                ),
-            ),
-            timeout=120,
-        )
-
-        print(
-            "📦 DAYTONA SANDBOX CREATED:",
-            sandbox.id,
-            flush=True,
-        )
-
-        try:
-            sandbox.refresh_data()
-        except Exception:
-            pass
-
-        state = str(
-            getattr(
-                sandbox,
-                "state",
-                "",
-            )
-        ).lower()
-
-        print(
-            "🔎 NEW SANDBOX STATE:",
-            state,
-            flush=True,
-        )
-
-        if "started" not in state:
+            final_state = str(
+                getattr(
+                    sandbox,
+                    "state",
+                    "",
+                )
+            ).lower()
 
             print(
-                "▶️ STARTING NEW DAYTONA SANDBOX:",
+                "🔎 NEW SANDBOX FINAL STATE:",
+                final_state,
+                flush=True,
+            )
+
+            if "started" not in final_state:
+                raise RuntimeError(
+                    "New Daytona sandbox did not start. "
+                    f"Final state: {final_state}"
+                )
+
+            print(
+                "✅ NEW DAYTONA SANDBOX READY:",
                 sandbox.id,
                 flush=True,
             )
 
-            sandbox.start(
-                timeout=60
+            self._clone_project(
+                sandbox
             )
 
-            sandbox.refresh_data()
-
-        final_state = str(
-            getattr(
-                sandbox,
-                "state",
-                "",
-            )
-        ).lower()
-
-        print(
-            "🔎 NEW SANDBOX FINAL STATE:",
-            final_state,
-            flush=True,
-        )
-
-        if "started" not in final_state:
-            raise RuntimeError(
-                "New Daytona sandbox did not start. "
-                f"Final state: {final_state}"
-            )
-
-        print(
-            "✅ NEW DAYTONA SANDBOX READY:",
-            sandbox.id,
-            flush=True,
-        )
-
-        self._clone_project(
-            sandbox
-        )
-
-        return sandbox
+            return sandbox
 
     # ========================================================
     # CLONE PROJECT
