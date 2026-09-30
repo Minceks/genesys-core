@@ -4,4 +4,5 @@ PyGithub
 python-dotenv
 gunicorn
 groq
+daytona
 playwright
