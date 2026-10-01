@@ -1,22 +1,21 @@
+import logging
+import hmac
 import os
+import time
+import uuid
 
 from dotenv import load_dotenv
 from flask import (
     Flask,
+    g,
     jsonify,
     request,
 )
 from flask_cors import CORS
-
-from agent.orchestrator import (
-    run_agent,
-)
-
-from agent.tools import (
-    list_files,
-    read_file,
-    write_file,
-)
+from agent.logging_config import configure_logging, request_id_context
+from agent.config import load_settings
+from agent.orchestrator import run_agent
+from agent.tools import list_files, read_file, write_file
 
 
 # ============================================================
@@ -34,6 +33,12 @@ load_dotenv(
     )
 )
 
+configure_logging()
+
+settings = load_settings()
+
+logger = logging.getLogger(__name__)
+
 
 # ============================================================
 # FLASK APP
@@ -47,10 +52,86 @@ CORS(
     app,
     resources={
         r"/*": {
-            "origins": "*",
+            "origins": [
+                origin.strip()
+                for origin in settings.cors_origins.split(",")
+                if origin.strip()
+            ],
+            "allow_headers": [
+                "Content-Type",
+                "X-API-Key",
+            ],
         }
     },
 )
+
+
+@app.before_request
+def begin_request_logging():
+    g.request_started_at = time.perf_counter()
+    g.request_id_token = request_id_context.set(uuid.uuid4().hex)
+
+
+@app.before_request
+def require_api_key():
+    if request.method == "OPTIONS" or request.path.rstrip("/") in {
+        "/health",
+        "/api/v1/health",
+    }:
+        return None
+
+    expected_key = str(getattr(settings, "api_key", "") or "").strip()
+    if not expected_key:
+        logger.error("api_auth_not_configured")
+        return jsonify(
+            {
+                "status": "error",
+                "code": "API_AUTH_NOT_CONFIGURED",
+                "message": "API authentication is not configured.",
+                "requestId": request_id_context.get(),
+            }
+        ), 503
+
+    supplied_key = request.headers.get("X-API-Key", "")
+    keys_match = hmac.compare_digest(
+        supplied_key.encode("utf-8"),
+        expected_key.encode("utf-8"),
+    )
+    if not supplied_key or not keys_match:
+        logger.warning(
+            "api_request_rejected method=%s path=%s",
+            request.method,
+            request.path,
+        )
+        return jsonify(
+            {
+                "status": "error",
+                "code": "UNAUTHORIZED",
+                "message": "Invalid or missing API key.",
+                "requestId": request_id_context.get(),
+            }
+        ), 401
+
+    return None
+
+
+@app.after_request
+def finish_request_logging(response):
+    request_id = request_id_context.get()
+    started_at = g.get("request_started_at", time.perf_counter())
+    duration_ms = round((time.perf_counter() - started_at) * 1000, 2)
+    response.headers["X-Request-ID"] = request_id
+    logger.info(
+        "request_complete method=%s path=%s status=%s duration_ms=%s",
+        request.method,
+        request.path,
+        response.status_code,
+        duration_ms,
+    )
+    token = g.pop("request_id_token", None)
+    if token is not None:
+        request_id_context.reset(token)
+    return response
 
 
 # ============================================================
@@ -151,6 +232,7 @@ def files():
         )
 
     except Exception as error:
+        logger.exception("api_handler_failed")
         return jsonify(
             {
                 "status": "error",
@@ -218,6 +300,7 @@ def read():
         ), 404
 
     except Exception as error:
+        logger.exception("api_handler_failed")
         return jsonify(
             {
                 "status": "error",
@@ -290,6 +373,7 @@ def write():
         )
 
     except Exception as error:
+        logger.exception("api_handler_failed")
         return jsonify(
             {
                 "status": "error",
@@ -338,22 +422,9 @@ def agent_run():
             or "genesys-project"
         )
 
-        print()
-        print(
-            "========================================"
-        )
-
-        print(
-            "🤖 AGENT REQUEST: "
-            + str(prompt)
-        )
-
-        print(
-            f"📦 PROJECT: {project_id}"
-        )
-
-        print(
-            "========================================"
+        logger.info(
+            "agent_run_started project_id=%s",
+            project_id,
         )
 
         result = run_agent(
@@ -368,9 +439,7 @@ def agent_run():
         )
 
     except Exception as error:
-        print(
-            f"❌ AGENT HTTP ERROR: {error}"
-        )
+        logger.exception("agent_run_failed")
 
         return jsonify(
             {
@@ -435,25 +504,10 @@ def browser_console():
             + "..."
         )
 
-    url = str(
-        data.get("url", "")
-    )
-
-    user_agent = str(
-        data.get("userAgent", "")
-    )
-
-    timestamp = str(
-        data.get("timestamp", "")
-    )
-
-    app.logger.warning(
-        "[BROWSER:%s] %s | url=%s | userAgent=%s | timestamp=%s",
+    logger.info(
+        "browser_console_event level=%s message_length=%s",
         level.upper(),
-        message,
-        url,
-        user_agent,
-        timestamp,
+        len(message),
     )
 
     return jsonify(
