@@ -322,6 +322,11 @@ def compact_assistant_message(
     for call in tool_calls:
         call_copy = dict(call)
 
+        call_copy.pop(
+            "thought_signature",
+            None,
+        )
+
         function = call.get(
             "function"
         )
