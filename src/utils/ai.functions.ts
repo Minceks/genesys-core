@@ -12,6 +12,8 @@
 //   VITE_CLOUD_AGENT_URL
 // ============================================================
 
+const API_KEY = (import.meta.env.VITE_CLOUD_AGENT_API_KEY || "").trim();
+
 const LOCAL_AGENT_URL =
   "http://127.0.0.1:5000";
 
@@ -116,6 +118,9 @@ export async function askGenesys(
             "application/json",
           "Accept":
             "application/json",
+          ...(API_KEY
+            ? { "X-API-Key": API_KEY }
+            : {}),
         },
 
         body: JSON.stringify({
