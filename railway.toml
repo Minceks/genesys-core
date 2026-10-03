@@ -1,4 +1,4 @@
 [deploy]
-startCommand = "gunicorn cloud_agent:app"
+startCommand = "gunicorn --timeout 300 cloud_agent:app"
 healthcheckPath = "/health"
 healthcheckTimeout = 30

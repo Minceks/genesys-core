@@ -338,52 +338,52 @@ class BrowserSession:
         }
 
     # ========================================================
-# TYPE
-# ========================================================
+    # TYPE
+    # ========================================================
 
-def type(
-    self,
-    selector: str,
-    text: str,
-) -> dict[str, Any]:
-
-    page = self.start()
-
-    try:
-        locator = page.locator(selector)
-
-        locator.fill(text)
-
-    except Exception as error:
-        message = str(error)
-
-        if (
-            "cannot be filled" in message
-            or "not editable" in message
-            or "waiting for locator" in message
-        ):
-            return {
-                "status": "error",
-                "success": False,
-                "projectId": self.project_id,
-                "action": "type",
-                "selector": selector,
-                "message": message,
-            }
-
-        self._cleanup_session()
+    def type(
+        self,
+        selector: str,
+        text: str,
+    ) -> dict[str, Any]:
 
         page = self.start()
 
-        page.locator(selector).fill(text)
+        try:
+            locator = page.locator(selector)
 
-    return {
-        "status": "success",
-        "success": True,
-        "projectId": self.project_id,
-        "action": "type",
-        "selector": selector,
-    }
+            locator.fill(text)
+
+        except Exception as error:
+            message = str(error)
+
+            if (
+                "cannot be filled" in message
+                or "not editable" in message
+                or "waiting for locator" in message
+            ):
+                return {
+                    "status": "error",
+                    "success": False,
+                    "projectId": self.project_id,
+                    "action": "type",
+                    "selector": selector,
+                    "message": message,
+                }
+
+            self._cleanup_session()
+
+            page = self.start()
+
+            page.locator(selector).fill(text)
+
+        return {
+            "status": "success",
+            "success": True,
+            "projectId": self.project_id,
+            "action": "type",
+            "selector": selector,
+        }
 
     # ========================================================
     # KEYPRESS

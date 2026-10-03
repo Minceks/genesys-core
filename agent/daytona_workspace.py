@@ -1145,7 +1145,7 @@ class DaytonaWorkspace:
                 "--sort=-creatordate"
             ),
             cwd=REMOTE_PROJECT_ROOT,
-            timeout=30,
+            timeout=10,
         )
 
         output = result.result or ""
@@ -1232,8 +1232,10 @@ class DaytonaWorkspace:
         self,
     ) -> dict[str, Any]:
 
+        # Daytona ExecuteResponse.result contains stdout. Merge stderr so
+        # TypeScript/Vite build errors are visible to logs and self-repair.
         result = self.sandbox.process.exec(
-            "npm run build",
+            "npm run build 2>&1",
             cwd=REMOTE_PROJECT_ROOT,
             timeout=120,
         )
