@@ -4,7 +4,10 @@ import logging
 import shlex
 from pathlib import PurePosixPath
 
-from daytona import Daytona
+from daytona import (
+    CreateSandboxFromSnapshotParams,
+    Daytona,
+)
 
 from .config import load_settings
 
