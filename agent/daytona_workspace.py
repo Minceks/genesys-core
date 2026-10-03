@@ -7,6 +7,7 @@ from pathlib import PurePosixPath
 from daytona import (
     CreateSandboxFromSnapshotParams,
     Daytona,
+    SessionExecuteRequest,
 )
 
 from .config import load_settings
