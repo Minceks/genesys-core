@@ -60,7 +60,7 @@ You MUST follow this workflow:
 4. Never invent file paths.
 5. Make the smallest correct changes needed for the user's request.
 6. When writing a file, provide its complete intended contents.
-7. Do not repeatedly read the same file unless necessary.
+7. Before the first edit, read only files directly relevant to the task. After four file reads, begin implementation; inspect more files later only if needed.
 8. After modifying files, the orchestrator will run the build.
 9. Do NOT call run_build yourself.
 10. Do NOT call start_preview yourself.
@@ -1892,6 +1892,8 @@ def run_agent(
 
     last_tool_signature: tuple[str, str] | None = None
     repeated_tool_count = 0
+    pre_edit_read_count = 0
+    PRE_EDIT_READ_LIMIT = 8
 
     MAX_REPAIR_ATTEMPTS = 3
     repair_attempts = 0
@@ -3549,7 +3551,37 @@ def run_agent(
             # LIFECYCLE TOOLS ARE ORCHESTRATOR CONTROLLED
             # ----------------------------------------------
 
-            if tool_name in {
+            inspection_limit_hit = False
+            if tool_name == "read_file" and not modified_files:
+                pre_edit_read_count += 1
+                if pre_edit_read_count == 4:
+                    loop_warning = (
+                        "You have inspected four files. Stop exploring and "
+                        "make the first implementation change now. You can "
+                        "inspect another file later if the edit requires it."
+                    )
+                elif pre_edit_read_count > PRE_EDIT_READ_LIMIT:
+                    inspection_limit_hit = True
+                    loop_warning = (
+                        "The pre-edit inspection limit has been reached. "
+                        "Use the information already available and make "
+                        "the first implementation change now."
+                    )
+                    result = {
+                        "status": "error",
+                        "error": (
+                            "Pre-edit inspection limit reached. "
+                            "Begin implementation with the files already read."
+                        ),
+                        "tool": tool_name,
+                    }
+
+            if inspection_limit_hit:
+                print(
+                    "⚠️ Blocked additional pre-edit file read; "
+                    "inspection limit reached."
+                )
+            elif tool_name in {
                 "run_build",
                 "start_preview",
                 "stop_preview",
