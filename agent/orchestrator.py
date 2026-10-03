@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import json
 import os
@@ -1789,6 +1789,8 @@ def run_agent(
 
     provider = get_provider()
 
+    active_provider_name = settings.provider_name
+
     workspace = get_workspace(
         project_id
     )
@@ -2625,10 +2627,10 @@ def run_agent(
                             )
                         ),
                         "agent": "genesys",
-                        "provider": PROVIDER_NAME,
+                        "provider": active_provider_name,
                         "model": (
                             GEMINI_MODEL
-                            if PROVIDER_NAME == "gemini"
+                            if active_provider_name == "gemini"
                             else MODEL
                         ),
                         "steps": steps_used,
@@ -2804,10 +2806,10 @@ def run_agent(
                             )
                         ),
                         "agent": "genesys",
-                        "provider": PROVIDER_NAME,
+                        "provider": active_provider_name,
                         "model": (
                             GEMINI_MODEL
-                            if PROVIDER_NAME == "gemini"
+                            if active_provider_name == "gemini"
                             else MODEL
                         ),
                         "steps": steps_used,
@@ -3028,10 +3030,10 @@ def run_agent(
                             or "Agent completed the requested change."
                         ),
                         "agent": "genesys",
-                        "provider": PROVIDER_NAME,
+                        "provider": active_provider_name,
                         "model": (
                             GEMINI_MODEL
-                            if PROVIDER_NAME == "gemini"
+                            if active_provider_name == "gemini"
                             else MODEL
                         ),
                         "steps": steps_used,
@@ -3094,10 +3096,10 @@ def run_agent(
                             )
                         ),
                         "agent": "genesys",
-                        "provider": PROVIDER_NAME,
+                        "provider": active_provider_name,
                         "model": (
                             GEMINI_MODEL
-                            if PROVIDER_NAME == "gemini"
+                            if active_provider_name == "gemini"
                             else MODEL
                         ),
                         "steps": steps_used,
@@ -3209,10 +3211,10 @@ def run_agent(
                     or "Task completed successfully."
                 ),
                 "agent": "genesys",
-                "provider": PROVIDER_NAME,
+                "provider": active_provider_name,
                 "model": (
                     GEMINI_MODEL
-                    if PROVIDER_NAME == "gemini"
+                    if active_provider_name == "gemini"
                     else MODEL
                 ),
                 "steps": steps_used,
@@ -3276,7 +3278,7 @@ def run_agent(
             # PROVIDER FALLBACK: GROQ -> GEMINI
             # ------------------------------------------------
 
-            if PROVIDER_NAME == "groq":
+            if active_provider_name == "groq":
 
                 print(
                     "⚠️ Groq failed. Falling back to Gemini..."
@@ -3328,8 +3330,12 @@ def run_agent(
                     )
 
                     print(
-                        "✅ Gemini fallback succeeded."
+                        "✅ Gemini fallback succeeded; using Gemini for the rest of this run."
                     )
+                    # Keep subsequent Gemini calls on Gemini-compatible history.
+                    messages = fallback_messages
+                    provider = fallback_provider
+                    active_provider_name = FALLBACK_PROVIDER
 
                 except Exception as fallback_exc:
 
@@ -3355,10 +3361,10 @@ def run_agent(
                             f"{fallback_error}"
                         ),
                         "agent": "genesys",
-                        "provider": PROVIDER_NAME,
+                        "provider": active_provider_name,
                         "model": (
                             GEMINI_MODEL
-                            if PROVIDER_NAME == "gemini"
+                            if active_provider_name == "gemini"
                             else MODEL
                         ),
                         "steps": steps_used,
@@ -3380,10 +3386,10 @@ def run_agent(
                     ),
                     "text": error_text,
                     "agent": "genesys",
-                    "provider": PROVIDER_NAME,
+                    "provider": active_provider_name,
                     "model": (
                         GEMINI_MODEL
-                        if PROVIDER_NAME == "gemini"
+                        if active_provider_name == "gemini"
                         else MODEL
                     ),
                     "steps": steps_used,
@@ -3441,10 +3447,10 @@ def run_agent(
                         or "Task completed successfully."
                     ),
                     "agent": "genesys",
-                    "provider": PROVIDER_NAME,
+                    "provider": active_provider_name,
                     "model": (
                         GEMINI_MODEL
-                        if PROVIDER_NAME == "gemini"
+                        if active_provider_name == "gemini"
                         else MODEL
                     ),
                     "steps": steps_used,
@@ -3730,10 +3736,10 @@ def run_agent(
                 or "Agent completed the requested change."
             ),
             "agent": "genesys",
-            "provider": PROVIDER_NAME,
+            "provider": active_provider_name,
             "model": (
                 GEMINI_MODEL
-                if PROVIDER_NAME == "gemini"
+                if active_provider_name == "gemini"
                 else MODEL
             ),
             "steps": steps_used,
@@ -3764,10 +3770,10 @@ def run_agent(
             or "Agent reached the maximum step limit."
         ),
         "agent": "genesys",
-        "provider": PROVIDER_NAME,
+        "provider": active_provider_name,
         "model": (
             GEMINI_MODEL
-            if PROVIDER_NAME == "gemini"
+            if active_provider_name == "gemini"
             else MODEL
         ),
         "steps": steps_used,
