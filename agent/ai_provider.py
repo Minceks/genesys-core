@@ -1281,12 +1281,22 @@ class GroqProvider(AIProvider):
                         except (ValueError, IndexError):
                             pass
 
-                    # Keep the retry bounded.
+                    # Do not sleep long enough to trigger the
+                    # Gunicorn request timeout. Let the orchestrator
+                    # immediately use the Gemini fallback instead.
+                    if wait_seconds > 5.0:
+                        print(
+                            "⚠️ Groq rate limit requires "
+                            f"{wait_seconds:.1f}s wait. "
+                            "Skipping retry and falling back."
+                        )
+                        raise
+
                     wait_seconds = max(
                         1.0,
                         min(
                             wait_seconds,
-                            30.0,
+                            5.0,
                         ),
                     )
 
