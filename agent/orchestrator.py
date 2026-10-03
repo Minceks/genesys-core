@@ -1890,7 +1890,7 @@ def run_agent(
 
     steps_used = 0
 
-    last_tool_name: str | None = None
+    last_tool_signature: tuple[str, str] | None = None
     repeated_tool_count = 0
 
     MAX_REPAIR_ATTEMPTS = 3
@@ -3497,6 +3497,8 @@ def run_agent(
         # EXECUTE TOOL CALLS
         # ----------------------------------------------------
 
+        loop_warning: str | None = None
+
         for tool_call in tool_calls:
 
             tool_name = tool_call.name
@@ -3514,39 +3516,36 @@ def run_agent(
             # REPETITION DETECTION
             # ----------------------------------------------
 
-            if tool_name == last_tool_name:
+            tool_signature = (
+                tool_name,
+                json.dumps(
+                    arguments,
+                    sort_keys=True,
+                    ensure_ascii=False,
+                    default=str,
+                ),
+            )
+
+            if tool_signature == last_tool_signature:
                 repeated_tool_count += 1
             else:
-                last_tool_name = tool_name
+                last_tool_signature = tool_signature
                 repeated_tool_count = 1
 
             if repeated_tool_count >= 3:
-
                 print(
-                    "⚠️ Repeated tool loop detected: "
+                    "⚠️ Repeated tool call detected: "
                     f"{tool_name} ({repeated_tool_count} times)"
                 )
-
-                messages.append(
-                    {
-                        "role": "user",
-                        "content": (
-                            f"You have called {tool_name} repeatedly. "
-                            "Stop inspecting the same information. "
-                            "Continue with implementation or verification."
-                        ),
-                    }
+                loop_warning = (
+                    f"You repeated the same {tool_name} call. "
+                    "Use the result already in the conversation and "
+                    "continue with implementation or verification. "
+                    "Do not make the identical call again."
                 )
-
-                # Do not let a model-side inspection loop prevent
-                # the orchestrator from progressing through its
-                # mandatory build and verification lifecycle.
-                if not build_passed or changed_since_build:
-                    changed_since_build = True
-
-                recovery_waiting_for_model = False
                 repeated_tool_count = 0
-                       # ----------------------------------------------
+
+            # ----------------------------------------------
             # LIFECYCLE TOOLS ARE ORCHESTRATOR CONTROLLED
             # ----------------------------------------------
 
@@ -3703,6 +3702,18 @@ def run_agent(
                     "content": _tool_result_text(
                         result
                     ),
+                }
+            )
+
+        # ----------------------------------------------------
+        # LOOP WARNING AFTER TOOL RESULTS
+        # ----------------------------------------------------
+
+        if loop_warning:
+            messages.append(
+                {
+                    "role": "user",
+                    "content": loop_warning,
                 }
             )
 
