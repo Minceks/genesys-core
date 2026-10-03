@@ -1801,11 +1801,20 @@ def run_agent(
 
     recovery_checkpoint_id = None
 
-    checkpoint_list = (
-        workspace.list_checkpoints()
-        if hasattr(workspace, "list_checkpoints")
-        else {}
-    )
+    # Checkpoint discovery is helpful for rollback, but it must not prevent
+    # a new task from starting when Daytona's process API is temporarily slow.
+    try:
+        checkpoint_list = (
+            workspace.list_checkpoints()
+            if hasattr(workspace, "list_checkpoints")
+            else {}
+        )
+    except Exception as exc:
+        print(
+            "⚠️ Checkpoint lookup failed; continuing without a recovery checkpoint:",
+            exc,
+        )
+        checkpoint_list = {}
 
     checkpoints = checkpoint_list.get(
         "checkpoints",
