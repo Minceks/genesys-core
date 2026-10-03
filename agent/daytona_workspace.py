@@ -595,6 +595,30 @@ class DaytonaWorkspace:
             command,
             timeout=180,
         )
+
+        clone_output = result.result or ""
+
+        if result.exit_code != 0:
+            raise RuntimeError(
+                "Failed to clone GeneSys project:\n"
+                f"{clone_output[-12000:]}"
+            )
+
+        install_result = sandbox.process.exec(
+            "npm ci",
+            cwd=REMOTE_PROJECT_ROOT,
+            timeout=300,
+        )
+
+        install_output = (
+            install_result.result or ""
+        )
+
+        if install_result.exit_code != 0:
+            raise RuntimeError(
+                "Failed to install project dependencies:\n"
+                f"{install_output[-12000:]}"
+            )
     # ========================================================
     # INFO
     # ========================================================
