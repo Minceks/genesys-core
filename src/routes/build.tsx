@@ -25,6 +25,10 @@ import {
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
+const API_KEY = (
+  import.meta.env.VITE_CLOUD_AGENT_API_KEY || ""
+).trim();
+
 
 // ============================================================
 // CONFIG
@@ -178,7 +182,14 @@ function BuildPage() {
   async function refreshFiles() {
     try {
       const response = await fetch(
-        `${CLOUD_AGENT_URL}/list-files`
+        `${CLOUD_AGENT_URL}/list-files`,
+        {
+          headers: {
+            ...(API_KEY
+              ? { "X-API-Key": API_KEY }
+              : {}),
+          },
+        }
       );
 
       if (!response.ok) {
