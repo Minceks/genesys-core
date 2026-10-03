@@ -3516,22 +3516,30 @@ def run_agent(
 
             if repeated_tool_count >= 3:
 
+                print(
+                    "⚠️ Repeated tool loop detected: "
+                    f"{tool_name} ({repeated_tool_count} times)"
+                )
+
                 messages.append(
                     {
                         "role": "user",
                         "content": (
-                            f"You have called "
-                            f"{tool_name} repeatedly "
-                            f"({repeated_tool_count} times). "
-                            "Do not repeatedly inspect the "
-                            "same information. "
-                            "Use what you already learned "
-                            "and continue implementing or "
-                            "verifying the task."
+                            f"You have called {tool_name} repeatedly. "
+                            "Stop inspecting the same information. "
+                            "Continue with implementation or verification."
                         ),
                     }
                 )
 
+                # Do not let a model-side inspection loop prevent
+                # the orchestrator from progressing through its
+                # mandatory build and verification lifecycle.
+                if not build_passed or changed_since_build:
+                    changed_since_build = True
+
+                recovery_waiting_for_model = False
+                repeated_tool_count = 0
                        # ----------------------------------------------
             # LIFECYCLE TOOLS ARE ORCHESTRATOR CONTROLLED
             # ----------------------------------------------
