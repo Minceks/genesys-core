@@ -1255,14 +1255,45 @@ class GroqProvider(AIProvider):
                     ):
                         raise
 
-                    wait_seconds = (
-                        2 ** attempt
+                    # Groq can tell us how long to wait.
+                    # Fall back to exponential backoff if that
+                    # information is unavailable.
+                    wait_seconds = 2 ** attempt
+
+                    error_text = str(error)
+                    marker = "Please try again in "
+
+                    if marker in error_text:
+                        try:
+                            retry_text = error_text.split(
+                                marker,
+                                1,
+                            )[1]
+
+                            retry_value = retry_text.split(
+                                "s",
+                                1,
+                            )[0].strip()
+
+                            wait_seconds = float(
+                                retry_value
+                            )
+                        except (ValueError, IndexError):
+                            pass
+
+                    # Keep the retry bounded.
+                    wait_seconds = max(
+                        1.0,
+                        min(
+                            wait_seconds,
+                            30.0,
+                        ),
                     )
 
                     print(
                         "⏳ Groq rate limit reached "
                         f"(429). Retrying in "
-                        f"{wait_seconds}s..."
+                        f"{wait_seconds:.1f}s..."
                     )
 
                     time.sleep(
@@ -1270,7 +1301,6 @@ class GroqProvider(AIProvider):
                     )
 
                     continue
-
                 # ------------------------------------------------
                 # Request too large
                 # ------------------------------------------------

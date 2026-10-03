@@ -3288,8 +3288,42 @@ def run_agent(
                         model=GEMINI_MODEL,
                     )
 
+                    # The previous provider may have produced function calls
+                    # that do not contain Gemini 3 thought signatures.
+                    # Do not replay those provider-specific tool turns into
+                    # Gemini. Preserve normal conversation text and let Gemini
+                    # issue fresh tool calls with its own signatures.
+                    fallback_messages = []
+
+                    for message in messages:
+                        role = message.get(
+                            "role"
+                        )
+
+                        if role == "tool":
+                            continue
+
+                        if role == "assistant":
+                            cleaned_message = dict(
+                                message
+                            )
+
+                            cleaned_message.pop(
+                                "tool_calls",
+                                None,
+                            )
+
+                            fallback_messages.append(
+                                cleaned_message
+                            )
+                            continue
+
+                        fallback_messages.append(
+                            dict(message)
+                        )
+
                     response = fallback_provider.generate(
-                        messages,
+                        fallback_messages,
                         TOOLS,
                     )
 
