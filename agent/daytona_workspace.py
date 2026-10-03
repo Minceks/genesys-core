@@ -1232,12 +1232,19 @@ class DaytonaWorkspace:
         self,
     ) -> dict[str, Any]:
 
-        # Daytona ExecuteResponse.result contains stdout. Merge stderr so
-        # TypeScript/Vite build errors are visible to logs and self-repair.
+        # Reused sandboxes may have lost node_modules. Install locked
+        # dependencies only when Vite is missing, then capture install and
+        # build errors together for logs and self-repair.
         result = self.sandbox.process.exec(
-            "npm run build 2>&1",
+            (
+                "if [ ! -x node_modules/.bin/vite ]; then "
+                "echo 'Vite is missing; installing locked dependencies'; "
+                "npm ci || exit $?; "
+                "fi; "
+                "npm run build 2>&1"
+            ),
             cwd=REMOTE_PROJECT_ROOT,
-            timeout=120,
+            timeout=300,
         )
 
         output = (
