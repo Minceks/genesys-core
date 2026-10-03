@@ -1760,6 +1760,11 @@ def run_agent(
             "buildPassed": False,
         }
 
+    agent_deadline = time.monotonic() + min(
+        settings.agent_timeout_seconds,
+        240,
+    )
+
     print()
     print("=" * 40)
     print("🤖 AGENT REQUEST:", prompt)
@@ -1861,6 +1866,42 @@ def run_agent(
     recovery_strategy: dict[str, Any] | None = None
     recovery_waiting_for_model = False
     checkpoint_result: dict[str, Any] | None = None
+
+    def _agent_timeout_result() -> dict[str, Any]:
+        try:
+            stop_browser(project_id)
+        except Exception:
+            pass
+
+        message = (
+            "Agent execution reached its time limit before all "
+            "required build and browser checks completed."
+        )
+        print("⏱️", message)
+
+        return {
+            "status": "error",
+            "message": message,
+            "text": (
+                last_answer
+                or "The agent reached its execution time limit."
+            ),
+            "agent": "genesys",
+            "provider": active_provider_name,
+            "model": (
+                GEMINI_MODEL
+                if active_provider_name == "gemini"
+                else MODEL
+            ),
+            "steps": steps_used,
+            "modifiedFiles": modified_files,
+            "buildAttempted": build_attempted,
+            "buildPassed": build_passed,
+            "previewStarted": preview_started,
+            "browserVerified": browser_verified,
+            "previewUrl": preview_url,
+            "errorType": "agent_timeout",
+        }
 
     def _create_success_checkpoint() -> dict[str, Any]:
         nonlocal checkpoint_result
@@ -2175,6 +2216,9 @@ def run_agent(
     for step in range(1, MAX_STEPS + 1):
 
         steps_used = step
+
+        if time.monotonic() >= agent_deadline:
+            return _agent_timeout_result()
 
         if verification_complete:
             print(
@@ -3335,6 +3379,9 @@ def run_agent(
                             dict(message)
                         )
 
+                    if time.monotonic() >= agent_deadline:
+                        return _agent_timeout_result()
+
                     response = fallback_provider.generate(
                         fallback_messages,
                         TOOLS,
@@ -3413,6 +3460,9 @@ def run_agent(
                 }
 
         # ----------------------------------------------------
+        if time.monotonic() >= agent_deadline:
+            return _agent_timeout_result()
+
         # NORMALIZED RESPONSE
         # ----------------------------------------------------
 
@@ -3511,6 +3561,9 @@ def run_agent(
         loop_warning: str | None = None
 
         for tool_call in tool_calls:
+
+            if time.monotonic() >= agent_deadline:
+                return _agent_timeout_result()
 
             tool_name = tool_call.name
 
