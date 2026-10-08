@@ -37,6 +37,8 @@ PROVIDER_NAME = settings.provider_name
 FALLBACK_PROVIDER = settings.fallback_provider
 
 MAX_STEPS = 18
+VERIFICATION_STEP_RESERVE = 6
+TOTAL_MAX_STEPS = MAX_STEPS + VERIFICATION_STEP_RESERVE
 
 MAX_COMPLETION_TOKENS = 3200
 
@@ -2213,7 +2215,7 @@ def run_agent(
     # AGENT LOOP
     # --------------------------------------------------------
 
-    for step in range(1, MAX_STEPS + 1):
+    for step in range(1, TOTAL_MAX_STEPS + 1):
 
         steps_used = step
 
@@ -2235,7 +2237,7 @@ def run_agent(
         )
 
         print(
-            f"🤖 Agent step {step}/{MAX_STEPS}"
+            f"🤖 Agent step {step}/{TOTAL_MAX_STEPS}"
         )
 
         # ----------------------------------------------------
@@ -3254,6 +3256,21 @@ def run_agent(
                 continue
 
         # ----------------------------------------------------
+        # RESERVE THE LAST STEPS FOR MANDATORY VERIFICATION AND REPAIR.
+        # The model must not spend this reserve on new exploration after its
+        # normal implementation budget has ended.
+        if (
+            step > MAX_STEPS
+            and not changed_since_build
+            and not recovery_waiting_for_model
+            and not last_failure_type
+        ):
+            print(
+                "⏹️ Implementation step budget ended; "
+                "no pending changes or recovery remain."
+            )
+            break
+
         # SUCCESS CONDITION
         # ----------------------------------------------------
 
