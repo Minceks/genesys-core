@@ -3345,7 +3345,7 @@ def run_agent(
             traceback.print_exc()
 
             # ------------------------------------------------
-            # PROVIDER FALLBACK: GROQ -> GEMINI
+            # PROVIDER FALLBACK: GROQ <-> GEMINI
             # ------------------------------------------------
 
             if active_provider_name == "groq":
@@ -3451,28 +3451,62 @@ def run_agent(
 
             else:
 
-                # Existing behavior for non-Groq providers
-                return {
-                    "status": "error",
-                    "message": (
-                        "AI provider request failed."
-                    ),
-                    "text": error_text,
-                    "agent": "genesys",
-                    "provider": active_provider_name,
-                    "model": (
-                        GEMINI_MODEL
-                        if active_provider_name == "gemini"
-                        else MODEL
-                    ),
-                    "steps": steps_used,
-                    "modifiedFiles": modified_files,
-                    "buildAttempted": build_attempted,
-                    "buildPassed": build_passed,
-                    "previewStarted": preview_started,
-                    "browserVerified": browser_verified,
-                    "errorType": "ai_request",
-                }
+                print(
+                    "⚠️ Gemini failed. Falling back to Groq..."
+                )
+
+                try:
+                    fallback_provider = GroqProvider(
+                        model=MODEL,
+                    )
+
+                    if time.monotonic() >= agent_deadline:
+                        return _agent_timeout_result()
+
+                    response = fallback_provider.generate(
+                        messages,
+                        TOOLS,
+                    )
+
+                    provider = fallback_provider
+                    active_provider_name = "groq"
+
+                    print(
+                        "✅ Groq fallback succeeded; using Groq for the rest of this run."
+                    )
+
+                except Exception as fallback_exc:
+                    fallback_error = str(fallback_exc)
+
+                    print(
+                        "❌ Groq fallback also failed:"
+                    )
+                    print(fallback_error)
+
+                    return {
+                        "status": "error",
+                        "message": (
+                            "AI provider request failed."
+                        ),
+                        "text": (
+                            f"Gemini failed: {error_text}\n"
+                            f"Groq fallback failed: {fallback_error}"
+                        ),
+                        "agent": "genesys",
+                        "provider": active_provider_name,
+                        "model": (
+                            GEMINI_MODEL
+                            if active_provider_name == "gemini"
+                            else MODEL
+                        ),
+                        "steps": steps_used,
+                        "modifiedFiles": modified_files,
+                        "buildAttempted": build_attempted,
+                        "buildPassed": build_passed,
+                        "previewStarted": preview_started,
+                        "browserVerified": browser_verified,
+                        "errorType": "ai_request",
+                    }
 
         # ----------------------------------------------------
         if time.monotonic() >= agent_deadline:

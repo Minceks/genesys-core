@@ -9,7 +9,7 @@ from dotenv import load_dotenv
 
 DEFAULT_GENESYS_MODEL = "openai/gpt-oss-120b"
 DEFAULT_GEMINI_MODEL = "gemini-3.8-flash"
-DEFAULT_AGENT_TIMEOUT_SECONDS = 120
+DEFAULT_AGENT_TIMEOUT_SECONDS = 240
 
 VALID_PROVIDERS = {
     "groq",
