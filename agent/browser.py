@@ -56,6 +56,7 @@ class BrowserSession:
         self.page: Page | None = None
 
         self.console_messages: list[dict[str, Any]] = []
+        self.network_errors: list[dict[str, Any]] = []
 
         # Playwright sync objects are thread-sensitive.
         self.owner_thread_id: int | None = None
@@ -206,6 +207,27 @@ class BrowserSession:
                     self.console_messages[-200:]
                 )
 
+        def handle_response(response) -> None:
+            if response.status >= 400:
+                self.network_errors.append(
+                    {
+                        "status": response.status,
+                        "url": response.url,
+                        "method": response.request.method,
+                        "resourceType": response.request.resource_type,
+                    }
+                )
+
+                if len(self.network_errors) > 200:
+                    self.network_errors = (
+                        self.network_errors[-200:]
+                    )
+
+        self.page.on(
+            "response",
+            handle_response,
+        )
+
         self.page.on(
             "console",
             handle_console,
@@ -298,6 +320,7 @@ class BrowserSession:
             "messages": messages,
             "pageErrors": page_errors,
             "consoleErrors": console_errors,
+            "networkErrors": list(self.network_errors),
             "hasRuntimeErrors": bool(
                 page_errors or console_errors
             ),
