@@ -54,6 +54,7 @@ export type GenesysAgentResponse = {
   modifiedFiles: string[];
   buildAttempted: boolean;
   buildPassed: boolean;
+  previewUrl: string | null;
   status: string;
 };
 
@@ -144,10 +145,12 @@ export async function askGenesys(
 
     return {
       text:
-        typeof data.answer ===
+        typeof data.text ===
         "string"
-          ? data.answer
-          : "GeneSys completed the request.",
+          ? data.text
+          : typeof data.answer === "string"
+            ? data.answer
+            : "GeneSys completed the request.",
 
       agent:
         typeof data.agent ===
@@ -172,6 +175,11 @@ export async function askGenesys(
 
       buildPassed:
         data.buildPassed === true,
+
+      previewUrl:
+        typeof data.previewUrl === "string"
+          ? data.previewUrl
+          : null,
 
       status:
         typeof data.status ===

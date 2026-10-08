@@ -75,6 +75,7 @@ type AgentResponse = {
   modifiedFiles?: string[];
   buildAttempted?: boolean;
   buildPassed?: boolean;
+  previewUrl?: string | null;
   status?: string;
 };
 
@@ -139,7 +140,9 @@ function BuildPage() {
   const [loading, setLoading] = useState(false);
 
   const [previewUrl, setPreviewUrl] = useState(
-    LOCAL_PREVIEW_URL
+    import.meta.env.DEV
+      ? LOCAL_PREVIEW_URL
+      : ""
   );
 
   const [previewKey, setPreviewKey] = useState(0);
@@ -231,6 +234,18 @@ function BuildPage() {
   // ==========================================================
 
   async function checkPreview() {
+    // Production preview URLs are cross-origin Daytona URLs, so fetch-based
+    // health checks are blocked by browser CORS. The iframe load event is
+    // the reliable signal in production.
+    if (!import.meta.env.DEV) {
+      return;
+    }
+
+    if (!previewUrl) {
+      setPreviewOnline(false);
+      return;
+    }
+
     try {
       const response = await fetch(
         previewUrl,
@@ -351,11 +366,12 @@ function BuildPage() {
             step.result.url.length > 0
         );
 
-      if (
-        previewStep?.result?.url
-      ) {
-        const nextPreviewUrl =
-          previewStep.result.url;
+      const nextPreviewUrl =
+        response.previewUrl ||
+        previewStep?.result?.url;
+
+      if (nextPreviewUrl) {
+        setPreviewOnline(false);
 
         setPreviewUrl(
           nextPreviewUrl
@@ -978,6 +994,8 @@ function BuildPage() {
                 className="absolute inset-0 pt-12 w-full h-full border-0 bg-black"
                 allow="fullscreen"
                 sandbox="allow-scripts allow-same-origin allow-forms allow-modals allow-popups"
+                onLoad={() => setPreviewOnline(true)}
+                onError={() => setPreviewOnline(false)}
               />
             ) : (
               <div className="w-full h-full flex items-center justify-center">
