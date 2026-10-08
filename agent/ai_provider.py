@@ -721,13 +721,26 @@ class GeminiProvider(AIProvider):
         from google import genai
         from google.genai import types
 
-        # Keep one Gemini attempt below Gunicorn's default 30-second timeout.
+        # Keep each attempt bounded while allowing one quick retry for
+        # transient provider-side timeouts and capacity errors.
         self.client = genai.Client(
             api_key=api_key,
             http_options=types.HttpOptions(
                 timeout=20_000,
                 retry_options=types.HttpRetryOptions(
-                    attempts=1,
+                    attempts=2,
+                    initial_delay=1.0,
+                    max_delay=1.0,
+                    exp_base=2.0,
+                    jitter=0.1,
+                    http_status_codes=[
+                        408,
+                        429,
+                        500,
+                        502,
+                        503,
+                        504,
+                    ],
                 ),
             ),
         )
