@@ -63,6 +63,9 @@ export type GenesysAgentResponse = {
   modifiedFiles: string[];
   buildAttempted: boolean;
   buildPassed: boolean;
+  browserVerified: boolean;
+  checkpointId: string | null;
+  promotionToken: string | null;
   previewUrl: string | null;
   previewStarted?: boolean;
   status: string;
@@ -186,10 +189,26 @@ export async function askGenesys(
       buildPassed:
         data.buildPassed === true,
 
+      browserVerified:
+        data.browserVerified === true,
+
+      checkpointId:
+        typeof data.checkpoint?.checkpointId === "string"
+          ? data.checkpoint.checkpointId
+          : null,
+
+      promotionToken:
+        typeof data.promotionToken === "string"
+          ? data.promotionToken
+          : null,
+
       previewUrl:
         typeof data.previewUrl === "string"
           ? data.previewUrl
           : null,
+
+      previewStarted:
+        data.previewStarted === true,
 
       status:
         typeof data.status ===

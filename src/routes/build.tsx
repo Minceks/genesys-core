@@ -62,6 +62,11 @@ type ChatMessage = {
   modifiedFiles?: string[];
   buildAttempted?: boolean;
   buildPassed?: boolean;
+  browserVerified?: boolean;
+  checkpointId?: string;
+  promotionToken?: string;
+  promotionUrl?: string;
+  promotionError?: string;
   steps?: AgentStep[];
 };
 
@@ -157,6 +162,7 @@ function BuildPage() {
   const [input, setInput] = useState("");
 
   const [loading, setLoading] = useState(false);
+  const [promotingCheckpoint, setPromotingCheckpoint] = useState("");
 
   const [previewCode, setPreviewCode] = useState("");
 
@@ -514,6 +520,19 @@ function BuildPage() {
           buildPassed:
             response.buildPassed,
 
+          browserVerified:
+            response.browserVerified,
+
+          checkpointId:
+            response.buildPassed && response.browserVerified
+              ? response.checkpointId || undefined
+              : undefined,
+
+          promotionToken:
+            response.buildPassed && response.browserVerified
+              ? response.promotionToken || undefined
+              : undefined,
+
           steps:
             response.steps || [
               {
@@ -547,6 +566,42 @@ function BuildPage() {
       ]);
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function handlePromote(index: number, checkpointId: string, promotionToken: string) {
+    if (promotingCheckpoint) return;
+    setPromotingCheckpoint(checkpointId);
+    setMessages((previous) => previous.map((message, itemIndex) =>
+      itemIndex === index
+        ? { ...message, promotionError: undefined }
+        : message
+    ));
+
+    try {
+      const response = await fetch(`${CLOUD_AGENT_URL}/promote`, {
+        method: "POST",
+        headers: buildCloudAgentHeaders(true),
+        body: JSON.stringify({ projectId: "genesys-project", checkpointId, promotionToken }),
+      });
+      const data = await response.json();
+      if (!response.ok || data.status !== "success" || typeof data.url !== "string") {
+        throw new Error(data.message || `Promotion failed (${response.status}).`);
+      }
+      setMessages((previous) => previous.map((message, itemIndex) =>
+        itemIndex === index
+          ? { ...message, promotionUrl: data.url }
+          : message
+      ));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      setMessages((previous) => previous.map((item, itemIndex) =>
+        itemIndex === index
+          ? { ...item, promotionError: message }
+          : item
+      ));
+    } finally {
+      setPromotingCheckpoint("");
     }
   }
 
@@ -819,6 +874,38 @@ function BuildPage() {
                           Build reported errors.
                         </div>
                       )}
+
+                    {message.role === "bot" && message.checkpointId && message.promotionToken && (
+                      <div className="mt-3 w-full rounded-xl border border-blue-100 bg-blue-50 p-3">
+                        <div className="mb-2 text-[10px] font-semibold text-blue-900">
+                          Build passed and browser verification completed.
+                        </div>
+                        {message.promotionUrl ? (
+                          <a
+                            href={message.promotionUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-3 py-2 text-xs font-semibold text-white hover:bg-blue-700"
+                          >
+                            Review production pull request <ExternalLink size={13} />
+                          </a>
+                        ) : (
+                          <button
+                            type="button"
+                            disabled={Boolean(promotingCheckpoint)}
+                            onClick={() => void handlePromote(index, message.checkpointId!, message.promotionToken!)}
+                            className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-3 py-2 text-xs font-semibold text-white hover:bg-blue-700 disabled:opacity-60"
+                          >
+                            {promotingCheckpoint === message.checkpointId ? <Loader2 size={13} className="animate-spin" /> : <ExternalLink size={13} />}
+                            Create review pull request
+                          </button>
+                        )}
+                        {message.promotionError && (
+                          <p className="mt-2 text-xs text-red-700">{message.promotionError}</p>
+                        )}
+                        <p className="mt-2 text-[10px] text-blue-700">This opens a pull request for review; it does not deploy or merge automatically.</p>
+                      </div>
+                    )}
                   </div>
                 )
               )}
