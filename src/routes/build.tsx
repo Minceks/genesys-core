@@ -6,43 +6,27 @@ import React, {
   useState,
 } from "react";
 
-import { Navbar } from "@/components/genesys/navbar";
-import { askGenesys } from "@/utils/ai.functions";
+import { AppShell } from "@/components/AppShell";
+import {
+  askGenesys,
+  buildCloudAgentHeaders,
+  CLOUD_AGENT_URL,
+} from "@/utils/ai.functions";
 
 import {
   Send,
+  ArrowRight,
   Brain,
-  ListChecks,
   Loader2,
-  Eye,
-  FileCode,
-  RefreshCw,
   Check,
-  AlertCircle,
+  RefreshCw,
   ExternalLink,
+  AlertCircle,
+  FileCode,
 } from "lucide-react";
 
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-
-const API_KEY = (
-  import.meta.env.VITE_CLOUD_AGENT_API_KEY || ""
-).trim();
-
-
-// ============================================================
-// CONFIG
-// ============================================================
-
-const CLOUD_AGENT_URL = (
-  import.meta.env.VITE_CLOUD_AGENT_URL ||
-  (import.meta.env.DEV
-    ? "http://127.0.0.1:5000"
-    : "https://remarkable-generosity-production-7d5a.up.railway.app")
-).replace(/\/+$/, "");
-
-const LOCAL_PREVIEW_URL = "http://127.0.0.1:4173";
-
 
 // ============================================================
 // TYPES
@@ -68,17 +52,6 @@ type AgentStep = {
   };
 };
 
-type AgentResponse = {
-  text: string;
-  agent?: string;
-  steps?: AgentStep[];
-  modifiedFiles?: string[];
-  buildAttempted?: boolean;
-  buildPassed?: boolean;
-  previewUrl?: string | null;
-  status?: string;
-};
-
 type ChatMessage = {
   role: "user" | "bot";
   text: string;
@@ -87,9 +60,10 @@ type ChatMessage = {
   plan?: string;
   hasFile?: boolean;
   modifiedFiles?: string[];
+  buildAttempted?: boolean;
   buildPassed?: boolean;
+  steps?: AgentStep[];
 };
-
 
 // ============================================================
 // HELPERS
@@ -106,11 +80,11 @@ function cleanAgentText(text: string): string {
       ""
     )
     .replace(
-      /<GENESYS_PREVIEW>[\s\S]*?(?:<\/GENESYS_PREVIEW>|$)/gi,
+      /<GENESYS_PREVIEW>[\s\S]*?<\/GENESYS_PREVIEW>/gi,
       ""
     )
     .replace(
-      /---FILE:[\s\S]*?\[CODE END\]/gi,
+      /---FILE:[\s\S]*?\[CODE START\][\s\S]*?\[CODE END\]/gi,
       ""
     )
     .trim();
@@ -120,32 +94,77 @@ function extractLegacyTag(
   text: string,
   tag: string
 ): string | undefined {
+  const expression = new RegExp(
+    `<${tag}>([\\s\\S]*?)<\\/${tag}>`,
+    "i"
+  );
+
+  const match = text.match(expression);
+
+  return match?.[1]?.trim() || undefined;
+}
+
+function extractPreviewCode(
+  text: string
+): string | undefined {
   const match = text.match(
-    new RegExp(
-      `<${tag}>([\\s\\S]*?)<\\/${tag}>`,
-      "i"
-    )
+    /<GENESYS_PREVIEW>([\s\S]*?)<\/GENESYS_PREVIEW>/i
   );
 
   return match?.[1]?.trim() || undefined;
 }
 
+function extractFiles(
+  text: string
+): Array<{
+  filename: string;
+  code: string;
+}> {
+  const files: Array<{
+    filename: string;
+    code: string;
+  }> = [];
+
+  const regex =
+    /---FILE:\s*([^\r\n]+?)\s*---\s*\[CODE START\]([\s\S]*?)\[CODE END\]/gi;
+
+  let match: RegExpExecArray | null;
+
+  while ((match = regex.exec(text)) !== null) {
+    const filename = match[1].trim();
+    const code = match[2].trim();
+
+    if (filename && code) {
+      files.push({
+        filename,
+        code,
+      });
+    }
+  }
+
+  return files;
+}
 
 // ============================================================
 // PAGE
 // ============================================================
 
 function BuildPage() {
+  // ----------------------------------------------------------
+  // STATE
+  // ----------------------------------------------------------
+
   const [input, setInput] = useState("");
+
   const [loading, setLoading] = useState(false);
 
-  const [previewUrl, setPreviewUrl] = useState(
-    import.meta.env.DEV
-      ? LOCAL_PREVIEW_URL
-      : ""
-  );
+  const [previewCode, setPreviewCode] = useState("");
+
+  const [previewUrl, setPreviewUrl] = useState("");
 
   const [previewKey, setPreviewKey] = useState(0);
+
+  const [mobileView, setMobileView] = useState<"chat" | "preview">("chat");
 
   const [previewOnline, setPreviewOnline] =
     useState(false);
@@ -177,7 +196,6 @@ function BuildPage() {
   const scrollRef =
     useRef<HTMLDivElement>(null);
 
-
   // ==========================================================
   // PROJECT EXPLORER
   // ==========================================================
@@ -185,13 +203,9 @@ function BuildPage() {
   async function refreshFiles() {
     try {
       const response = await fetch(
-        `${CLOUD_AGENT_URL}/list-files`,
+        `${CLOUD_AGENT_URL}/list-files?projectId=genesys-project`,
         {
-          headers: {
-            ...(API_KEY
-              ? { "X-API-Key": API_KEY }
-              : {}),
-          },
+          headers: buildCloudAgentHeaders(),
         }
       );
 
@@ -201,25 +215,21 @@ function BuildPage() {
         );
       }
 
-      const data =
-        await response.json();
+      const data = await response.json();
 
-      if (data.tree) {
-        setProjectTree({
-          routes: Array.isArray(
-            data.tree.routes
-          )
-            ? data.tree.routes
-            : [],
+      const tree = data.tree || {};
 
-          components:
-            Array.isArray(
-              data.tree.components
-            )
-              ? data.tree.components
-              : [],
-        });
-      }
+      setProjectTree({
+        routes: Array.isArray(tree.routes)
+          ? tree.routes
+          : [],
+
+        components: Array.isArray(
+          tree.components
+        )
+          ? tree.components
+          : [],
+      });
     } catch (error) {
       console.error(
         "GeneSys project explorer unavailable:",
@@ -228,41 +238,42 @@ function BuildPage() {
     }
   }
 
-
   // ==========================================================
-  // PREVIEW HEALTH CHECK
+  // WRITE FILE TO CLOUD AGENT
   // ==========================================================
 
-  async function checkPreview() {
-    // Production preview URLs are cross-origin Daytona URLs, so fetch-based
-    // health checks are blocked by browser CORS. The iframe load event is
-    // the reliable signal in production.
-    if (!import.meta.env.DEV) {
-      return;
-    }
+  async function writeFile(
+    filename: string,
+    code: string
+  ) {
+    const response = await fetch(
+      `${CLOUD_AGENT_URL}/write-file`,
+      {
+        method: "POST",
 
-    if (!previewUrl) {
-      setPreviewOnline(false);
-      return;
-    }
+        headers: {
+          ...buildCloudAgentHeaders(true),
+          "Content-Type": "application/json",
+        },
 
-    try {
-      const response = await fetch(
-        previewUrl,
-        {
-          method: "GET",
-          cache: "no-store",
-        }
+        body: JSON.stringify({
+          filename,
+          content: code,
+        }),
+      }
+    );
+
+    if (!response.ok) {
+      const errorText =
+        await response.text();
+
+      throw new Error(
+        `Failed to write ${filename}: ${response.status} ${errorText}`
       );
-
-      setPreviewOnline(
-        response.ok
-      );
-    } catch {
-      setPreviewOnline(false);
     }
+
+    return response.json().catch(() => ({}));
   }
-
 
   // ==========================================================
   // INITIALIZATION
@@ -272,20 +283,9 @@ function BuildPage() {
     void refreshFiles();
   }, []);
 
-  useEffect(() => {
-    void checkPreview();
-
-    const interval = window.setInterval(
-      () => {
-        void checkPreview();
-      },
-      5000
-    );
-
-    return () => {
-      window.clearInterval(interval);
-    };
-  }, [previewUrl]);
+  // ==========================================================
+  // SAVE CHAT
+  // ==========================================================
 
   useEffect(() => {
     try {
@@ -303,9 +303,61 @@ function BuildPage() {
     }
   }, [messages, loading]);
 
+  // ==========================================================
+  // PREVIEW
+  // ==========================================================
+
+  useEffect(() => {
+    setPreviewOnline(Boolean(previewUrl || previewCode));
+  }, [previewCode, previewUrl]);
+
+  function reloadPreview() {
+    if (!previewUrl && !previewCode) {
+      return;
+    }
+
+    setPreviewKey(
+      (value) => value + 1
+    );
+  }
+
+  function openPreview() {
+    if (previewUrl) {
+      window.open(
+        previewUrl,
+        "_blank",
+        "noopener,noreferrer"
+      );
+      return;
+    }
+
+    if (!previewCode) {
+      return;
+    }
+
+    const blob = new Blob(
+      [previewCode],
+      {
+        type: "text/html",
+      }
+    );
+
+    const url =
+      URL.createObjectURL(blob);
+
+    window.open(
+      url,
+      "_blank",
+      "noopener,noreferrer"
+    );
+
+    window.setTimeout(() => {
+      URL.revokeObjectURL(url);
+    }, 10000);
+  }
 
   // ==========================================================
-  // SEND AGENT REQUEST
+  // SEND REQUEST
   // ==========================================================
 
   async function handleSend(
@@ -320,8 +372,10 @@ function BuildPage() {
     }
 
     setLoading(true);
+    setPreviewUrl("");
+    setPreviewCode("");
+    setPreviewOnline(false);
 
-    // Add user message only for normal chat sends.
     if (!overridePrompt) {
       setMessages((previous) => [
         ...previous,
@@ -336,109 +390,81 @@ function BuildPage() {
 
     try {
       // ------------------------------------------------------
-      // RUN REAL SERVER-SIDE AGENT
+      // 1. CALL RAILWAY CLOUD AGENT
       // ------------------------------------------------------
 
       const response =
-        (await askGenesys(
-          promptText
-        )) as AgentResponse;
+        await askGenesys(promptText);
 
-      const text =
-        response.text ||
-        "GeneSys completed the request.";
+      const text = response.text || "";
 
-      const steps =
-        response.steps || [];
+      const livePreviewUrl =
+        typeof response.previewUrl === "string"
+          ? response.previewUrl
+          : "";
 
-      // ------------------------------------------------------
-      // FIND PREVIEW SERVER RESULT
-      // ------------------------------------------------------
+      setPreviewUrl(livePreviewUrl);
 
-      const previewStep =
-        steps.find(
-          (step) =>
-            step.tool ===
-              "start_preview" &&
-            step.status === "success" &&
-            typeof step.result?.url ===
-              "string" &&
-            step.result.url.length > 0
-        );
-
-      const nextPreviewUrl =
-        response.previewUrl ||
-        previewStep?.result?.url;
-
-      if (nextPreviewUrl) {
+      if (livePreviewUrl) {
+        setPreviewCode("");
+        setPreviewOnline(true);
+        setPreviewKey((value) => value + 1);
+        setMobileView("preview");
+      } else if (response.previewStarted === false) {
         setPreviewOnline(false);
-
-        setPreviewUrl(
-          nextPreviewUrl
-        );
-
-        // Force iframe reload after
-        // a new agent execution.
-        setPreviewKey(
-          (value) => value + 1
-        );
-      } else if (
-        response.buildPassed ||
-        steps.some(
-          (step) =>
-            step.tool ===
-              "run_build" &&
-            step.status === "success" &&
-            step.result?.success === true
-        )
-      ) {
-        // Even when the preview server
-        // is already running, reload the
-        // iframe after a successful build.
-        setPreviewKey(
-          (value) => value + 1
-        );
       }
 
       // ------------------------------------------------------
-      // COUNT FILE CHANGES
+      // 2. EXTRACT PREVIEW
       // ------------------------------------------------------
 
-      const writtenFiles =
-        response.modifiedFiles ||
-        steps
-          .filter(
-            (step) =>
-              step.tool ===
-                "write_file" &&
-              step.status ===
-                "success"
-          )
-          .map(
-            (step) =>
-              step.result?.file
-          )
-          .filter(
-            (
-              file
-            ): file is string =>
-              typeof file ===
-              "string"
+      const preview =
+        extractPreviewCode(text);
+
+      if (preview) {
+        setPreviewCode(preview);
+        if (!livePreviewUrl) {
+          setPreviewOnline(true);
+        }
+      }
+
+      // ------------------------------------------------------
+      // 3. EXTRACT FILES
+      // ------------------------------------------------------
+
+      const files =
+        extractFiles(text);
+
+      const modifiedFiles: string[] = [];
+
+      for (const file of files) {
+        try {
+          await writeFile(
+            file.filename,
+            file.code
           );
 
-      const uniqueFiles =
-        [...new Set(writtenFiles)];
+          modifiedFiles.push(
+            file.filename
+          );
+        } catch (fileError) {
+          console.error(
+            `Failed to write ${file.filename}:`,
+            fileError
+          );
+        }
+      }
 
       // ------------------------------------------------------
-      // REFRESH EXPLORER
+      // 4. REFRESH PROJECT EXPLORER
       // ------------------------------------------------------
 
-      if (uniqueFiles.length > 0) {
+      if (modifiedFiles.length > 0) {
         await refreshFiles();
       }
 
       // ------------------------------------------------------
-      // LEGACY THINKING / PLAN EXTRACTION
+      // 5. EXTRACT ARCHITECTURE DATA
       // ------------------------------------------------------
 
       const thought =
@@ -457,42 +483,44 @@ function BuildPage() {
         cleanAgentText(text);
 
       // ------------------------------------------------------
-      // ADD ASSISTANT MESSAGE
+      // 6. ADD RESPONSE TO CHAT
       // ------------------------------------------------------
 
       setMessages((previous) => [
         ...previous,
         {
           role: "bot",
+
           text:
             cleanDisplay ||
-            "GeneSys completed the requested change.",
+            "GeneSys architectural synchronization complete.",
+
+          agent:
+            response.agent ||
+            "Chief Architect",
 
           thought,
 
           plan,
 
-          agent:
-            response.agent ||
-            "GeneSys Agent",
-
           hasFile:
-            uniqueFiles.length > 0,
+            modifiedFiles.length > 0,
 
-          modifiedFiles:
-            uniqueFiles,
+          modifiedFiles,
+
+          buildAttempted:
+            response.buildAttempted,
 
           buildPassed:
-            response.buildPassed ||
-            steps.some(
-              (step) =>
-                step.tool ===
-                  "run_build" &&
-                step.status ===
-                  "success" &&
-                step.result?.success ===
-                  true
-            ),
+            response.buildPassed,
+
+          steps:
+            response.steps || [
+              {
+                tool: "cloud_agent",
+                status: "success",
+              },
+            ],
         },
       ]);
     } catch (error) {
@@ -510,579 +538,430 @@ function BuildPage() {
         ...previous,
         {
           role: "bot",
+
           text:
-            `❌ Connection Error: ${message}`,
-          agent: "System",
+            `**SYSTEM ERROR DETECTED**\n\n${message}`,
+
+          agent: "System Guard",
         },
       ]);
     } finally {
       setLoading(false);
-
-      // Re-check the preview after
-      // the agent has finished.
-      window.setTimeout(
-        () => {
-          void checkPreview();
-        },
-        500
-      );
     }
   }
 
+  // ==========================================================
+  // KEYBOARD
+  // ==========================================================
+
+  function handleInputKeyDown(
+    event: React.KeyboardEvent<HTMLTextAreaElement>
+  ) {
+    if (
+      event.key === "Enter" &&
+      !event.shiftKey
+    ) {
+      event.preventDefault();
+
+      if (
+        !loading &&
+        input.trim()
+      ) {
+        void handleSend();
+      }
+    }
+  }
 
   // ==========================================================
   // RENDER
   // ==========================================================
 
   return (
-    <div className="flex flex-col h-screen bg-[#020202] text-white overflow-hidden font-sans">
-      <Navbar />
+    <AppShell
+      projectTree={projectTree}
+      previewUrl={previewUrl}
+      previewOnline={previewOnline}
+      onRefreshFiles={refreshFiles}
+    >
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-background">
+        {/* ==================================================
+            HEADER
+        ================================================== */}
 
-      <div className="flex flex-1 pt-16 overflow-hidden">
-
-        {/* ================================================== */}
-        {/* COLUMN 1 — PROJECT EXPLORER                       */}
-        {/* ================================================== */}
-
-        <aside className="w-56 shrink-0 border-r border-white/5 bg-zinc-950/80 p-4 hidden md:flex flex-col overflow-y-auto">
-
-          <div className="flex items-center justify-between mb-6 opacity-60">
-            <span className="text-[9px] font-black uppercase tracking-[0.3em]">
-              Project Explorer
-            </span>
-
-            <RefreshCw
-              size={12}
-              onClick={() => {
-                void refreshFiles();
-              }}
-              className="cursor-pointer hover:rotate-180 transition-all"
-            />
+        <header className="flex h-14 shrink-0 items-center justify-between border-b border-slate-200/80 bg-white/95 px-3 backdrop-blur sm:px-5">
+          <div className="flex min-w-0 items-center gap-3">
+            <div className="hidden h-8 w-8 items-center justify-center rounded-xl bg-blue-50 text-blue-700 sm:flex">
+              <Brain size={16} />
+            </div>
+            <div className="min-w-0">
+              <div className="flex items-center gap-2 text-[10px] font-medium text-slate-400">
+                <span>Workspace</span>
+                <span aria-hidden="true">/</span>
+                <span className="font-semibold text-slate-600">App builder</span>
+              </div>
+              <div className="truncate text-xs font-semibold text-slate-900 sm:text-sm">
+                {projectTree.routes.length + projectTree.components.length > 0
+                  ? "genesys-project"
+                  : "New project"}
+              </div>
+            </div>
           </div>
 
-
-          <div className="space-y-6">
-
-            {/* ROUTES */}
-
-            <div>
-              <div className="flex items-center gap-2 mb-2">
-                <ListChecks
-                  size={11}
-                  className="text-blue-400/70"
-                />
-
-                <h4 className="text-[8px] font-bold text-blue-400/50 uppercase tracking-widest">
-                  Routes
-                </h4>
-              </div>
-
-              {projectTree.routes.length >
-              0 ? (
-                <div className="space-y-1">
-                  {projectTree.routes.map(
-                    (file) => (
-                      <div
-                        key={file}
-                        className="text-[10px] text-white/35 p-1.5 rounded font-mono flex items-center gap-2 hover:bg-white/5 hover:text-white/70 transition-colors"
-                        title={file}
-                      >
-                        <FileCode
-                          size={10}
-                          className="shrink-0"
-                        />
-
-                        <span className="truncate">
-                          {file}
-                        </span>
-                      </div>
-                    )
-                  )}
-                </div>
-              ) : (
-                <div className="text-[9px] text-white/15 px-2">
-                  No routes found
-                </div>
-              )}
+          <div className="flex items-center gap-2">
+            <div className="mr-1 flex items-center rounded-lg border border-slate-200 bg-slate-50 p-0.5 xl:hidden" role="group" aria-label="Builder panels">
+              <button
+                type="button"
+                onClick={() => setMobileView("chat")}
+                aria-pressed={mobileView === "chat"}
+                className={`rounded-md px-2 py-1 text-[10px] font-bold ${
+                    mobileView === "chat"
+                    ? "bg-blue-600 text-white"
+                    : "text-slate-500"
+                }`}
+              >
+                Chat
+              </button>
+              <button
+                type="button"
+                onClick={() => setMobileView("preview")}
+                aria-pressed={mobileView === "preview"}
+                className={`rounded-md px-2 py-1 text-[10px] font-bold ${
+                    mobileView === "preview"
+                    ? "bg-blue-600 text-white"
+                    : "text-slate-500"
+                }`}
+              >
+                Preview
+              </button>
             </div>
 
+            <div className="flex items-center gap-2 rounded-full border border-slate-200 bg-white px-2.5 py-1.5 shadow-sm sm:px-3">
+              <span
+                className={`h-2 w-2 rounded-full ${
+                  previewOnline
+                    ? "bg-emerald-500 animate-pulse"
+                    : "bg-slate-300"
+                }`}
+              />
 
-            {/* COMPONENTS */}
-
-            <div>
-              <div className="flex items-center gap-2 mb-2">
-                <Brain
-                  size={11}
-                  className="text-purple-400/70"
-                />
-
-                <h4 className="text-[8px] font-bold text-purple-400/50 uppercase tracking-widest">
-                  Components
-                </h4>
-              </div>
-
-              {projectTree.components.length >
-              0 ? (
-                <div className="space-y-1">
-                  {projectTree.components.map(
-                    (file) => (
-                      <div
-                        key={file}
-                        className="text-[10px] text-white/35 p-1.5 rounded font-mono flex items-center gap-2 hover:bg-white/5 hover:text-white/70 transition-colors"
-                        title={file}
-                      >
-                        <FileCode
-                          size={10}
-                          className="shrink-0"
-                        />
-
-                        <span className="truncate">
-                          {file}
-                        </span>
-                      </div>
-                    )
-                  )}
-                </div>
-              ) : (
-                <div className="text-[9px] text-white/15 px-2">
-                  No components found
-                </div>
-              )}
+              <span
+                className={`hidden text-[10px] font-bold uppercase tracking-wider sm:inline ${
+                  previewOnline
+                    ? "text-emerald-600"
+                    : "text-slate-400"
+                }`}
+              >
+                {previewOnline
+                  ? "Preview Ready"
+                  : loading
+                    ? "Building"
+                    : "GeneSys Builder"}
+              </span>
             </div>
 
+            <button
+              type="button"
+              onClick={reloadPreview}
+              disabled={!previewCode && !previewUrl}
+              className="rounded-lg p-2 text-slate-400 transition hover:bg-slate-100 disabled:opacity-30"
+              title="Reload preview"
+            >
+              <RefreshCw size={17} />
+            </button>
+
+            <button
+              type="button"
+              onClick={openPreview}
+              disabled={!previewCode && !previewUrl}
+              className="rounded-lg p-2 text-slate-400 transition hover:bg-slate-100 disabled:opacity-30"
+              title="Open preview"
+            >
+              <ExternalLink size={17} />
+            </button>
           </div>
-        </aside>
+        </header>
 
+        {/* ==================================================
+            MAIN
+        ================================================== */}
 
-        {/* ================================================== */}
-        {/* COLUMN 2 — CHAT                                  */}
-        {/* ================================================== */}
+        <div className="flex min-h-0 flex-1 overflow-hidden">
+          {/* =================================================
+              CHAT
+          ================================================= */}
 
-        <aside className="w-[420px] shrink-0 border-r border-white/5 flex flex-col bg-zinc-950/40 backdrop-blur-xl">
-
-          {/* CHAT HISTORY */}
-
-          <div
-            ref={scrollRef}
-            className="flex-1 overflow-y-auto p-4 space-y-6"
-          >
-
-            {messages.length === 0 && (
-              <div className="h-full flex flex-col items-center justify-center text-center px-8">
-                <div className="w-12 h-12 rounded-2xl bg-blue-500/10 border border-blue-500/10 flex items-center justify-center mb-4">
-                  <Brain
-                    size={22}
-                    className="text-blue-400/60"
-                  />
-                </div>
-
-                <h3 className="text-sm font-semibold text-white/70 mb-2">
-                  GeneSys Agent
-                </h3>
-
-                <p className="text-[11px] leading-relaxed text-white/25">
-                  Describe what you want to
-                  build. GeneSys will inspect
-                  the project, edit the real
-                  files, build the application,
-                  repair errors, and launch the
-                  live preview.
-                </p>
-              </div>
-            )}
-
-            {messages.map(
-              (message, index) => (
-                <div
-                  key={index}
-                  className={`flex flex-col ${
-                    message.role === "user"
-                      ? "items-end"
-                      : "items-start"
-                  }`}
-                >
-
-                  {/* AGENT LABEL */}
-
-                  {message.agent && (
-                    <div className="text-[9px] font-bold text-blue-400/50 uppercase tracking-widest mb-2">
-                      {message.agent}
-                    </div>
-                  )}
-
-
-                  {/* THOUGHT */}
-
-                  {message.thought && (
-                    <div className="mb-2 p-3 bg-blue-500/5 border border-blue-500/10 rounded-xl text-[10px] text-blue-300 italic w-full leading-relaxed">
-                      💭 {message.thought}
-                    </div>
-                  )}
-
-
-                  {/* PLAN */}
-
-                  {message.plan && (
-                    <div className="mb-2 p-3 bg-emerald-500/5 border border-emerald-500/10 rounded-xl text-[10px] text-emerald-400 w-full">
-                      <ReactMarkdown>
-                        {message.plan}
-                      </ReactMarkdown>
-                    </div>
-                  )}
-
-
-                  {/* MESSAGE */}
-
-                  <div
-                    className={`p-4 rounded-2xl text-sm max-w-full ${
-                      message.role === "user"
-                        ? "bg-blue-600 shadow-xl shadow-blue-900/20"
-                        : "bg-zinc-900 border border-white/5"
-                    }`}
-                  >
-                    <ReactMarkdown
-                      remarkPlugins={[
-                        remarkGfm,
-                      ]}
-                    >
-                      {message.text}
-                    </ReactMarkdown>
+          <aside className={`${mobileView === "chat" ? "flex" : "hidden"} min-h-0 w-full flex-col border-r border-slate-200/80 bg-white lg:w-[430px] xl:flex`}>
+            <div
+              ref={scrollRef}
+              className="min-h-0 flex-1 space-y-4 overflow-y-auto bg-gradient-to-b from-white to-slate-50/70 p-4 sm:p-5"
+            >
+              {messages.length === 0 && (
+                <div className="rounded-3xl border border-slate-200 bg-white p-5 text-center shadow-sm shadow-slate-900/[0.03] sm:p-6">
+                  <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-br from-blue-50 to-indigo-50 ring-1 ring-blue-100">
+                    <Brain
+                      size={24}
+                      className="text-blue-500"
+                    />
                   </div>
 
+                  <h3 className="text-lg font-bold text-slate-900">
+                    What would you like to build?
+                  </h3>
 
-                  {/* FILES */}
+                  <p className="mx-auto mt-2 max-w-xs text-xs leading-5 text-slate-500">
+                    Start with a goal. You can refine the design after you see it working.
+                  </p>
 
-                  {message.role ===
-                    "bot" &&
-                    message.hasFile && (
-                      <div className="mt-2 space-y-1">
+                  <div className="mt-5 space-y-2 text-left">
+                    {[
+                      "Build a simple appointment booking app",
+                      "Create a dashboard for tracking expenses",
+                      "Make a portfolio site for a photographer",
+                    ].map((suggestion) => (
+                      <button
+                        key={suggestion}
+                        type="button"
+                        onClick={() => setInput(suggestion)}
+                        className="group flex w-full items-center justify-between gap-2 rounded-xl border border-slate-200 bg-white px-3 py-3 text-left text-xs font-medium text-slate-600 shadow-sm shadow-slate-900/[0.02] transition hover:-translate-y-0.5 hover:border-blue-200 hover:bg-blue-50/50 hover:text-blue-800 hover:shadow-blue-900/[0.04]"
+                      >
+                        {suggestion}
+                        <ArrowRight size={13} className="shrink-0 text-slate-300 transition group-hover:translate-x-0.5 group-hover:text-blue-600" />
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
 
-                        <div className="flex items-center gap-1 text-[8px] font-black text-green-500/60 bg-green-500/5 px-2 py-1 rounded-full border border-green-500/10 uppercase tracking-widest">
-                          <Check size={8} />
+              {messages.map(
+                (message, index) => (
+                  <div
+                    key={`${index}-${message.role}`}
+                    className={`flex flex-col ${
+                      message.role === "user"
+                        ? "items-end"
+                        : "items-start"
+                    }`}
+                  >
+                    {message.agent && (
+                      <div className="mb-1 ml-1 text-[9px] font-bold uppercase tracking-[0.2em] text-blue-600 opacity-50">
+                        {message.agent}
+                      </div>
+                    )}
 
-                          {
-                            message
-                              .modifiedFiles
-                              ?.length
-                          }
-
-                          {" "}
-                          file
-                          {
-                            message
-                              .modifiedFiles
-                              ?.length === 1
-                              ? ""
-                              : "s"
-                          }
-                          {" "}
-                          updated
+                    {message.thought && (
+                      <div className="mb-3 w-full rounded-2xl border border-blue-100 bg-blue-50/50 p-3 text-[11px] italic text-blue-700">
+                        <div className="mb-1 flex items-center gap-2 text-[8px] font-black uppercase tracking-widest not-italic opacity-50">
+                          <Brain size={12} />
+                          Reasoning
                         </div>
 
-                        {message.modifiedFiles
-                          ?.slice(0, 6)
-                          .map(
+                        {message.thought}
+                      </div>
+                    )}
+
+                    {message.plan && (
+                      <div className="mb-3 w-full rounded-2xl border border-slate-200 bg-white p-3 text-[11px] text-slate-600">
+                        <div className="mb-1 text-[8px] font-black uppercase tracking-widest text-slate-400">
+                          Plan
+                        </div>
+
+                        {message.plan}
+                      </div>
+                    )}
+
+                    <div
+                      className={`max-w-[95%] rounded-2xl p-4 text-sm shadow-sm ${
+                        message.role === "user"
+                          ? "rounded-br-none bg-blue-600 text-white"
+                          : "border border-slate-200 bg-white text-slate-700"
+                      }`}
+                    >
+                      <div className="prose prose-sm max-w-none">
+                        <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                          {message.text}
+                        </ReactMarkdown>
+                      </div>
+                    </div>
+
+                    {message.hasFile && (
+                      <div className="mt-3 w-full rounded-xl border border-emerald-100 bg-emerald-50 p-3">
+                        <div className="mb-2 flex items-center gap-2 text-[9px] font-bold uppercase tracking-widest text-emerald-600">
+                          <Check size={12} />
+                          Files synchronized
+                        </div>
+
+                        <div className="space-y-1">
+                          {message.modifiedFiles?.map(
                             (file) => (
                               <div
                                 key={file}
-                                className="text-[9px] text-white/25 font-mono px-2"
+                                className="flex items-center gap-2 rounded-lg border border-emerald-100 bg-white px-2 py-1.5 font-mono text-[10px] text-emerald-700"
                               >
-                                • {file}
+                                <FileCode
+                                  size={12}
+                                />
+
+                                {file}
                               </div>
                             )
                           )}
-
+                        </div>
                       </div>
                     )}
 
-
-                  {/* BUILD STATUS */}
-
-                  {message.role ===
-                    "bot" &&
-                    message.buildPassed && (
-                      <div className="flex items-center gap-1 mt-2 text-[8px] font-black text-emerald-400/60 bg-emerald-500/5 px-2 py-1 rounded-full border border-emerald-500/10 uppercase tracking-widest">
-                        <Check size={8} />
-                        Build verified
-                      </div>
-                    )}
-
-                </div>
-              )
-            )}
-
-
-            {/* LOADING */}
-
-            {loading && (
-              <div className="flex items-start">
-                <div className="bg-zinc-900 border border-white/5 rounded-2xl p-4 flex items-center gap-3">
-
-                  <Loader2
-                    size={16}
-                    className="animate-spin text-blue-400"
-                  />
-
-                  <div>
-                    <div className="text-[10px] font-bold text-white/60 uppercase tracking-widest">
-                      GeneSys is working
-                    </div>
-
-                    <div className="text-[9px] text-white/25 mt-1">
-                      Inspecting → Editing →
-                      Building → Verifying
-                    </div>
+                    {message.buildAttempted &&
+                      message.buildPassed ===
+                        false && (
+                        <div className="mt-3 flex w-full items-center gap-2 rounded-xl border border-red-100 bg-red-50 p-3 text-[10px] font-bold text-red-600">
+                          <AlertCircle
+                            size={14}
+                          />
+                          Build reported errors.
+                        </div>
+                      )}
                   </div>
-
-                </div>
-              </div>
-            )}
-
-          </div>
-
-
-          {/* INPUT */}
-
-          <div className="p-4 bg-black/40 border-t border-white/5">
-
-            <div className="flex items-end gap-2 bg-zinc-900 border border-white/10 rounded-2xl p-2">
-
-              <textarea
-                value={input}
-                onChange={(event) =>
-                  setInput(event.target.value)
-                }
-                onKeyDown={(event) => {
-                  if (
-                    event.key ===
-                      "Enter" &&
-                    !event.shiftKey
-                  ) {
-                    event.preventDefault();
-                    void handleSend();
-                  }
-                }}
-                placeholder="Describe what you want to build..."
-                className="flex-1 bg-transparent border-none outline-none text-sm p-2 resize-none max-h-32 text-white placeholder:text-white/20"
-                rows={1}
-                disabled={loading}
-              />
-
-              <button
-                onClick={() => {
-                  void handleSend();
-                }}
-                disabled={
-                  loading ||
-                  !input.trim()
-                }
-                className="bg-blue-600 p-2.5 rounded-xl shadow-lg hover:bg-blue-500 disabled:opacity-30 disabled:hover:bg-blue-600 transition-all"
-                aria-label="Send request"
-              >
-                {loading ? (
-                  <Loader2
-                    size={18}
-                    className="animate-spin"
-                  />
-                ) : (
-                  <Send size={18} />
-                )}
-              </button>
-
-            </div>
-
-            <div className="text-[8px] text-white/15 mt-2 px-2">
-              Enter to send · Shift + Enter
-              for a new line
-            </div>
-
-          </div>
-        </aside>
-
-
-        {/* ================================================== */}
-        {/* COLUMN 3 — LIVE PREVIEW                           */}
-        {/* ================================================== */}
-
-        <main className="flex-1 p-6 relative min-w-0">
-
-          <div className="w-full h-full rounded-[2.5rem] overflow-hidden border border-white/5 bg-black shadow-2xl relative">
-
-            {/* PREVIEW HEADER */}
-
-            <div className="absolute top-0 left-0 right-0 z-20 h-12 px-5 flex items-center justify-between bg-black/60 backdrop-blur-xl border-b border-white/5">
-
-              <div className="flex items-center gap-3">
-
-                <div className="flex items-center gap-2">
-                  <Eye
-                    size={13}
-                    className="text-blue-400"
-                  />
-
-                  <span className="text-[9px] font-black uppercase tracking-[0.25em] text-white/50">
-                    Live Preview
-                  </span>
-                </div>
-
-
-                <div className="flex items-center gap-1.5">
-
-                  <span
-                    className={`w-1.5 h-1.5 rounded-full ${
-                      previewOnline
-                        ? "bg-emerald-400"
-                        : "bg-red-400"
-                    }`}
-                  />
-
-                  <span className="text-[8px] uppercase tracking-widest text-white/25">
-                    {previewOnline
-                      ? "Online"
-                      : "Offline"}
-                  </span>
-
-                </div>
-
-              </div>
-
-
-              <div className="flex items-center gap-2">
-
-                <button
-                  type="button"
-                  onClick={() => {
-                    setPreviewKey(
-                      (value) =>
-                        value + 1
-                    );
-
-                    void checkPreview();
-                  }}
-                  className="p-2 rounded-lg text-white/30 hover:text-white/70 hover:bg-white/5 transition-colors"
-                  title="Refresh preview"
-                >
-                  <RefreshCw
-                    size={13}
-                  />
-                </button>
-
-
-                <a
-                  href={previewUrl}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="p-2 rounded-lg text-white/30 hover:text-white/70 hover:bg-white/5 transition-colors"
-                  title="Open preview in new tab"
-                >
-                  <ExternalLink
-                    size={13}
-                  />
-                </a>
-
-              </div>
-            </div>
-
-
-            {/* PREVIEW */}
-
-            {previewUrl ? (
-              <iframe
-                key={previewKey}
-                src={previewUrl}
-                title="GeneSys Application Preview"
-                className="absolute inset-0 pt-12 w-full h-full border-0 bg-black"
-                allow="fullscreen"
-                sandbox="allow-scripts allow-same-origin allow-forms allow-modals allow-popups"
-                onLoad={() => setPreviewOnline(true)}
-                onError={() => setPreviewOnline(false)}
-              />
-            ) : (
-              <div className="w-full h-full flex items-center justify-center">
-                <div className="text-center">
-
-                  <AlertCircle
-                    size={24}
-                    className="mx-auto mb-3 text-white/10"
-                  />
-
-                  <p className="text-[10px] text-white/20 uppercase tracking-[0.25em]">
-                    Preview unavailable
-                  </p>
-
-                </div>
-              </div>
-            )}
-
-
-            {/* INITIAL OVERLAY */}
-
-            {!previewOnline &&
-              !loading && (
-                <div className="absolute inset-0 z-10 pointer-events-none flex items-center justify-center pt-12">
-                  <div className="bg-black/70 backdrop-blur-md border border-white/5 rounded-2xl px-5 py-4 text-center">
-
-                    <div className="flex items-center justify-center gap-2 mb-2">
-                      <AlertCircle
-                        size={14}
-                        className="text-white/30"
-                      />
-
-                      <span className="text-[9px] font-black uppercase tracking-widest text-white/40">
-                        Waiting for preview
-                      </span>
-                    </div>
-
-                    <p className="text-[9px] text-white/20">
-                      Start the application preview
-                      through the GeneSys agent.
-                    </p>
-
-                  </div>
-                </div>
+                )
               )}
 
-
-            {/* WORKING OVERLAY */}
-
-            {loading && (
-              <div className="absolute top-16 right-5 z-30">
-
-                <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-blue-500/10 border border-blue-500/20 backdrop-blur-xl">
-
+              {loading && (
+                <div className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-white p-4 text-xs text-slate-400">
                   <Loader2
-                    size={12}
-                    className="animate-spin text-blue-400"
+                    size={16}
+                    className="animate-spin text-blue-500"
                   />
 
-                  <span className="text-[8px] font-black uppercase tracking-widest text-blue-300/70">
-                    Updating application
-                  </span>
-
+                    GeneSys is planning and building your request...
                 </div>
+              )}
+            </div>
 
+            {/* =================================================
+                INPUT
+            ================================================= */}
+
+            <div className="border-t border-slate-200/80 bg-white p-3 sm:p-4">
+              <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-2 transition-all focus-within:border-blue-300 focus-within:bg-white focus-within:shadow-[0_12px_36px_-20px_rgba(37,99,235,0.35)]">
+                <textarea
+                  value={input}
+                  onChange={(event) =>
+                    setInput(
+                      event.target.value
+                    )
+                  }
+                  onKeyDown={
+                    handleInputKeyDown
+                  }
+                  placeholder="Describe what you want to build or change..."
+                  aria-label="Describe what you want to build or change"
+                  rows={3}
+                  disabled={loading}
+                  className="w-full resize-none bg-transparent px-4 py-2 text-sm text-slate-900 outline-none placeholder:text-slate-400"
+                />
+
+                <div className="flex items-center justify-between px-2 pb-1">
+                  <span className="text-[10px] text-slate-400">Enter to send · Shift + Enter for a new line</span>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        void handleSend()
+                      }
+                      aria-label={loading ? "Building your request" : "Send build request"}
+                    disabled={
+                      loading ||
+                      !input.trim()
+                    }
+                    className="flex h-9 w-9 items-center justify-center rounded-xl bg-blue-600 text-white shadow-md shadow-blue-600/20 transition hover:-translate-y-0.5 hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-30"
+                  >
+                    {loading ? (
+                      <Loader2
+                        className="animate-spin"
+                        size={18}
+                      />
+                    ) : (
+                      <Send size={18} />
+                    )}
+                  </button>
+                </div>
               </div>
-            )}
 
-          </div>
+              <div className="mt-2 text-center text-[10px] text-slate-400">
+                GeneSys Builder · describe, preview, refine
+              </div>
+            </div>
+          </aside>
 
-        </main>
+          {/* =================================================
+              PREVIEW
+          ================================================= */}
 
+          <section className={`${mobileView === "preview" ? "flex" : "hidden"} min-w-0 flex-1 flex-col bg-[#f1f5f9] xl:flex`}>
+            <div className="flex h-12 shrink-0 items-center justify-between border-b border-slate-200 bg-white px-4 sm:px-5">
+              <div className="flex items-center gap-2">
+                <div className={`h-2 w-2 rounded-full ${previewOnline ? "bg-emerald-500" : loading ? "animate-pulse bg-amber-400" : "bg-slate-300"}`} />
+
+                <span className="text-[10px] font-bold uppercase tracking-widest text-slate-400">
+                  {previewOnline ? "Live preview" : loading ? "Building preview" : "Preview"}
+                </span>
+              </div>
+
+              {(previewCode || previewUrl) && (
+                <button
+                  type="button"
+                  onClick={reloadPreview}
+                  className="flex items-center gap-2 rounded-lg px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider text-slate-500 transition hover:bg-slate-100"
+                >
+                  <RefreshCw size={13} />
+                  Reload
+                </button>
+              )}
+            </div>
+
+            <div className="min-h-0 flex-1 p-3 sm:p-6">
+              <div className="relative h-full w-full overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-[0_24px_70px_-40px_rgba(15,23,42,0.35)] sm:rounded-[1.5rem]">
+                {previewUrl || previewCode ? (
+                  <iframe
+                    key={previewKey}
+                    src={previewUrl || undefined}
+                    srcDoc={previewUrl ? undefined : previewCode}
+                    title="GeneSys Simulation Preview"
+                    className="h-full w-full border-none"
+                    sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
+                    onLoad={() => setPreviewOnline(true)}
+                    onError={() => setPreviewOnline(false)}
+                  />
+                ) : (
+                  <div className="flex h-full flex-col items-center justify-center text-center">
+                    <div className="mb-4 flex h-16 w-16 items-center justify-center rounded-3xl bg-blue-50 ring-1 ring-blue-100">
+                      <FileCode
+                        size={28}
+                        className="text-blue-500"
+                      />
+                    </div>
+
+                    <div className="text-sm font-semibold tracking-tight text-slate-800">
+                      Your preview will appear here
+                    </div>
+
+                    <p className="mt-2 max-w-sm px-5 text-xs leading-5 text-slate-500">
+                      Describe an app idea in the conversation. Once GeneSys finishes the first build, you can explore it here and ask for changes.
+                    </p>
+                  </div>
+                )}
+              </div>
+            </div>
+          </section>
+        </div>
       </div>
-    </div>
+    </AppShell>
   );
 }
-
 
 // ============================================================
 // ROUTE
 // ============================================================
 
 export const Route = createRoute({
-  getParentRoute: () =>
-    rootRoute,
-
+  getParentRoute: () => rootRoute,
   path: "/build",
-
   component: BuildPage,
 });

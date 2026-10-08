@@ -1,15 +1,20 @@
-import React from 'react';
+import { Link } from "@tanstack/react-router";
+import { Cpu } from "lucide-react";
 
 export function Footer() {
   return (
-    <footer className="py-12 border-t border-white/5 text-center">
-      <p className="text-xs font-bold tracking-[0.3em] text-white/20 uppercase">
-        Genesys AI — Independent System Core
-      </p>
-      <div className="mt-4 flex justify-center gap-8 text-xs text-white/40 font-bold uppercase tracking-widest">
-        <a href="#" className="hover:text-blue-400 transition-colors">Privacy</a>
-        <a href="#" className="hover:text-blue-400 transition-colors">Terms</a>
-        <a href="#" className="hover:text-blue-400 transition-colors">Twitter</a>
+    <footer className="border-t border-slate-200 bg-white">
+      <div className="mx-auto flex max-w-7xl flex-col gap-5 px-5 py-8 sm:flex-row sm:items-center sm:justify-between sm:px-8">
+        <Link to="/" className="inline-flex items-center gap-2 text-sm font-bold tracking-tight text-slate-900 no-underline">
+          <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-blue-600 text-white"><Cpu size={15} /></span>
+          GeneSys
+        </Link>
+        <p className="text-xs text-slate-500">Make something useful. Then make it yours.</p>
+        <div className="flex items-center gap-5 text-xs font-medium text-slate-500">
+          <Link to="/pricing" className="no-underline transition hover:text-blue-700">Pricing</Link>
+          <Link to="/terms" className="no-underline transition hover:text-blue-700">Terms</Link>
+          <Link to="/dashboard" className="no-underline transition hover:text-blue-700">Dashboard</Link>
+        </div>
       </div>
     </footer>
   );

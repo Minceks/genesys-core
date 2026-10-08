@@ -27,6 +27,15 @@ export const CLOUD_AGENT_URL = (
     : PRODUCTION_AGENT_URL)
 ).replace(/\/+$/, "");
 
+export function buildCloudAgentHeaders(
+  includeJson = false,
+): Record<string, string> {
+  return {
+    ...(includeJson ? { "Content-Type": "application/json" } : {}),
+    ...(API_KEY ? { "X-API-Key": API_KEY } : {}),
+  };
+}
+
 
 // ============================================================
 // TYPES
@@ -55,6 +64,7 @@ export type GenesysAgentResponse = {
   buildAttempted: boolean;
   buildPassed: boolean;
   previewUrl: string | null;
+  previewStarted?: boolean;
   status: string;
 };
 
