@@ -1,12 +1,13 @@
-import { createFileRoute } from '@tanstack/react-router'
+import { createRoute } from '@tanstack/react-router'
 import { Route as rootRoute } from "./__root"; // We import root as an alias
 import React from "react";
 import { LegalPage, LegalSection } from "@/components/genesys/legal";
 import { Navbar } from "@/components/genesys/navbar";
 import { Footer } from "@/components/genesys/footer";
 
-export const Route = createFileRoute("/terms")({
+export const Route = createRoute({
   getParentRoute: () => rootRoute,
+  path: "/terms",
   component: TermsPage,
 });
 
