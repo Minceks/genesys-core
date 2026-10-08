@@ -308,11 +308,50 @@ class BrowserSession:
             if message.get("type") == "pageerror"
         ]
 
-        console_errors = [
+        raw_console_errors = [
             message
             for message in messages
             if message.get("type") == "error"
         ]
+
+        network_errors = list(
+            self.network_errors
+        )
+
+        def is_logger_delivery_failure(
+            error: dict[str, Any],
+        ) -> bool:
+            url = str(
+                error.get("url", "")
+            ).split("?", 1)[0].rstrip("/")
+
+            return (
+                error.get("status", 0) >= 400
+                and str(error.get("method", "")).upper() == "POST"
+                and str(error.get("resourceType", "")).lower() == "ping"
+                and url.endswith("/browser-console")
+            )
+
+        logger_delivery_failures = sum(
+            1
+            for error in network_errors
+            if is_logger_delivery_failure(error)
+        )
+
+        console_errors = []
+        ignored_console_errors = []
+
+        for error in raw_console_errors:
+            text = str(error.get("text", ""))
+
+            if (
+                logger_delivery_failures > 0
+                and text.startswith("Failed to load resource:")
+            ):
+                ignored_console_errors.append(error)
+                logger_delivery_failures -= 1
+            else:
+                console_errors.append(error)
 
         return {
             "status": "success",
@@ -320,7 +359,8 @@ class BrowserSession:
             "messages": messages,
             "pageErrors": page_errors,
             "consoleErrors": console_errors,
-            "networkErrors": list(self.network_errors),
+            "ignoredConsoleErrors": ignored_console_errors,
+            "networkErrors": network_errors,
             "hasRuntimeErrors": bool(
                 page_errors or console_errors
             ),
