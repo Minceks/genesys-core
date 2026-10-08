@@ -1225,7 +1225,30 @@ class DaytonaWorkspace:
             "projectId": self.project_id,
             "sandboxId": self.sandbox.id,
         }
-        
+
+    def promote_checkpoint(
+        self,
+        checkpoint_id: str,
+        *,
+        github_token: str,
+        repository: str,
+        base_branch: str = "main",
+        expected_commit: str,
+    ) -> dict[str, Any]:
+        from .promotion import promote_workspace_checkpoint
+
+        return promote_workspace_checkpoint(
+            self,
+            checkpoint_id,
+            project_id=self.project_id,
+            sandbox_id=self.sandbox.id,
+            project_root=REMOTE_PROJECT_ROOT,
+            github_token=github_token,
+            repository=repository,
+            base_branch=base_branch,
+            expected_commit=expected_commit,
+        )
+
     # ========================================================
     # BUILD
     # ========================================================

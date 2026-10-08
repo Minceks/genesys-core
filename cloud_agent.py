@@ -16,6 +16,11 @@ from agent.logging_config import configure_logging, request_id_context
 from agent.config import load_settings
 from agent.orchestrator import run_agent
 from agent.tools import list_files, read_file, write_file
+from agent.daytona_workspace import get_workspace
+from agent.promotion import (
+    sign_verified_checkpoint,
+    verify_checkpoint_promotion_token,
+)
 
 
 # ============================================================
@@ -422,6 +427,20 @@ def agent_run():
             or "genesys-project"
         )
 
+        raw_history = data.get("history")
+        conversation_history = (
+            [
+                {
+                    "role": str(turn.get("role", "")),
+                    "content": str(turn.get("content", "")),
+                }
+                for turn in raw_history[-10:]
+                if isinstance(turn, dict)
+            ]
+            if isinstance(raw_history, list)
+            else []
+        )
+
         logger.info(
             "agent_run_started project_id=%s",
             project_id,
@@ -432,7 +451,27 @@ def agent_run():
                 prompt
             ),
             project_id=project_id,
+            conversation_history=conversation_history,
         )
+
+        if isinstance(result, dict):
+            result.setdefault("requestType", "build")
+            checkpoint = result.get("checkpoint")
+            if (
+                result.get("buildPassed") is True
+                and result.get("browserVerified") is True
+                and isinstance(checkpoint, dict)
+                and checkpoint.get("status") == "success"
+                and checkpoint.get("checkpointId")
+                and checkpoint.get("commit")
+                and settings.promotion_signing_key
+            ):
+                result["promotionToken"] = sign_verified_checkpoint(
+                    signing_key=settings.promotion_signing_key,
+                    project_id=project_id,
+                    checkpoint_id=str(checkpoint["checkpointId"]),
+                    checkpoint_commit=str(checkpoint["commit"]),
+                )
 
         return jsonify(
             result
@@ -447,6 +486,104 @@ def agent_run():
                 "message": str(error),
             }
         ), 500
+
+
+# ============================================================
+# VERIFIED PRODUCTION PROMOTION
+# ============================================================
+
+@app.route(
+    "/promote",
+    methods=["POST"],
+)
+def promote_verified_checkpoint():
+    data = get_json_body()
+    checkpoint_id = str(data.get("checkpointId") or "").strip()
+    promotion_token = str(data.get("promotionToken") or "").strip()
+    project_id = str(
+        data.get("projectId") or "genesys-project"
+    ).strip()
+
+    if not checkpoint_id:
+        return jsonify(
+            {
+                "status": "error",
+                "code": "INVALID_CHECKPOINT",
+                "message": "checkpointId is required.",
+            }
+        ), 400
+
+    if not settings.github_token or not settings.promotion_signing_key:
+        return jsonify(
+            {
+                "status": "error",
+                "code": "PROMOTION_NOT_CONFIGURED",
+                "message": (
+                    "Production promotion requires GENESYS_GITHUB_TOKEN and "
+                    "GENESYS_PROMOTION_SIGNING_KEY."
+                ),
+            }
+        ), 503
+
+    verified_commit = verify_checkpoint_promotion_token(
+        promotion_token,
+        signing_key=settings.promotion_signing_key,
+        project_id=project_id,
+        checkpoint_id=checkpoint_id,
+    )
+    if not verified_commit:
+        return jsonify(
+            {
+                "status": "error",
+                "code": "INVALID_PROMOTION_PROOF",
+                "message": (
+                    "This checkpoint has no valid, unexpired verification "
+                    "proof. Run and verify the change again."
+                ),
+            }
+        ), 403
+
+    try:
+        workspace = get_workspace(project_id)
+        result = workspace.promote_checkpoint(
+            checkpoint_id,
+            github_token=settings.github_token,
+            repository=settings.github_repository,
+            base_branch=settings.github_base_branch,
+            expected_commit=verified_commit,
+        )
+    except Exception:
+        logger.exception(
+            "verified_checkpoint_promotion_failed project_id=%s checkpoint_id=%s",
+            project_id,
+            checkpoint_id,
+        )
+        return jsonify(
+            {
+                "status": "error",
+                "code": "PROMOTION_FAILED",
+                "message": "Could not promote the verified checkpoint.",
+                "requestId": request_id_context.get(),
+            }
+        ), 500
+
+    if result.get("status") == "success":
+        logger.info(
+            "verified_checkpoint_promoted project_id=%s checkpoint_id=%s pr_number=%s",
+            project_id,
+            checkpoint_id,
+            result.get("number"),
+        )
+        return jsonify(result)
+
+    code = result.get("code")
+    if code in {"INVALID_CHECKPOINT", "CHECKPOINT_NOT_FOUND"}:
+        http_status = 400
+    elif code in {"STALE_CHECKPOINT", "CHECKPOINT_CHANGED"}:
+        http_status = 409
+    else:
+        http_status = 502
+    return jsonify(result), http_status
 
 
 # ============================================================
@@ -468,6 +605,7 @@ def root():
                 "readFile": "/read-file",
                 "writeFile": "/write-file",
                 "agentRun": "/agent/run",
+                "promote": "/promote",
             },
         }
     )

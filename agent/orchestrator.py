@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import time
 from typing import Any
 
@@ -277,6 +278,113 @@ def _build_task_understanding(
         "scope": scope,
         "risk": risk,
         "request": text,
+    }
+
+
+_BUILD_REQUEST_START = re.compile(
+    r"^(?:(?:please|okay|ok|sure|now)[,\s]+)*(?:build|create|make|add|implement|design|develop|code|write|generate|fix|update|change|modify|remove|delete|replace|refactor|integrate|convert|improve|restyle|rewrite|rename)\b",
+    re.IGNORECASE,
+)
+_REQUEST_TO_BUILD = re.compile(
+    r"^(?:(?:please|okay|ok|hey)[,\s]+)*(?:can|could|would)\s+you\s+(?:(?:please|also|just)\s+)*(?:build|create|make|add|implement|design|develop|code|write|generate|fix|update|change|modify|remove|delete|replace|refactor|integrate|convert|improve|restyle|rewrite|rename)\b",
+    re.IGNORECASE,
+)
+_REQUEST_HELP_BUILD = re.compile(
+    r"^(?:can|could|would)\s+you\s+(?:please\s+)?help\s+me\s+(?:to\s+)?(?:build|create|make|add|implement|design|develop|fix|update|change|modify)\b",
+    re.IGNORECASE,
+)
+_GENERAL_CAPABILITY_QUESTION = re.compile(
+    r"^(?:can|could|would)\s+you\s+(?:build|create|make|design|develop|fix|write|code)\s+(?:websites?|apps?|applications?|software|projects?|anything|all\s+that)(?:\s+for\s+me)?\s*\??$",
+    re.IGNORECASE,
+)
+_QUESTION_OR_CHAT_START = re.compile(
+    r"^(?:hi\b|hello\b|hey\b|thanks\b|thank\s+you\b|ok\b|okay\b|sure\b|got\s+it\b|sounds\s+good\b|makes\s+sense\b|great\b|perfect\b|what\b|why\b|when\b|where\b|who\b|which\b|how\b|is\b|are\b|do\b|does\b|did\b|can\b|could\b|would\b|should\b|will\b|any\b|tell\s+me\b|explain\b|describe\b|show\s+me\b|what's\b)",
+    re.IGNORECASE,
+)
+
+
+def classify_request_type(prompt: str) -> str:
+    """Separate clear chat questions from requests that should edit a project.
+
+    Ambiguous statements default to build so existing task behavior is preserved.
+    """
+    text = (prompt or "").strip()
+    if not text:
+        return "chat"
+    if _GENERAL_CAPABILITY_QUESTION.fullmatch(text):
+        return "chat"
+    if (
+        _BUILD_REQUEST_START.match(text)
+        or _REQUEST_TO_BUILD.match(text)
+        or _REQUEST_HELP_BUILD.match(text)
+        or re.match(r"^(?:i|we)\s+(?:want|need)\s+(?:you\s+to\s+)?(?:build|create|make|add|implement|design|develop|fix|update|change|modify)\b", text, re.IGNORECASE)
+        or re.match(r"^let'?s\s+(?:build|create|make|add|implement|design|develop|fix|update|change|modify)\b", text, re.IGNORECASE)
+    ):
+        return "build"
+    if _QUESTION_OR_CHAT_START.match(text) or text.endswith("?"):
+        return "chat"
+    return "build"
+
+
+def _answer_chat_question(
+    prompt: str,
+    project_id: str,
+    conversation_history: list[dict[str, str]] | None = None,
+) -> dict[str, Any]:
+    """Answer a conversational question without opening a project workspace."""
+    provider = get_provider()
+    chat_messages = [
+        {
+            "role": "system",
+            "content": (
+                "You are GeneSys, a helpful assistant for a website and app "
+                "building agent. Answer the user's question directly and "
+                "concisely. Do not call tools, claim you inspected project "
+                "files, or say you changed, built, or deployed anything. "
+                "If a question asks about the user's specific project and "
+                "you do not have its details, say so and invite them to ask "
+                "GeneSys to inspect or change it."
+            ),
+        },
+    ]
+    for turn in (conversation_history or [])[-10:]:
+        role = turn.get("role")
+        content = str(turn.get("content") or "").strip()
+        if role in {"user", "assistant"} and content:
+            chat_messages.append(
+                {
+                    "role": role,
+                    "content": content[:2000],
+                }
+            )
+    chat_messages.append({"role": "user", "content": prompt})
+    try:
+        response = provider.generate(chat_messages, [])
+    except Exception:
+        if settings.provider_name != "groq" or FALLBACK_PROVIDER != "gemini":
+            raise
+        response = GeminiProvider(model=GEMINI_MODEL).generate(
+            chat_messages,
+            [],
+        )
+    answer = (response.text or "").strip()
+    if not answer:
+        answer = "I couldn't generate an answer just now. Please try again."
+    return {
+        "status": "success",
+        "requestType": "chat",
+        "intent": "question",
+        "text": answer,
+        "agent": "GeneSys Assistant",
+        "steps": [],
+        "modifiedFiles": [],
+        "buildAttempted": False,
+        "buildPassed": False,
+        "browserVerified": False,
+        "previewStarted": False,
+        "previewUrl": None,
+        "checkpoint": None,
+        "projectId": project_id,
     }
 
 # ============================================================
@@ -1746,6 +1854,7 @@ def _build_recovery_report(
 def run_agent(
     prompt: str,
     project_id: str = PROJECT_ID_DEFAULT,
+    conversation_history: list[dict[str, str]] | None = None,
 ) -> dict[str, Any]:
 
     prompt = (prompt or "").strip()
@@ -1761,6 +1870,32 @@ def run_agent(
             "buildAttempted": False,
             "buildPassed": False,
         }
+
+    request_type = classify_request_type(prompt)
+    if request_type == "chat":
+        try:
+            return _answer_chat_question(
+                prompt,
+                project_id,
+                conversation_history,
+            )
+        except Exception:
+            return {
+                "status": "error",
+                "requestType": "chat",
+                "intent": "question",
+                "message": "GeneSys couldn't answer just now. Please try again.",
+                "text": "GeneSys couldn't answer just now. Please try again.",
+                "agent": "GeneSys Assistant",
+                "steps": [],
+                "modifiedFiles": [],
+                "buildAttempted": False,
+                "buildPassed": False,
+                "browserVerified": False,
+                "previewStarted": False,
+                "previewUrl": None,
+                "checkpoint": None,
+            }
 
     agent_deadline = time.monotonic() + min(
         settings.agent_timeout_seconds,

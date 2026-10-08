@@ -1190,20 +1190,25 @@ class GroqProvider(AIProvider):
             MAX_GROQ_RETRIES
         ):
             try:
-                response = (
-                    self.client.chat.completions.create(
-                        model=self.model,
-                        messages=prepared_messages,
-                        tools=tools,
-                        tool_choice="auto",
-                        parallel_tool_calls=False,
-                        temperature=0.2,
-                        max_completion_tokens=(
-                            current_max_tokens
-                        ),
-                        reasoning_effort="low",
-                        include_reasoning=False,
+                request_options: dict[str, Any] = {
+                    "model": self.model,
+                    "messages": prepared_messages,
+                    "temperature": 0.2,
+                    "max_completion_tokens": current_max_tokens,
+                    "reasoning_effort": "low",
+                    "include_reasoning": False,
+                }
+                if tools:
+                    request_options.update(
+                        {
+                            "tools": tools,
+                            "tool_choice": "auto",
+                            "parallel_tool_calls": False,
+                        }
                     )
+
+                response = self.client.chat.completions.create(
+                    **request_options
                 )
 
                 choice = response.choices[0]

@@ -55,6 +55,10 @@ class Settings:
     fallback_provider: str = "gemini"
     cors_origins: str = "*"
     api_key: str = ""
+    github_token: str = ""
+    github_repository: str = "Minceks/genesys-core"
+    github_base_branch: str = "main"
+    promotion_signing_key: str = ""
 
 
 def _required_env(name: str) -> str:
@@ -164,6 +168,22 @@ def load_settings() -> Settings:
         ),
         api_key=_optional_env(
             "GENESYS_API_KEY",
+            "",
+        ),
+        github_token=_optional_env(
+            "GENESYS_GITHUB_TOKEN",
+            "",
+        ),
+        github_repository=_optional_env(
+            "GENESYS_GITHUB_REPOSITORY",
+            "Minceks/genesys-core",
+        ),
+        github_base_branch=_optional_env(
+            "GENESYS_GITHUB_BASE_BRANCH",
+            "main",
+        ),
+        promotion_signing_key=_optional_env(
+            "GENESYS_PROMOTION_SIGNING_KEY",
             "",
         ),
     )
