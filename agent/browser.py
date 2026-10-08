@@ -476,6 +476,7 @@ class BrowserSession:
         self.owner_thread_id = None
 
         self.console_messages.clear()
+        self.network_errors.clear()
 
     # ========================================================
     # STOP

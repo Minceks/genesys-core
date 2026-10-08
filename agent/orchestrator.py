@@ -3004,6 +3004,7 @@ def run_agent(
 
                     page_errors = []
                     console_errors = []
+                    network_errors = []
 
                     if isinstance(
                         console_result,
@@ -3023,6 +3024,13 @@ def run_agent(
                             )
                         )
 
+                        network_errors = (
+                            console_result.get(
+                                "networkErrors",
+                                [],
+                            )
+                        )
+
                     raise RuntimeError(
                         "Browser runtime errors detected.\n\n"
                         "PAGE ERRORS:\n"
@@ -3035,6 +3043,13 @@ def run_agent(
                         "CONSOLE ERRORS:\n"
                         + json.dumps(
                             console_errors,
+                            indent=2,
+                            ensure_ascii=False,
+                        )
+                        + "\n\n"
+                        "NETWORK ERRORS:\n"
+                        + json.dumps(
+                            network_errors,
                             indent=2,
                             ensure_ascii=False,
                         )
