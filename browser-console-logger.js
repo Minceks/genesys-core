@@ -6,7 +6,13 @@
  */
 
 (function() {
-  const API_ENDPOINT = '/browser-console';
+  const configuredEndpoint =
+    window.GENESYS_BROWSER_CONSOLE_ENDPOINT;
+  const API_ENDPOINT =
+    typeof configuredEndpoint === 'string' &&
+    !configuredEndpoint.includes('%VITE_CLOUD_AGENT_URL%')
+      ? configuredEndpoint
+      : '/browser-console';
   const PROJECT_ID = new URLSearchParams(window.location.search).get('projectId') || 'genesys-project';
   
   // Store original console methods
@@ -38,8 +44,14 @@
       };
 
       // Send asynchronously to avoid blocking
-      navigator.sendBeacon 
-        ? navigator.sendBeacon(API_ENDPOINT, JSON.stringify(payload))
+      navigator.sendBeacon
+        ? navigator.sendBeacon(
+            API_ENDPOINT,
+            new Blob(
+              [JSON.stringify(payload)],
+              { type: 'application/json' }
+            )
+          )
         : fetch(API_ENDPOINT, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },

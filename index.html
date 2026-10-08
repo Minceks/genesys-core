@@ -10,6 +10,14 @@
     <div id="root"></div>
     
     <!-- Browser Console Logger - Captures all console messages -->
+    <script type="module">
+      const cloudAgentUrl = import.meta.env.VITE_CLOUD_AGENT_URL;
+
+      if (cloudAgentUrl) {
+        window.GENESYS_BROWSER_CONSOLE_ENDPOINT =
+          `${cloudAgentUrl}/browser-console`;
+      }
+    </script>
     <script src="/browser-console-logger.js"></script>
     
     <!-- This line starts the React Engine -->
