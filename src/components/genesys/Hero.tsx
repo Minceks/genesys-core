@@ -22,7 +22,7 @@ export function Hero() {
           </div>
 
           <h1 className="text-5xl font-semibold leading-[1.04] tracking-[-0.055em] text-slate-950 sm:text-6xl lg:text-[4.35rem]">
-            From first idea to a real,
+            From your idea to a real,
             <span className="text-gradient-brand"> working app.</span>
           </h1>
 
