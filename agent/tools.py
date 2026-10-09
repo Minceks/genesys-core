@@ -57,10 +57,27 @@ def list_files(
 def read_file(
     filename: str,
     project_id: str = "genesys-project",
+    start_line: int | None = None,
+    end_line: int | None = None,
 ) -> dict[str, Any]:
     workspace = get_workspace(
         project_id
     )
+
+    if start_line is not None or end_line is not None:
+        from .daytona_workspace import safe_remote_path
+        start = start_line if start_line is not None else 1
+        if start < 1 or (end_line is not None and end_line < start):
+            raise ValueError("Line ranges must be positive and end_line must follow start_line.")
+        full_content = workspace.sandbox.fs.download_file(safe_remote_path(filename)).decode("utf-8")
+        lines = full_content.splitlines(keepends=True)
+        end = end_line if end_line is not None else len(lines)
+        return {
+            "status": "success", "projectId": project_id, "path": filename,
+            "content": "".join(lines[start - 1:end]),
+            "startLine": start, "endLine": min(end, len(lines)),
+            "totalLines": len(lines), "truncated": start > 1 or end < len(lines),
+        }
 
     return workspace.read_file(
         filename
@@ -76,10 +93,32 @@ def write_file(
         project_id
     )
 
+    from .ai_provider import READ_FILE_MAX_CHARS
+    try:
+        existing = workspace.read_file(filename)
+    except FileNotFoundError:
+        existing = None
+    if existing and (
+        existing.get("truncated")
+        or len(existing.get("content", "")) > READ_FILE_MAX_CHARS
+    ):
+        raise ValueError("Existing file exceeds the complete model read budget. Use edit_file to preserve its unshown content.")
+
     return workspace.write_file(
         filename,
         content,
     )
+
+
+def edit_file(filename: str, old_text: str, new_text: str,
+              project_id: str = "genesys-project") -> dict[str, Any]:
+    """Replace one exact match in the complete remote file."""
+    workspace = get_workspace(project_id)
+    from .daytona_workspace import safe_remote_path
+    content = workspace.sandbox.fs.download_file(safe_remote_path(filename)).decode("utf-8")
+    if not old_text or content.count(old_text) != 1:
+        raise ValueError("old_text must match exactly once. Supply a unique exact match from the file.")
+    return workspace.write_file(filename, content.replace(old_text, new_text, 1))
 
 
 # ============================================================
@@ -239,6 +278,23 @@ TOOLS = [
     {
         "type": "function",
         "function": {
+            "name": "edit_file",
+            "description": "Edit an existing file by replacing one exact old_text match. Prefer this to rewriting files, especially for partial file views. Preserves all other content.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "filename": {"type": "string"},
+                    "old_text": {"type": "string"},
+                    "new_text": {"type": "string"},
+                },
+                "required": ["filename", "old_text", "new_text"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "list_files",
             "description": (
                 "Inspect the current project inside its "
@@ -259,11 +315,13 @@ TOOLS = [
             "name": "read_file",
             "description": (
                 "Read an existing project file from the "
-                "isolated Daytona workspace."
+                "isolated Daytona workspace. For large files, use start_line/end_line to inspect a narrow range."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
+                    "start_line": {"type": "integer", "minimum": 1},
+                    "end_line": {"type": "integer", "minimum": 1},
                     "filename": {
                         "type": "string",
                         "description": (
@@ -285,7 +343,7 @@ TOOLS = [
             "name": "write_file",
             "description": (
                 "Create or update a file inside the isolated "
-                "Daytona workspace. Write complete file contents."
+                "Daytona workspace. Write complete file contents. Use edit_file for existing large files."
             ),
             "parameters": {
                 "type": "object",
@@ -548,6 +606,7 @@ TOOLS = [
 # ============================================================
 
 AVAILABLE_TOOLS = {
+    "edit_file": edit_file,
     "list_files": list_files,
     "read_file": read_file,
     "write_file": write_file,

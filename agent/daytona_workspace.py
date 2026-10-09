@@ -874,6 +874,9 @@ class DaytonaWorkspace:
 
         content = str(content)
 
+        if "[... GeneSys context compacted ...]" in content:
+            raise ValueError("Compacted context cannot be saved as source code. Use an exact text edit.")
+
         if len(content) > MAX_WRITE_CHARS:
             raise ValueError(
                 f"File exceeds "

@@ -180,6 +180,13 @@ def compact_tool_result(
             ),
             READ_FILE_MAX_CHARS,
         )
+        if result["content"] != data.get("content", ""):
+            result["truncated"] = True
+        if result.get("truncated"):
+            result["editInstruction"] = (
+                "This is a partial file view. Use edit_file with an exact "
+                "old_text/new_text replacement; never reconstruct this file with write_file."
+            )
 
         return json.dumps(
             result,

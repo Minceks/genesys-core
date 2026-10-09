@@ -1,5 +1,7 @@
 from typing import Any
 import threading
+from concurrent.futures import ThreadPoolExecutor
+from functools import wraps
 
 from playwright.sync_api import (
     Browser,
@@ -22,6 +24,21 @@ VIEWPORT_HEIGHT = 800
 DEFAULT_TIMEOUT_MS = 10000
 
 
+def browser_thread(method):
+    """Keep each project's sync Playwright driver on its own dedicated thread."""
+    @wraps(method)
+    def dispatch(self, *args, **kwargs):
+        if threading.get_ident() == self._worker_thread_id:
+            return method(self, *args, **kwargs)
+
+        def run():
+            self._worker_thread_id = threading.get_ident()
+            return method(self, *args, **kwargs)
+
+        return self._executor.submit(run).result()
+    return dispatch
+
+
 # ============================================================
 # BROWSER SESSION
 # ============================================================
@@ -36,8 +53,8 @@ class BrowserSession:
     Browser sessions are recoverable:
     if Playwright/page/browser dies, GeneSys recreates the session.
 
-    Playwright's sync API is thread-sensitive, so the session is
-    also recreated if it is accessed from a different thread.
+    All operations run on a dedicated thread for this project so
+    different callers and projects cannot share a Playwright event loop.
     """
 
     def __init__(
@@ -49,6 +66,8 @@ class BrowserSession:
             str(project_id).strip()
             or "genesys-project"
         )
+        self._worker_thread_id: int | None = None
+        self._executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="genesys-browser")
 
         self.playwright: Playwright | None = None
         self.browser: Browser | None = None
@@ -107,6 +126,7 @@ class BrowserSession:
     # START
     # ========================================================
 
+    @browser_thread
     def start(self) -> Page:
         """
         Start or reuse the browser session and navigate to the
@@ -256,6 +276,7 @@ class BrowserSession:
     # SCREENSHOT
     # ========================================================
 
+    @browser_thread
     def screenshot(
         self,
     ) -> dict[str, Any]:
@@ -292,6 +313,7 @@ class BrowserSession:
     # GET CONSOLE
     # ========================================================
 
+    @browser_thread
     def get_console(
         self,
     ) -> dict[str, Any]:
@@ -370,6 +392,7 @@ class BrowserSession:
     # CLICK
     # ========================================================
 
+    @browser_thread
     def click(
         self,
         selector: str,
@@ -404,6 +427,7 @@ class BrowserSession:
     # TYPE
     # ========================================================
 
+    @browser_thread
     def type(
         self,
         selector: str,
@@ -452,6 +476,7 @@ class BrowserSession:
     # KEYPRESS
     # ========================================================
 
+    @browser_thread
     def keypress(
         self,
         key: str,
@@ -522,6 +547,7 @@ class BrowserSession:
     # STOP
     # ========================================================
 
+    @browser_thread
     def stop(
         self,
     ) -> None:
@@ -537,6 +563,7 @@ _sessions: dict[
     str,
     BrowserSession,
 ] = {}
+_sessions_lock = threading.Lock()
 
 
 def get_browser(
@@ -548,12 +575,10 @@ def get_browser(
         or "genesys-project"
     )
 
-    if key not in _sessions:
-        _sessions[key] = BrowserSession(
-            key
-        )
-
-    return _sessions[key]
+    with _sessions_lock:
+        if key not in _sessions:
+            _sessions[key] = BrowserSession(key)
+        return _sessions[key]
 
 
 def stop_browser(
@@ -565,12 +590,14 @@ def stop_browser(
         or "genesys-project"
     )
 
-    session = _sessions.get(
-        key
-    )
+    with _sessions_lock:
+        session = _sessions.pop(key, None)
 
     if session is not None:
-        session.stop()
+        try:
+            session.stop()
+        finally:
+            session._executor.shutdown(wait=True)
 
     return {
         "status": "success",

@@ -59,7 +59,7 @@ You MUST follow this workflow:
 
 1. Inspect the project before making changes.
 2. Use list_files first when beginning a task.
-3. Use read_file before modifying an existing file.
+3. Use read_file before modifying an existing file. Prefer edit_file for exact targeted changes. Partial or compacted file views must never be reconstructed with write_file.
 4. Never invent file paths.
 5. Make the smallest correct changes needed for the user's request.
 6. When writing a file, provide its complete intended contents.
@@ -3903,7 +3903,7 @@ def run_agent(
                 "write_file",
                 "create_file",
                 "edit_file",
-            }:
+            } and isinstance(result, dict) and result.get("status") == "success":
 
                 changed_since_build = True
 
@@ -3936,7 +3936,7 @@ def run_agent(
                 "write_file",
                 "create_file",
                 "edit_file",
-            }:
+            } and isinstance(result, dict) and result.get("status") == "success":
 
                 changed_since_build = True
 
