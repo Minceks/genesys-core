@@ -57,6 +57,7 @@ export type AgentStep = {
 };
 
 export type GenesysAgentResponse = {
+  requestType: "chat" | "build";
   text: string;
   agent: string;
   steps: AgentStep[];
@@ -65,6 +66,7 @@ export type GenesysAgentResponse = {
   buildPassed: boolean;
   browserVerified: boolean;
   checkpointId: string | null;
+  checkpointStatus: string | null;
   promotionToken: string | null;
   previewUrl: string | null;
   previewStarted?: boolean;
@@ -108,7 +110,8 @@ async function getErrorMessage(
 // ============================================================
 
 export async function askGenesys(
-  prompt: string
+  prompt: string,
+  history: Array<{ role: "user" | "assistant"; content: string }> = [],
 ): Promise<GenesysAgentResponse> {
   const cleanedPrompt = prompt.trim();
 
@@ -142,6 +145,10 @@ export async function askGenesys(
             "genesys-project",
           prompt:
             cleanedPrompt,
+          history: history.slice(-10).map((turn) => ({
+            role: turn.role,
+            content: turn.content.slice(0, 2000),
+          })),
         }),
       }
     );
@@ -157,6 +164,7 @@ export async function askGenesys(
       await response.json();
 
     return {
+      requestType: data.requestType === "chat" ? "chat" : "build",
       text:
         typeof data.text ===
         "string"
@@ -195,6 +203,11 @@ export async function askGenesys(
       checkpointId:
         typeof data.checkpoint?.checkpointId === "string"
           ? data.checkpoint.checkpointId
+          : null,
+
+      checkpointStatus:
+        typeof data.checkpoint?.status === "string"
+          ? data.checkpoint.status
           : null,
 
       promotionToken:

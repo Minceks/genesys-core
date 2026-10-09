@@ -63,6 +63,7 @@ type ChatMessage = {
   buildAttempted?: boolean;
   buildPassed?: boolean;
   browserVerified?: boolean;
+  checkpointStatus?: string;
   checkpointId?: string;
   promotionToken?: string;
   promotionUrl?: string;
@@ -400,12 +401,22 @@ function BuildPage() {
       // ------------------------------------------------------
 
       const response =
-        await askGenesys(promptText);
+        await askGenesys(
+          promptText,
+          messages
+            .filter((message) => message.role === "user" || message.role === "bot")
+            .slice(-10)
+            .map((message) => ({
+              role: message.role === "bot" ? "assistant" as const : "user" as const,
+              content: message.text,
+            })),
+        );
 
       const text = response.text || "";
+      const isBuildRequest = response.requestType === "build";
 
       const livePreviewUrl =
-        typeof response.previewUrl === "string"
+        isBuildRequest && typeof response.previewUrl === "string"
           ? response.previewUrl
           : "";
 
@@ -424,8 +435,9 @@ function BuildPage() {
       // 2. EXTRACT PREVIEW
       // ------------------------------------------------------
 
-      const preview =
-        extractPreviewCode(text);
+      const preview = isBuildRequest
+        ? extractPreviewCode(text)
+        : undefined;
 
       if (preview) {
         setPreviewCode(preview);
@@ -438,8 +450,9 @@ function BuildPage() {
       // 3. EXTRACT FILES
       // ------------------------------------------------------
 
-      const files =
-        extractFiles(text);
+      const files = isBuildRequest
+        ? extractFiles(text)
+        : [];
 
       const modifiedFiles: string[] = [];
 
@@ -523,13 +536,20 @@ function BuildPage() {
           browserVerified:
             response.browserVerified,
 
+          checkpointStatus:
+            response.checkpointStatus || undefined,
+
           checkpointId:
-            response.buildPassed && response.browserVerified
+            response.buildPassed &&
+            response.browserVerified &&
+            response.checkpointStatus === "success"
               ? response.checkpointId || undefined
               : undefined,
 
           promotionToken:
-            response.buildPassed && response.browserVerified
+            response.buildPassed &&
+            response.browserVerified &&
+            response.checkpointStatus === "success"
               ? response.promotionToken || undefined
               : undefined,
 
@@ -584,9 +604,13 @@ function BuildPage() {
         headers: buildCloudAgentHeaders(true),
         body: JSON.stringify({ projectId: "genesys-project", checkpointId, promotionToken }),
       });
-      const data = await response.json();
+      const data = await response.json().catch(() => ({}));
       if (!response.ok || data.status !== "success" || typeof data.url !== "string") {
-        throw new Error(data.message || `Promotion failed (${response.status}).`);
+        throw new Error(
+          typeof data.message === "string"
+            ? data.message
+            : `Could not create the review pull request (${response.status}). Please try again.`
+        );
       }
       setMessages((previous) => previous.map((message, itemIndex) =>
         itemIndex === index
@@ -875,7 +899,12 @@ function BuildPage() {
                         </div>
                       )}
 
-                    {message.role === "bot" && message.checkpointId && message.promotionToken && (
+                    {message.role === "bot" &&
+                      message.buildPassed === true &&
+                      message.browserVerified === true &&
+                      message.checkpointStatus === "success" &&
+                      message.checkpointId &&
+                      message.promotionToken && (
                       <div className="mt-3 w-full rounded-xl border border-blue-100 bg-blue-50 p-3">
                         <div className="mb-2 text-[10px] font-semibold text-blue-900">
                           Build passed and browser verification completed.
@@ -896,12 +925,18 @@ function BuildPage() {
                             onClick={() => void handlePromote(index, message.checkpointId!, message.promotionToken!)}
                             className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-3 py-2 text-xs font-semibold text-white hover:bg-blue-700 disabled:opacity-60"
                           >
-                            {promotingCheckpoint === message.checkpointId ? <Loader2 size={13} className="animate-spin" /> : <ExternalLink size={13} />}
-                            Create review pull request
+                            {promotingCheckpoint === message.checkpointId ? (
+                              <Loader2 size={13} className="animate-spin" />
+                            ) : (
+                              <ExternalLink size={13} />
+                            )}
+                            {promotingCheckpoint === message.checkpointId
+                              ? "Creating pull request..."
+                              : "Create review pull request"}
                           </button>
                         )}
                         {message.promotionError && (
-                          <p className="mt-2 text-xs text-red-700">{message.promotionError}</p>
+                          <p role="alert" className="mt-2 text-xs text-red-700">{message.promotionError}</p>
                         )}
                         <p className="mt-2 text-[10px] text-blue-700">This opens a pull request for review; it does not deploy or merge automatically.</p>
                       </div>
