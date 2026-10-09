@@ -1,4 +1,5 @@
 from __future__ import annotations
+from .progress import report_progress
 
 import json
 import os
@@ -1871,9 +1872,11 @@ def run_agent(
             "buildPassed": False,
         }
 
+    report_progress("Understanding request")
     request_type = classify_request_type(prompt)
     if request_type == "chat":
         try:
+            report_progress("Answering your question")
             return _answer_chat_question(
                 prompt,
                 project_id,
@@ -1897,6 +1900,7 @@ def run_agent(
                 "checkpoint": None,
             }
 
+    report_progress("Preparing workspace")
     agent_deadline = time.monotonic() + min(
         settings.agent_timeout_seconds,
         240,
@@ -2043,6 +2047,7 @@ def run_agent(
     def _create_success_checkpoint() -> dict[str, Any]:
         nonlocal checkpoint_result
 
+        report_progress("Saving verified checkpoint")
         checkpoint_result = workspace.create_checkpoint(
             "Successful autonomous task completion"
         )
@@ -2561,6 +2566,7 @@ def run_agent(
                 "🔧 TOOL: run_build"
             )
 
+            report_progress("Building application")
             build_attempted = True
 
             try:
@@ -2903,6 +2909,7 @@ def run_agent(
 
             try:
 
+                report_progress("Starting preview")
                 preview_result = (
                     workspace.start_preview()
                 )
@@ -3092,6 +3099,7 @@ def run_agent(
                 "🧪 Running browser verification..."
             )
 
+            report_progress("Verifying in browser")
             screenshot_result = None
             console_result = None
 
@@ -3867,6 +3875,7 @@ def run_agent(
 
                 try:
 
+                    report_progress("Editing files" if tool_name in {"edit_file", "write_file"} else "Inspecting project")
                     result = _execute_agent_tool(
                         tool_name,
                         arguments,

@@ -1,8 +1,9 @@
-﻿import hashlib
+import hashlib
 import importlib
 import logging
 import shlex
 import time
+import threading
 from pathlib import PurePosixPath
 
 from daytona import (
@@ -1521,22 +1522,25 @@ def get_workspace(
         key,
     )
 
-    if key not in _workspaces:
-        print(
-            "🆕 CREATING WORKSPACE OBJECT:",
-            key,
-        )
-
-        _workspaces[key] = (
-            DaytonaWorkspace(
-                key
+    with _workspace_cache_guard:
+        project_lock = _workspace_locks.setdefault(key, threading.Lock())
+    with project_lock:
+        if key not in _workspaces:
+            print(
+                "🆕 CREATING WORKSPACE OBJECT:",
+                key,
             )
-        )
 
-    else:
-        print(
-            "♻️ REUSING WORKSPACE OBJECT:",
-            key,
-        )
+            _workspaces[key] = (
+                DaytonaWorkspace(
+                    key
+                )
+            )
 
-    return _workspaces[key]
+        else:
+            print(
+                "♻️ REUSING WORKSPACE OBJECT:",
+                key,
+            )
+
+        return _workspaces[key]

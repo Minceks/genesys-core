@@ -15,6 +15,7 @@ from flask_cors import CORS
 from agent.logging_config import configure_logging, request_id_context
 from agent.config import load_settings
 from agent.orchestrator import run_agent
+from agent.jobs import JobManager
 from agent.tools import list_files, read_file, write_file
 from agent.daytona_workspace import get_workspace
 from agent.promotion import (
@@ -62,6 +63,7 @@ CORS(
                 for origin in settings.cors_origins.split(",")
                 if origin.strip()
             ],
+            "expose_headers": ["X-Request-ID"],
             "allow_headers": [
                 "Content-Type",
                 "X-API-Key",
@@ -391,6 +393,37 @@ def write():
 # AGENT RUN
 # ============================================================
 
+def execute_agent_request(prompt, project_id, conversation_history):
+    result = run_agent(
+        prompt=str(
+            prompt
+        ),
+        project_id=project_id,
+        conversation_history=conversation_history,
+    )
+
+    if isinstance(result, dict):
+        result.setdefault("requestType", "build")
+        checkpoint = result.get("checkpoint")
+        if (
+            result.get("buildPassed") is True
+            and result.get("browserVerified") is True
+            and isinstance(checkpoint, dict)
+            and checkpoint.get("status") == "success"
+            and checkpoint.get("checkpointId")
+            and checkpoint.get("commit")
+            and settings.promotion_signing_key
+        ):
+            result["promotionToken"] = sign_verified_checkpoint(
+                signing_key=settings.promotion_signing_key,
+                project_id=project_id,
+                checkpoint_id=str(checkpoint["checkpointId"]),
+                checkpoint_commit=str(checkpoint["commit"]),
+            )
+
+    return result
+
+
 @app.route(
     "/agent/run",
     methods=["POST"],
@@ -446,32 +479,7 @@ def agent_run():
             project_id,
         )
 
-        result = run_agent(
-            prompt=str(
-                prompt
-            ),
-            project_id=project_id,
-            conversation_history=conversation_history,
-        )
-
-        if isinstance(result, dict):
-            result.setdefault("requestType", "build")
-            checkpoint = result.get("checkpoint")
-            if (
-                result.get("buildPassed") is True
-                and result.get("browserVerified") is True
-                and isinstance(checkpoint, dict)
-                and checkpoint.get("status") == "success"
-                and checkpoint.get("checkpointId")
-                and checkpoint.get("commit")
-                and settings.promotion_signing_key
-            ):
-                result["promotionToken"] = sign_verified_checkpoint(
-                    signing_key=settings.promotion_signing_key,
-                    project_id=project_id,
-                    checkpoint_id=str(checkpoint["checkpointId"]),
-                    checkpoint_commit=str(checkpoint["commit"]),
-                )
+        result = execute_agent_request(prompt, project_id, conversation_history)
 
         return jsonify(
             result
@@ -486,6 +494,61 @@ def agent_run():
                 "message": str(error),
             }
         ), 500
+
+
+
+jobs = JobManager()
+
+
+@app.route("/agent/jobs", methods=["POST"])
+def start_agent_job():
+    data = get_json_body()
+    prompt = str(data.get("prompt") or "").strip()
+    project_id = str(data.get("projectId") or "").strip()
+    if not prompt or len(prompt) > 8000 or not project_id or len(project_id) > 128:
+        return jsonify(status="error", message="A project and a prompt of at most 8000 characters are required."), 400
+    history = [{"role": turn.get("role"), "content": str(turn.get("content") or "")[:2000]}
+               for turn in (data.get("history") or [])[-10:] if isinstance(turn, dict)] if isinstance(data.get("history"), list) else []
+    try:
+        job_id = jobs.submit(project_id, request_id_context.get(),
+            lambda: execute_agent_request(prompt, project_id, history))
+    except ValueError as error:
+        return jsonify(status="error", message=str(error)), 429
+    return jsonify(jobs.get(job_id, project_id)), 202
+
+
+@app.route("/agent/jobs/<job_id>", methods=["GET"])
+def get_agent_job(job_id):
+    job = jobs.get(job_id, request.args.get("projectId", ""))
+    if job is None:
+        return jsonify(status="error", message="This request is no longer available. The service may have restarted; please retry."), 404
+    return jsonify(job)
+
+
+@app.route("/preview", methods=["POST"])
+def reconnect_preview():
+    project_id = str(get_json_body().get("projectId") or "").strip()
+    if not project_id or len(project_id) > 128:
+        return jsonify(status="error", message="projectId is required."), 400
+    if jobs.is_running(project_id):
+        return jsonify(status="error", message="Wait for the current request to finish before reconnecting the preview."), 409
+    try:
+        return jsonify(get_workspace(project_id).start_preview())
+    except Exception:
+        logger.exception("preview_reconnect_failed project_id=%s", project_id)
+        return jsonify(status="error", message="Preview could not reconnect. Please retry or report this problem."), 503
+
+
+@app.route("/beta/feedback", methods=["POST"])
+def beta_feedback():
+    data = get_json_body()
+    message = str(data.get("message") or "").strip()
+    if not message or len(message) > 2000:
+        return jsonify(status="error", message="Describe the problem in 1-2000 characters."), 400
+    logger.warning("beta_feedback project_id=%s related_request_id=%s stage=%s message=%s",
+        str(data.get("projectId") or "")[:128], str(data.get("requestId") or "")[:64],
+        str(data.get("stage") or "")[:100], message.replace("\n", " ").replace("\r", " "))
+    return jsonify(status="success", reportId=request_id_context.get())
 
 
 # ============================================================
