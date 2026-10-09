@@ -289,16 +289,6 @@ def create_verified_pull_request(
     if existing["status"] != "success":
         return existing
     open_prs = existing["data"]
-    if isinstance(open_prs, list) and open_prs:
-        pr = open_prs[0]
-        return {
-            "status": "success",
-            "created": False,
-            "number": pr.get("number"),
-            "url": pr.get("html_url"),
-            "branch": branch,
-            "checkpointId": checkpoint_id,
-        }
 
     base_ref = _github_request(
         f"{api_root}/git/ref/heads/{quote(base, safe='/')}",
@@ -312,6 +302,17 @@ def create_verified_pull_request(
             "STALE_CHECKPOINT",
             "Production changed after this preview was verified. Rebuild and verify against the latest production revision before promoting.",
         )
+
+    if isinstance(open_prs, list) and open_prs:
+        pr = open_prs[0]
+        return {
+            "status": "success",
+            "created": False,
+            "number": pr.get("number"),
+            "url": pr.get("html_url"),
+            "branch": branch,
+            "checkpointId": checkpoint_id,
+        }
 
     base_commit = _github_request(
         f"{api_root}/git/commits/{parent_commit}",
