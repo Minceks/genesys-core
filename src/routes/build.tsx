@@ -1,3 +1,4 @@
+import { getBetaProjectId } from "@/utils/project";
 import { createRoute } from "@tanstack/react-router";
 import { Route as rootRoute } from "./__root";
 import React, {
@@ -156,6 +157,17 @@ function extractFiles(
 // ============================================================
 
 function BuildPage() {
+  const [projectId] = useState(getBetaProjectId);
+  const chatStorageKey = `genesys_chat_${projectId}`;
+  const [progressStage, setProgressStage] = useState("Preparing request");
+  const [lastRequestId, setLastRequestId] = useState("");
+  const [elapsed, setElapsed] = useState(0);
+  const [previewRefreshing, setPreviewRefreshing] = useState(false);
+  const [previewError, setPreviewError] = useState("");
+  const [reportOpen, setReportOpen] = useState(false);
+  const [reportText, setReportText] = useState("");
+  const [reportStatus, setReportStatus] = useState("");
+  const [reportSending, setReportSending] = useState(false);
   // ----------------------------------------------------------
   // STATE
   // ----------------------------------------------------------
@@ -167,7 +179,9 @@ function BuildPage() {
 
   const [previewCode, setPreviewCode] = useState("");
 
-  const [previewUrl, setPreviewUrl] = useState("");
+  const [previewUrl, setPreviewUrl] = useState(() => {
+    try { return sessionStorage.getItem(`genesys_preview_${projectId}`) || ""; } catch { return ""; }
+  });
 
   const [previewKey, setPreviewKey] = useState(0);
 
@@ -190,10 +204,11 @@ function BuildPage() {
 
       try {
         const saved =
-          sessionStorage.getItem("genesys_v3");
+          sessionStorage.getItem(chatStorageKey);
 
-        return saved
-          ? JSON.parse(saved)
+        const restored = saved ? JSON.parse(saved) : [];
+        return Array.isArray(restored)
+          ? restored.filter(message => (message.role === "user" || message.role === "bot") && typeof message.text === "string")
           : [];
       } catch {
         return [];
@@ -210,7 +225,7 @@ function BuildPage() {
   async function refreshFiles() {
     try {
       const response = await fetch(
-        `${CLOUD_AGENT_URL}/list-files?projectId=genesys-project`,
+        `${CLOUD_AGENT_URL}/list-files?projectId=${encodeURIComponent(projectId)}`,
         {
           headers: buildCloudAgentHeaders(),
         }
@@ -264,6 +279,7 @@ function BuildPage() {
         },
 
         body: JSON.stringify({
+          projectId,
           filename,
           content: code,
         }),
@@ -287,7 +303,8 @@ function BuildPage() {
   // ==========================================================
 
   useEffect(() => {
-    void refreshFiles();
+    if (messages.some(message => message.buildPassed)) void refreshFiles();
+    if (previewUrl) void reloadPreview();
   }, []);
 
   // ==========================================================
@@ -297,7 +314,7 @@ function BuildPage() {
   useEffect(() => {
     try {
       sessionStorage.setItem(
-        "genesys_v3",
+        chatStorageKey,
         JSON.stringify(messages)
       );
     } catch {
@@ -315,18 +332,60 @@ function BuildPage() {
   // ==========================================================
 
   useEffect(() => {
-    setPreviewOnline(Boolean(previewUrl || previewCode));
+    setPreviewOnline(false);
+    try { sessionStorage.setItem(`genesys_preview_${projectId}`, previewUrl); } catch { /* Storage is optional. */ }
   }, [previewCode, previewUrl]);
 
-  function reloadPreview() {
-    if (!previewUrl && !previewCode) {
-      return;
-    }
-
-    setPreviewKey(
-      (value) => value + 1
-    );
+  async function reloadPreview() {
+    if (previewRefreshing || loading) return;
+    if (!previewUrl) { setPreviewKey(value => value + 1); return; }
+    setPreviewRefreshing(true);
+    setPreviewError("");
+    try {
+      const response = await fetch(`${CLOUD_AGENT_URL}/preview`, {
+        method: "POST", headers: buildCloudAgentHeaders(true),
+        body: JSON.stringify({ projectId }),
+      });
+      const data = await response.json();
+      if (!response.ok || data.status !== "success" || !data.url) throw new Error(data.message || "Preview could not reconnect.");
+      setPreviewOnline(false);
+      setPreviewUrl(data.url);
+      setPreviewKey(value => value + 1);
+    } catch (error) {
+      setPreviewOnline(false);
+      setPreviewError(error instanceof Error ? error.message : "Preview could not reconnect.");
+    } finally { setPreviewRefreshing(false); }
   }
+
+  async function sendReport() {
+    if (!reportText.trim() || reportSending) return;
+    setReportSending(true);
+    setReportStatus("");
+    try {
+      const response = await fetch(`${CLOUD_AGENT_URL}/beta/feedback`, {
+        method: "POST", headers: buildCloudAgentHeaders(true),
+        body: JSON.stringify({ projectId, requestId: lastRequestId, stage: progressStage, message: reportText.trim() }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.message || "Report could not be sent.");
+      setReportStatus(`Report received. Reference: ${data.reportId}`);
+      setReportText("");
+    } catch (error) { setReportStatus(error instanceof Error ? error.message : "Report could not be sent."); }
+    finally { setReportSending(false); }
+  }
+
+  useEffect(() => {
+    if (!loading) return;
+    const started = Date.now();
+    const timer = window.setInterval(() => setElapsed(Math.floor((Date.now() - started) / 1000)), 1000);
+    return () => window.clearInterval(timer);
+  }, [loading]);
+
+  useEffect(() => {
+    if (!previewUrl || loading) return;
+    const timer = window.setTimeout(() => void reloadPreview(), 50 * 60 * 1000);
+    return () => window.clearTimeout(timer);
+  }, [previewUrl, loading]);
 
   function openPreview() {
     if (previewUrl) {
@@ -379,9 +438,9 @@ function BuildPage() {
     }
 
     setLoading(true);
-    setPreviewUrl("");
-    setPreviewCode("");
-    setPreviewOnline(false);
+    setProgressStage("Preparing request");
+    setElapsed(0);
+    setLastRequestId("");
 
     if (!overridePrompt) {
       setMessages((previous) => [
@@ -410,6 +469,7 @@ function BuildPage() {
               role: message.role === "bot" ? "assistant" as const : "user" as const,
               content: message.text,
             })),
+          (stage, requestId) => { setProgressStage(stage); setLastRequestId(requestId); },
         );
 
       const text = response.text || "";
@@ -420,14 +480,18 @@ function BuildPage() {
           ? response.previewUrl
           : "";
 
-      setPreviewUrl(livePreviewUrl);
+      if (isBuildRequest) {
+        setPreviewUrl(livePreviewUrl);
+        setPreviewCode("");
+        setPreviewError("");
+      }
 
       if (livePreviewUrl) {
         setPreviewCode("");
         setPreviewOnline(true);
         setPreviewKey((value) => value + 1);
         setMobileView("preview");
-      } else if (response.previewStarted === false) {
+      } else if (isBuildRequest && response.previewStarted === false) {
         setPreviewOnline(false);
       }
 
@@ -454,7 +518,7 @@ function BuildPage() {
         ? extractFiles(text)
         : [];
 
-      const modifiedFiles: string[] = [];
+      const modifiedFiles: string[] = [...response.modifiedFiles];
 
       for (const file of files) {
         try {
@@ -602,7 +666,7 @@ function BuildPage() {
       const response = await fetch(`${CLOUD_AGENT_URL}/promote`, {
         method: "POST",
         headers: buildCloudAgentHeaders(true),
-        body: JSON.stringify({ projectId: "genesys-project", checkpointId, promotionToken }),
+        body: JSON.stringify({ projectId, checkpointId, promotionToken }),
       });
       const data = await response.json().catch(() => ({}));
       if (!response.ok || data.status !== "success" || typeof data.url !== "string") {
@@ -680,13 +744,14 @@ function BuildPage() {
               </div>
               <div className="truncate text-xs font-semibold text-slate-900 sm:text-sm">
                 {projectTree.routes.length + projectTree.components.length > 0
-                  ? "genesys-project"
+                  ? `Beta project ${projectId.slice(-8)}`
                   : "New project"}
               </div>
             </div>
           </div>
 
           <div className="flex items-center gap-2">
+            <button type="button" onClick={() => setReportOpen(true)} className="rounded-lg px-2 py-1 text-xs font-medium text-blue-700 hover:bg-blue-50">Report a problem</button>
             <div className="mr-1 flex items-center rounded-lg border border-slate-200 bg-slate-50 p-0.5 xl:hidden" role="group" aria-label="Builder panels">
               <button
                 type="button"
@@ -741,9 +806,9 @@ function BuildPage() {
             <button
               type="button"
               onClick={reloadPreview}
-              disabled={!previewCode && !previewUrl}
+              disabled={loading || previewRefreshing || (!previewCode && !previewUrl)}
               className="rounded-lg p-2 text-slate-400 transition hover:bg-slate-100 disabled:opacity-30"
-              title="Reload preview"
+              title="Reconnect preview"
             >
               <RefreshCw size={17} />
             </button>
@@ -952,7 +1017,7 @@ function BuildPage() {
                     className="animate-spin text-blue-500"
                   />
 
-                    GeneSys is planning and building your request...
+                    {progressStage} ? {elapsed}s
                 </div>
               )}
             </div>
@@ -987,7 +1052,7 @@ function BuildPage() {
                       onClick={() =>
                         void handleSend()
                       }
-                      aria-label={loading ? "Building your request" : "Send build request"}
+                      aria-label={loading ? "Working on your request" : "Send request"}
                     disabled={
                       loading ||
                       !input.trim()
@@ -1022,7 +1087,7 @@ function BuildPage() {
                 <div className={`h-2 w-2 rounded-full ${previewOnline ? "bg-emerald-500" : loading ? "animate-pulse bg-amber-400" : "bg-slate-300"}`} />
 
                 <span className="text-[10px] font-bold uppercase tracking-widest text-slate-400">
-                  {previewOnline ? "Live preview" : loading ? "Building preview" : "Preview"}
+                  {previewOnline ? "Live preview" : loading ? progressStage : "Preview"}
                 </span>
               </div>
 
@@ -1038,6 +1103,13 @@ function BuildPage() {
               )}
             </div>
 
+            {previewUrl && (
+              <div className="border-b border-slate-200 bg-white px-4 py-2 text-xs text-slate-600">
+                <span role="status">{previewError || (previewRefreshing ? "Reconnecting preview..." : "Preview not visible? Reconnect the link or open it in a new tab. Network filters may block preview domains.")}</span>
+                <button type="button" disabled={previewRefreshing || loading} onClick={() => void reloadPreview()} className="ml-2 font-semibold text-blue-700 disabled:opacity-50">Reconnect</button>
+                <button type="button" onClick={openPreview} className="ml-2 font-semibold text-blue-700">Open preview</button>
+              </div>
+            )}
             <div className="min-h-0 flex-1 p-3 sm:p-6">
               <div className="relative h-full w-full overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-[0_24px_70px_-40px_rgba(15,23,42,0.35)] sm:rounded-[1.5rem]">
                 {previewUrl || previewCode ? (
@@ -1049,7 +1121,7 @@ function BuildPage() {
                     className="h-full w-full border-none"
                     sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
                     onLoad={() => setPreviewOnline(true)}
-                    onError={() => setPreviewOnline(false)}
+                    onError={() => { setPreviewOnline(false); setPreviewError("Preview could not load. Reconnect it or try another network if a security filter blocks the link."); }}
                   />
                 ) : (
                   <div className="flex h-full flex-col items-center justify-center text-center">
@@ -1074,6 +1146,20 @@ function BuildPage() {
           </section>
         </div>
       </div>
+      {reportOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/30 p-4">
+          <section role="dialog" aria-modal="true" aria-labelledby="report-title" onKeyDown={event => { if (event.key === "Escape") setReportOpen(false); }} className="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl">
+            <h2 id="report-title" className="text-lg font-semibold">Report a beta problem</h2>
+            <p className="mt-2 text-xs text-slate-500">Your project and request reference will be included. Please leave passwords and API keys out of your report.</p>
+            <textarea aria-label="Describe the problem" maxLength={2000} value={reportText} onChange={event => setReportText(event.target.value)} className="mt-4 h-28 w-full rounded-lg border border-slate-200 p-3 text-sm" />
+            <p role="status" className="mt-2 break-all text-xs text-slate-600">{reportStatus}</p>
+            <div className="mt-4 flex gap-3">
+              <button type="button" disabled={reportSending || !reportText.trim()} onClick={() => void sendReport()} className="rounded-lg bg-blue-600 px-4 py-2 text-sm text-white disabled:opacity-50">{reportSending ? "Sending..." : "Send report"}</button>
+              <button type="button" onClick={() => setReportOpen(false)} className="px-4 py-2 text-sm text-slate-600">Close</button>
+            </div>
+          </section>
+        </div>
+      )}
     </AppShell>
   );
 }
