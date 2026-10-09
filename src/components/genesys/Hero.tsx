@@ -80,10 +80,10 @@ export function Hero() {
                 <div className="mt-auto pt-5">
                   <div className="mb-2 flex items-center gap-1.5 text-[9px] font-semibold text-slate-400"><Code2 size={11} /> PROJECT FILES</div>
                   <div className="space-y-1 text-[10px] text-slate-500">
-                    <div className="rounded-md bg-blue-50 px-2 py-1.5 text-blue-700">⌄ src</div>
-                    <div className="pl-5">⌄ routes</div>
+                    <div className="rounded-md bg-blue-50 px-2 py-1.5 text-blue-700">? src</div>
+                    <div className="pl-5">? routes</div>
                     <div className="rounded-md bg-white px-2 py-1.5 pl-8 text-slate-700 shadow-sm">dashboard.tsx</div>
-                    <div className="pl-5">⌄ components</div>
+                    <div className="pl-5">? components</div>
                     <div className="pl-8">stat-card.tsx</div>
                   </div>
                 </div>
