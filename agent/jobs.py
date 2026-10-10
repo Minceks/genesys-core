@@ -118,9 +118,16 @@ class JobManager:
             if attempts:
                 recovery = ("This accepted request was interrupted by a service restart. "
                     "The original request is unchanged. Existing Daytona files contain partial work. "
-                    "Inspect the current implementation first, preserve completed changes and user data, "
-                    "avoid duplicating components or applying the same edit twice, and finish missing work. "
-                    "Run all mandatory verification again. Last recorded stage: " + job.get('previousStage', 'unknown'))
+                    "Before editing, read the relevant existing user project files and compare them "
+                    "with the original request and conversation. Make a brief requirements checklist: "
+                    "what the user asked for, what is already implemented, and what is missing or broken. "
+                    "Base completion claims on file contents and verification, never on the saved stage alone. "
+                    "Preserve completed features, design, dependencies, and user data. Do not recreate the "
+                    "project, replace working files wholesale, duplicate components, or apply an edit twice. "
+                    "Implement only missing requirements or necessary repairs. If the requested work is "
+                    "already implemented, finish implementation without edits so mandatory build and "
+                    "browser verification can run again. Report what was retained, completed, and verified. "
+                    "Last recorded stage (informational, not proof of completion): " + job.get('previousStage', 'unknown'))
             result = self.execute(job['prompt'], job['projectId'], history, reservation, recovery)
             state = 'completed' if result.get('status') == 'success' else 'failed'
             self.update(job_id, state=state, stage='Complete' if state == 'completed' else 'Request failed', result=result)
