@@ -6,7 +6,7 @@ export function pendingBuild(projectId: string): PendingBuild | null {
   try {
     const value = JSON.parse(localStorage.getItem(key(projectId)) || 'null')
     if (value && typeof value.jobId === 'string' && typeof value.prompt === 'string' &&
-        Number.isFinite(value.startedAt) && Date.now() - value.startedAt < 3600000) return value
+        Number.isFinite(value.startedAt) && Date.now() - value.startedAt < 86400000) return value
     localStorage.removeItem(key(projectId))
   } catch { /* Server lookup also supports unavailable browser storage. */ }
   return null

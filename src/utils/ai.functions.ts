@@ -195,13 +195,13 @@ export async function askGenesys(
 
     let job = await response.json();
     if (job.jobId) savePendingBuild(projectId, { jobId: job.jobId, prompt: job.prompt || cleanedPrompt, startedAt: saved?.startedAt || job.createdAt || Date.now() });
-    const deadline = (saved?.startedAt || job.createdAt || Date.now()) + 3600000;
+    const deadline = (saved?.startedAt || job.createdAt || Date.now()) + 86400000;
     while (job.state === "running") {
       onProgress?.(job.stage || "Working on your request", job.requestId || "");
       if (Date.now() > deadline) { clearPendingBuild(projectId); throw new Error('This background request has expired. Please reconnect to your project before retrying.'); }
       await new Promise(resolve => setTimeout(resolve, 1500));
       if (document.hidden || !navigator.onLine) {
-        onProgress?.('Build continues on the server. Reconnecting when you return…', job.requestId || '');
+        onProgress?.('Build continues on the server. Reconnecting when you returnâ€¦', job.requestId || '');
         continue;
       }
       let poll: Response | undefined;
@@ -215,7 +215,7 @@ export async function askGenesys(
         onProgress?.("Reconnecting to request", job.requestId || "");
         await new Promise(resolve => setTimeout(resolve, 2000));
       }
-      if (!poll || poll.status >= 500) { onProgress?.('Build continues in the background. Reconnecting…', job.requestId || ''); continue; }
+      if (!poll || poll.status >= 500) { onProgress?.('Build continues in the background. Reconnectingâ€¦', job.requestId || ''); continue; }
       if (poll.status === 404) clearPendingBuild(projectId);
       if (!poll.ok) throw new Error(await getErrorMessage(poll));
       job = await poll.json();
