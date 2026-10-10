@@ -89,6 +89,7 @@ GROQ_MODEL = settings.genesys_model
 MAX_COMPLETION_TOKENS = 3200
 
 MAX_GROQ_RETRIES = 2
+MAX_GROQ_RETRY_WAIT = 20.0
 
 # ============================================================
 # CONTEXT COMPACTION
@@ -1329,10 +1330,9 @@ class GroqProvider(AIProvider):
                         except (ValueError, IndexError):
                             pass
 
-                    # Do not sleep long enough to trigger the
-                    # Gunicorn request timeout. Let the orchestrator
-                    # immediately use the Gemini fallback instead.
-                    if wait_seconds > 5.0:
+                    # Builds run as background jobs. A brief TPM cooldown is
+                    # usually cheaper than switching provider and replaying context.
+                    if wait_seconds > MAX_GROQ_RETRY_WAIT:
                         print(
                             "⚠️ Groq rate limit requires "
                             f"{wait_seconds:.1f}s wait. "
@@ -1343,8 +1343,8 @@ class GroqProvider(AIProvider):
                     wait_seconds = max(
                         1.0,
                         min(
-                            wait_seconds,
-                            5.0,
+                            wait_seconds + 0.25,
+                            MAX_GROQ_RETRY_WAIT,
                         ),
                     )
 
