@@ -8,6 +8,9 @@ export function AuthPage() {
   const [mode, setMode] = useState<Mode>('signin')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
+  const [confirmPassword, setConfirmPassword] = useState('')
+  const [firstName, setFirstName] = useState('')
+  const [lastName, setLastName] = useState('')
   const [message, setMessage] = useState('')
   const [busy, setBusy] = useState(false)
 
@@ -26,10 +29,16 @@ export function AuthPage() {
         if (error) throw error
         setMessage('If that address has an account, a reset email has been sent.')
       } else if (mode === 'signup') {
+        if (!firstName.trim() || !lastName.trim()) throw new Error('Enter your first name and surname.')
+        if (password.length < 8) throw new Error('Choose a password with at least 8 characters.')
+        if (password !== confirmPassword) throw new Error('Passwords do not match. Please check both passwords.')
         const { data, error } = await supabase.auth.signUp({
           email: email.trim(),
           password,
-          options: { emailRedirectTo: `${window.location.origin}/auth` },
+          options: {
+            emailRedirectTo: `${window.location.origin}/auth`,
+            data: { first_name: firstName.trim(), last_name: lastName.trim(), full_name: `${firstName.trim()} ${lastName.trim()}` },
+          },
         })
         if (error) throw error
 
@@ -56,7 +65,7 @@ export function AuthPage() {
     }
   }
 
-  function changeMode(next: Mode) { setMode(next); setMessage(''); setPassword('') }
+  function changeMode(next: Mode) { setMode(next); setMessage(''); setPassword(''); setConfirmPassword('') }
 
   async function signInWithGoogle() {
     if (busy) return
@@ -102,17 +111,23 @@ export function AuthPage() {
         <section className="mx-auto w-full max-w-md rounded-3xl border border-slate-200 bg-white p-7 shadow-xl shadow-slate-200/40 sm:p-10" aria-labelledby="auth-title">
           <h1 id="auth-title" className="text-3xl font-bold tracking-tight">{title}</h1>
           <p className="mt-3 text-sm leading-6 text-slate-500">{subtitle}</p>
+          {mode === 'signin' && <div className="mt-5 flex items-center justify-between rounded-xl bg-blue-50 px-4 py-3 text-sm"><span className="text-slate-600">New to GeneSys?</span><button type="button" disabled={busy} onClick={() => changeMode('signup')} className="font-semibold text-blue-700 hover:underline">Create account</button></div>}
           {mode !== 'forgot' && <>
             <button type="button" disabled={busy} onClick={signInWithGoogle} className="mt-7 flex w-full items-center justify-center gap-3 rounded-xl border border-slate-200 px-4 py-3 text-sm font-semibold transition hover:bg-slate-50 focus-visible:outline-2 focus-visible:outline-blue-600 disabled:opacity-50"><span aria-hidden="true" className="text-base font-bold text-blue-600">G</span> Continue with Google</button>
             <div className="my-6 flex items-center gap-3 text-xs text-slate-400"><span className="h-px flex-1 bg-slate-100" /> or continue with email <span className="h-px flex-1 bg-slate-100" /></div>
           </>}
           <form onSubmit={submit} className={mode === 'forgot' ? 'mt-7 space-y-5' : 'space-y-5'}>
+            {mode === 'signup' && <div className="grid gap-4 sm:grid-cols-2">
+              <label className="block text-sm font-semibold">First name<input className={inputClass} type="text" autoComplete="given-name" required maxLength={100} disabled={busy} value={firstName} onChange={e => setFirstName(e.target.value)} /></label>
+              <label className="block text-sm font-semibold">Surname<input className={inputClass} type="text" autoComplete="family-name" required maxLength={100} disabled={busy} value={lastName} onChange={e => setLastName(e.target.value)} /></label>
+            </div>}
             <label className="block text-sm font-semibold">Email<input className={inputClass} type="email" autoComplete="email" placeholder="you@example.com" required disabled={busy} value={email} onChange={e => setEmail(e.target.value)} /></label>
             {mode !== 'forgot' && <label className="block text-sm font-semibold"><span className="flex items-center justify-between">Password{mode === 'signin' && <button type="button" disabled={busy} onClick={() => changeMode('forgot')} className="text-xs font-medium text-blue-600 hover:text-blue-700">Forgot password?</button>}</span><input className={inputClass} type="password" autoComplete={mode === 'signup' ? 'new-password' : 'current-password'} minLength={mode === 'signup' ? 8 : undefined} placeholder={mode === 'signup' ? 'At least 8 characters' : 'Enter your password'} required disabled={busy} value={password} onChange={e => setPassword(e.target.value)} /></label>}
+            {mode === 'signup' && <label className="block text-sm font-semibold">Confirm password<input className={inputClass} type="password" autoComplete="new-password" placeholder="Enter your password again" required minLength={8} disabled={busy} value={confirmPassword} onChange={e => setConfirmPassword(e.target.value)} /></label>}
             <button disabled={busy} className="flex w-full items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-3.5 text-sm font-semibold text-white shadow-md shadow-blue-600/20 transition hover:bg-blue-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600 disabled:opacity-50">{busy ? <><Loader2 size={16} className="animate-spin" /> Please wait?</> : <>{mode === 'signup' ? 'Create account' : mode === 'forgot' ? 'Send reset email' : 'Sign in'}<ArrowRight size={16} /></>}</button>
           </form>
           {message && <p role="status" className="mt-5 rounded-xl border border-blue-100 bg-blue-50 p-3 text-sm leading-6 text-blue-900">{message}</p>}
-          <div className="mt-7 border-t border-slate-100 pt-6 text-center text-sm text-slate-500">{mode === 'signin' ? <>New to GeneSys? <button type="button" disabled={busy} onClick={() => changeMode('signup')} className="font-semibold text-blue-600 hover:text-blue-700">Create account</button></> : <button type="button" disabled={busy} onClick={() => changeMode('signin')} className="font-semibold text-blue-600 hover:text-blue-700">Back to sign in</button>}</div>
+          {mode !== 'signin' && <div className="mt-7 border-t border-slate-100 pt-6 text-center text-sm text-slate-500"><button type="button" disabled={busy} onClick={() => changeMode('signin')} className="font-semibold text-blue-600 hover:text-blue-700">Back to sign in</button></div>}
           {mode === 'signup' && <p className="mt-5 text-center text-xs leading-5 text-slate-400">By creating an account, you agree to our <a href="/terms" className="underline hover:text-blue-600">Terms &amp; Conditions</a>.</p>}
         </section>
       </div>
