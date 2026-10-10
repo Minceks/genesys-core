@@ -1,5 +1,6 @@
 import json
 import time
+import uuid
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -734,7 +735,7 @@ class GeminiProvider(AIProvider):
         self.client = genai.Client(
             api_key=api_key,
             http_options=types.HttpOptions(
-                timeout=20_000,
+                timeout=60_000,
                 retry_options=types.HttpRetryOptions(
                     attempts=2,
                     initial_delay=1.0,
@@ -1292,6 +1293,30 @@ class GroqProvider(AIProvider):
                     "status_code",
                     None,
                 )
+
+                # Normalize only this known typo within the current allowlist.
+                if status_code == 400:
+                    body = getattr(error, "body", None)
+                    detail = body.get("error", body) if isinstance(body, dict) else {}
+                    if isinstance(detail, dict) and detail.get("code") == "tool_use_failed":
+                        try:
+                            failed = json.loads(detail.get("failed_generation", ""))
+                        except (TypeError, ValueError):
+                            failed = None
+                        allowed = {tool.get("function", {}).get("name") for tool in tools}
+                        if (isinstance(failed, dict) and failed.get("name") == "list_file"
+                                and "list_files" in allowed
+                                and failed.get("arguments") in ({}, {"path": ""}, {"path": "."})):
+                            return AIResponse(text="", tool_calls=[AIToolCall(
+                                id="repaired_" + uuid.uuid4().hex,
+                                name="list_files", arguments={})])
+                        if attempt < MAX_GROQ_RETRIES - 1:
+                            prepared_messages.append({"role": "user", "content":
+                                "The previous tool call was rejected. Available exact tool names: "
+                                + ", ".join(sorted(allowed)) +
+                                ". Use existing source context and edit necessary files, "
+                                "or respond normally when implementation is complete."})
+                            continue
 
                 # ------------------------------------------------
                 # Rate limit

@@ -2123,7 +2123,7 @@ def run_agent(
     repeated_tool_count = 0
     pre_edit_read_count = 0
     repair_inspection_count = 0
-    PRE_EDIT_READ_LIMIT = 8
+    PRE_EDIT_READ_LIMIT = 4
 
     MAX_REPAIR_ATTEMPTS = 3
     repair_attempts = 0
@@ -3558,6 +3558,12 @@ def run_agent(
         # ----------------------------------------------------
 
         step_tools = tools_for_repair(model_tools, repair_inspection_count) if last_failure_type else model_tools
+        if project_id != PROJECT_ID_DEFAULT and not last_failure_type and not modified_files and pre_edit_read_count >= PRE_EDIT_READ_LIMIT:
+            step_tools = [tool for tool in model_tools if tool['function']['name'] not in {'read_file', 'list_files'}]
+            messages.append({'role': 'system', 'content':
+                'Use the existing source and inspection context now. The initial inspection budget is used. '
+                'Make the necessary implementation edits, or respond without tool calls if the '
+                'original request is already implemented so mandatory verification can proceed.'})
         try:
 
             response = provider.generate(
