@@ -1,8 +1,10 @@
 import { createClient } from '@supabase/supabase-js'
 import publicConfig from '../config/supabase.public.json'
 
-const url = import.meta.env.VITE_SUPABASE_URL || publicConfig.url
-const key = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY || publicConfig.publishableKey
+// Production must use the same project as the backend and ownership database.
+// Legacy Vercel variables can refer to an unrelated Supabase project.
+const url = import.meta.env.DEV ? import.meta.env.VITE_SUPABASE_URL || publicConfig.url : publicConfig.url
+const key = import.meta.env.DEV ? import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY || publicConfig.publishableKey : publicConfig.publishableKey
 
 // Record recovery before the SDK consumes the URL and emits its initial events.
 let recoverySession = false
