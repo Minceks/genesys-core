@@ -49,7 +49,7 @@ def verify_content(page, prompt):
                     item = page.get_by_text(marker, exact=True).first
                     container = item
                     for _ in range(5):
-                        remove = container.get_by_role('button', name=re.compile(r'^remove(?: book)?$', re.I))
+                        remove = container.get_by_role('button', name=re.compile(r'^remove\b', re.I))
                         if remove.count() == 1:
                             remove.click()
                             page.wait_for_timeout(150)

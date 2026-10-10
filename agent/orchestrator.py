@@ -3246,16 +3246,10 @@ def run_agent(
                     quality = get_browser(project_id).visual_quality(
                         allow_unstyled=bool(re.search(r"\b(unstyled|browser[- ]default|no css|plain html)\b", prompt, re.I))
                     )
-                    if quality['status'] != 'success':
-                        raise RuntimeError(
-                            "Visual quality verification failed. Keep the requested behavior and theme; "
-                            "repair the application stylesheet and layout before completing.\n"
-                            + json.dumps(quality, ensure_ascii=False)
-                        )
                     report_progress('Checking requested content and interactions')
                     content_result = get_browser(project_id).content_checks(prompt)
-                    if content_result['status'] != 'success':
-                        raise RuntimeError('Requested content or interaction verification failed. Repair these issues before completing:\n' + json.dumps(content_result, ensure_ascii=False))
+                    if quality['status'] != 'success' or content_result['status'] != 'success':
+                        raise RuntimeError('Application verification failed. Keep the requested behavior and theme and repair all reported layout, content and interaction issues in one pass:\n' + json.dumps({'visualQuality': quality, 'contentInteractions': content_result}, ensure_ascii=False))
 
                 browser_verified = True
                 verification_complete = True
@@ -3917,7 +3911,13 @@ def run_agent(
             # ----------------------------------------------
 
             inspection_limit_hit = False
-            if tool_name == "read_file" and not modified_files:
+            if tool_name not in {tool['function']['name'] for tool in step_tools}:
+                inspection_limit_hit = True
+                result = {'status': 'error', 'error': 'This tool is not available in the current phase. Use edit_file or write_file for the repair, then respond without tool calls for verification.'}
+                loop_warning = result['error']
+            elif last_failure_type and tool_name in {'read_file', 'list_files'} and repair_inspection_count == 2:
+                loop_warning = 'The repair inspection budget is now used. Make the smallest repair with edit_file or write_file using the current source, then stop tool calls so verification can run.'
+            if not inspection_limit_hit and tool_name == "read_file" and not modified_files:
                 pre_edit_read_count += 1
                 if pre_edit_read_count == 4:
                     loop_warning = (
