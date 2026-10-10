@@ -14,6 +14,7 @@ from .ai_provider import (
 )
 from .config import load_settings
 from .daytona_workspace import get_workspace
+from .design_guidance import project_design_guidance
 from .project_intelligence import (
     scan_project,
     build_project_context,
@@ -1990,6 +1991,7 @@ def run_agent(
                 "Remove old createRoute/Route/rootRoute wrappers, platform navigation and @/ platform imports. "
                 "Reimplement needed components using this project's actual dependencies. "
                 "Do not merely create an unreachable route."
+                + project_design_guidance(project_id)
                 if project_id != PROJECT_ID_DEFAULT else ""
             ),
         },
