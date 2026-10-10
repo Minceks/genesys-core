@@ -818,6 +818,7 @@ class GeminiProvider(AIProvider):
         ] = []
 
         system_instruction: str | None = None
+        system_parts: list[str] = []
 
         for message in messages:
             role = message.get(
@@ -833,9 +834,7 @@ class GeminiProvider(AIProvider):
                 content = ""
 
             if role == "system":
-                system_instruction = str(
-                    content
-                )
+                system_parts.append(str(content))
                 continue
 
             if role == "user":
@@ -1000,6 +999,22 @@ class GeminiProvider(AIProvider):
                     )
                 )
                 continue
+
+        system_instruction = '\n\n'.join(system_parts) or None
+        # Gemini requires alternating turns, with function calls following a user
+        # turn. Provider fallback can leave adjacent assistant text turns or end
+        # with assistant text after its tool outcomes became plain system context.
+        merged_contents = []
+        for turn in contents:
+            if merged_contents and merged_contents[-1].role == turn.role:
+                merged_contents[-1].parts.extend(turn.parts or [])
+            else:
+                merged_contents.append(turn)
+        contents = merged_contents
+        if contents and contents[-1].role == 'model':
+            contents.append(types.Content(role='user', parts=[types.Part.from_text(
+                text='Continue the current task from the latest executed progress. Use the available tools or finish without tool calls for verification.'
+            )]))
 
         function_declarations = []
 
