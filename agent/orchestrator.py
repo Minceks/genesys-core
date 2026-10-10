@@ -15,6 +15,7 @@ from .ai_provider import (
 from .config import load_settings
 from .daytona_workspace import get_workspace
 from .design_guidance import project_design_guidance
+from .build_context import InspectionCache, initial_source_context
 from .project_intelligence import (
     scan_project,
     build_project_context,
@@ -61,7 +62,7 @@ Your job is to modify a real software project inside a Daytona workspace.
 You MUST follow this workflow:
 
 1. Inspect the project before making changes.
-2. Use list_files first when beginning a task.
+2. Use the file listing already supplied by mandatory inspection. Call list_files only when you need an updated listing.
 3. Use read_file before modifying an existing file. Prefer edit_file for exact targeted changes. Partial or compacted file views must never be reconstructed with write_file.
 4. Never invent file paths.
 5. Make the smallest correct changes needed for the user's request.
@@ -80,6 +81,8 @@ You MUST follow this workflow:
 before ending your implementation turn. When implementation or a repair is complete, respond
 without tool calls; the orchestrator will then run mandatory verification. A single file edit
 does not mean the application is finished.
+18. Reuse complete source files supplied in initial inspection. Batch independent tool calls
+in one response when possible. Do not repeat inspection or planning after a provider switch.
 
 IMPORTANT TOOL LIMITATION:
 
@@ -2222,7 +2225,9 @@ def run_agent(
     print("🧠 Running project intelligence scan...")
 
     try:
-        project_scan = scan_project(workspace)
+        inspection_cache = InspectionCache(workspace)
+        known_files = inspection_result.get('files') if isinstance(inspection_result, dict) else None
+        project_scan = scan_project(inspection_cache, files=known_files if isinstance(known_files, list) else None)
 
         project_context = build_project_context(
             project_scan
@@ -2232,6 +2237,9 @@ def run_agent(
             prompt,
             project_scan,
         )
+        source_context = initial_source_context(inspection_cache, known_files, targeted_files)
+        if source_context:
+            messages.append({'role': 'system', 'content': source_context})
 
         print("🎯 Targeted files:")
 
@@ -3578,6 +3586,11 @@ def run_agent(
                         )
 
                         if role == "tool":
+                            # Preserve inspected source/tool outcomes as plain context rather
+                            # than discarding them with provider-specific function signatures.
+                            content = str(message.get('content') or '')
+                            if len(content) <= 4000:
+                                fallback_messages.append({'role': 'system', 'content': 'Previous tool result (already executed):\n' + content})
                             continue
 
                         if role == "assistant":
@@ -3599,6 +3612,10 @@ def run_agent(
                             dict(message)
                         )
 
+                    fallback_messages.append({'role': 'system', 'content':
+                        'Continue the same task from current progress. Do not restart inspection. '
+                        f'Already modified files: {modified_files}. Implementation steps remaining: {max(0, MAX_STEPS - step)}. '
+                        'Finish remaining application files and styles, then respond without tool calls for verification.'})
                     if time.monotonic() >= agent_deadline:
                         return _agent_timeout_result()
 

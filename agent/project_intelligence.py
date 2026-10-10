@@ -778,6 +778,7 @@ def _source_files(
 
 def scan_project(
     workspace: Any,
+    files: list[str] | None = None,
 ) -> dict[str, Any]:
     """
     Scan the current project and return normalized
@@ -785,7 +786,7 @@ def scan_project(
     """
 
     files = _clean_files(
-        _list_files(workspace)
+        _list_files(workspace) if files is None else files
     )
 
     package_json_content = None

@@ -1210,7 +1210,7 @@ class GroqProvider(AIProvider):
                         {
                             "tools": tools,
                             "tool_choice": "auto",
-                            "parallel_tool_calls": False,
+                            "parallel_tool_calls": True,
                         }
                     )
 
