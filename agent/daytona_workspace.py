@@ -262,7 +262,9 @@ root = pathlib.Path(%s).resolve()
 files = json.loads(%s)
 changed = []
 if (root / '.git').exists():
-    for args in (['diff', '--name-only', 'HEAD', '-z'], ['ls-files', '--others', '--exclude-standard', '-z']):
+    history = subprocess.run(['git', '-C', str(root), 'rev-list', '--reverse', 'HEAD'], capture_output=True, check=True).stdout.decode().splitlines()
+    baseline = history[0] if history else 'HEAD'
+    for args in (['diff', '--name-only', baseline, '-z'], ['ls-files', '--others', '--exclude-standard', '-z']):
         result = subprocess.run(['git', '-C', str(root), *args], capture_output=True, check=True)
         changed.extend(p for p in result.stdout.decode().split('\\0') if p)
 backup = root.parent / ('legacy-' + root.name + '-' + str(time.time_ns()))
