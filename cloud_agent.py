@@ -17,6 +17,7 @@ from agent.config import load_settings
 from agent.orchestrator import run_agent
 from agent.jobs import JobManager
 from agent import user_auth
+from agent.preview_proxy import publish_preview
 from agent.tools import list_files, read_file, write_file
 from agent.daytona_workspace import get_workspace
 from agent.promotion import (
@@ -418,6 +419,14 @@ def execute_agent_request(prompt, project_id, conversation_history):
     )
 
     if isinstance(result, dict):
+        if result.get('previewUrl'):
+            try:
+                result['previewUrl'] = publish_preview(result['previewUrl'])
+            except Exception:
+                logger.exception('preview_proxy_registration_failed')
+                result['previewUrl'] = None
+                result['previewStarted'] = False
+                result['message'] = str(result.get('message') or '') + ' Preview could not reconnect. Please retry from the builder.'
         result.setdefault("requestType", "build")
         checkpoint = result.get("checkpoint")
         if (
@@ -543,7 +552,10 @@ def reconnect_preview():
     if jobs.is_running(project_id):
         return jsonify(status="error", message="Wait for the current request to finish before reconnecting the preview."), 409
     try:
-        return jsonify(get_workspace(project_id).start_preview())
+        result = get_workspace(project_id).start_preview()
+        if result.get('url'):
+            result['url'] = publish_preview(result['url'])
+        return jsonify(result)
     except Exception:
         logger.exception("preview_reconnect_failed project_id=%s", project_id)
         return jsonify(status="error", message="Preview could not reconnect. Please retry or report this problem."), 503
