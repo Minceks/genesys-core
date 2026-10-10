@@ -13,6 +13,7 @@ export function AuthPage() {
 
   async function submit(event: React.FormEvent) {
     event.preventDefault()
+    if (busy) return
     setMessage('')
     setBusy(true)
 
@@ -26,7 +27,7 @@ export function AuthPage() {
         setMessage('If that address has an account, a reset email has been sent.')
       } else if (mode === 'signup') {
         const { data, error } = await supabase.auth.signUp({
-          email,
+          email: email.trim(),
           password,
           options: { emailRedirectTo: `${window.location.origin}/auth` },
         })
@@ -37,13 +38,16 @@ export function AuthPage() {
             ? 'Account created.'
             : 'Check your email to confirm your account.',
         )
+        if (data.session) window.location.assign('/account')
       } else {
-        const { error } = await supabase.auth.signInWithPassword({
-          email,
+        const { data, error } = await supabase.auth.signInWithPassword({
+          email: email.trim(),
           password,
         })
         if (error) throw error
+        if (!data.session) throw new Error('Sign-in did not establish a session. Please try again.')
         setMessage('Signed in. Opening your workspace…')
+        window.location.assign('/account')
       }
     } catch (error) {
       setMessage(error instanceof Error ? error.message : 'Authentication failed.')
