@@ -569,7 +569,7 @@ def start_agent_job():
         return limit_response(error)
     try:
         job_id = jobs.submit(project_id, request_id_context.get(),
-            lambda: execute_agent_request(prompt, project_id, history, reservation))
+            lambda: execute_agent_request(prompt, project_id, history, reservation), prompt=prompt)
     except ValueError as error:
         usage_limiter.release(reservation, refund=True)
         return jsonify(status="error", message=str(error)), 429
@@ -577,6 +577,11 @@ def start_agent_job():
         usage_limiter.release(reservation, refund=True)
         raise
     return jsonify(jobs.get(job_id, project_id)), 202
+
+
+@app.route('/agent/jobs', methods=['GET'])
+def latest_agent_job():
+    return jsonify(job=jobs.latest(get_project_id()))
 
 
 @app.route("/agent/jobs/<job_id>", methods=["GET"])

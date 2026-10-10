@@ -15,7 +15,7 @@ class JobManager:
         self.lock = threading.Lock()
         self.jobs = {}
 
-    def submit(self, project_id, request_id, execute):
+    def submit(self, project_id, request_id, execute, prompt=""):
         with self.lock:
             now = time.monotonic()
             self.jobs = {key: job for key, job in self.jobs.items()
@@ -27,6 +27,7 @@ class JobManager:
                 raise ValueError("GeneSys is busy. Please try again shortly.")
             job_id = uuid.uuid4().hex
             self.jobs[job_id] = {"jobId": job_id, "projectId": project_id,
+                "prompt": prompt, "createdAt": time.time() * 1000,
                 "requestId": request_id, "state": "running", "stage": "Preparing request",
                 "updated": now}
 
@@ -67,3 +68,12 @@ class JobManager:
         with self.lock:
             return any(job["projectId"] == project_id and job["state"] == "running"
                        for job in self.jobs.values())
+
+    def latest(self, project_id):
+        with self.lock:
+            candidates = [job for job in self.jobs.values() if job['projectId'] == project_id
+                          and (job['state'] == 'running' or time.monotonic() - job['updated'] < 3600)]
+            if not candidates:
+                return None
+            job = max(candidates, key=lambda item: item['createdAt'])
+            return {key: value for key, value in job.items() if key != 'updated'}
