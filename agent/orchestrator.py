@@ -23,6 +23,7 @@ from .project_intelligence import (
 
 from .browser import (
     BrowserSession,
+    get_browser,
     stop_browser,
 )
 from .tools import TOOLS, execute_tool
@@ -2916,6 +2917,7 @@ def run_agent(
             build_attempted
             and build_passed
             and not preview_started
+            and not recovery_waiting_for_model
         ):
 
             print(
@@ -3112,6 +3114,7 @@ def run_agent(
             preview_started
             and not browser_verified
             and preview_url
+            and not recovery_waiting_for_model
         ):
 
             print(
@@ -3219,6 +3222,18 @@ def run_agent(
                         )
                     )
 
+                if project_id != PROJECT_ID_DEFAULT:
+                    report_progress("Checking visual layout")
+                    quality = get_browser(project_id).visual_quality(
+                        allow_unstyled=bool(re.search(r"\b(unstyled|browser[- ]default|no css|plain html)\b", prompt, re.I))
+                    )
+                    if quality['status'] != 'success':
+                        raise RuntimeError(
+                            "Visual quality verification failed. Keep the requested behavior and theme; "
+                            "repair the application stylesheet and layout before completing.\n"
+                            + json.dumps(quality, ensure_ascii=False)
+                        )
+
                 browser_verified = True
                 verification_complete = True
 
@@ -3287,6 +3302,7 @@ def run_agent(
                 last_failure_type = (
                     "browser_runtime"
                 )
+                recovery_waiting_for_model = True
 
                 browser_verified = False
 
@@ -3921,7 +3937,7 @@ def run_agent(
                         tool_name,
                     )
 
-                    if recovery_waiting_for_model:
+                    if recovery_waiting_for_model and tool_name in {"edit_file", "write_file", "create_file"} and isinstance(result, dict) and result.get("status") == "success":
                         recovery_waiting_for_model = False
 
                 except Exception as exc:

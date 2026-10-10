@@ -12,6 +12,7 @@ from playwright.sync_api import (
 )
 
 from .daytona_workspace import get_workspace
+from .visual_quality import SNAPSHOT_SCRIPT, assess_visual_quality
 
 
 # ============================================================
@@ -312,6 +313,21 @@ class BrowserSession:
     # ========================================================
     # GET CONSOLE
     # ========================================================
+
+    @browser_thread
+    def visual_quality(self, *, allow_unstyled=False) -> dict[str, Any]:
+        page = self.start()
+        original = page.viewport_size
+        snapshots = []
+        try:
+            for width, height in ((1280, 800), (390, 844)):
+                page.set_viewport_size({'width': width, 'height': height})
+                page.wait_for_timeout(200)
+                snapshots.append(page.evaluate(SNAPSHOT_SCRIPT))
+        finally:
+            if original:
+                page.set_viewport_size(original)
+        return assess_visual_quality(snapshots, allow_unstyled=allow_unstyled)
 
     @browser_thread
     def get_console(
