@@ -92,3 +92,12 @@ preview domain needs separate hosting and DNS configuration.
 `POST /beta/feedback` accepts message (up to 2000 characters), projectId,
 requestId and stage. Reports are recorded in Railway application logs and
 return reportId. Do not include credentials or personal data in feedback.
+# Beta reliability endpoints
+
+`GET /usage` returns the authenticated account's hourly/daily remaining builds and active-build status.
+`POST /restore` with `{ "projectId": "<owned-project-uuid>" }` restores the last published verified
+checkpoint, preserving current changes in a Git stash. It is rejected during an active project job.
+`POST /preview` returns the last verified snapshot when one exists. Project preview hostnames stay
+stable so browser-local app data survives reconnects. Expired preview registrations still require reconnect.
+Build job failures may include `previousPreviewPreserved: true` and a `previewUrl` pointing at the
+previous working snapshot. Limits return HTTP 429, `retryAfter` and a `Retry-After` header.

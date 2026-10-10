@@ -1,6 +1,7 @@
 """Separate preview service. Each expiring link receives its own origin."""
 import asyncio
 import hmac
+import hashlib
 import os
 import re
 import secrets
@@ -39,7 +40,7 @@ def create_app():
             upstream = urlsplit(data['url'])
             # Fixed application port and trusted Daytona domains only. No arbitrary proxy targets.
             host = upstream.hostname or ''
-            allowed = re.fullmatch(r'4173-[a-zA-Z0-9-]+\.(?:daytonaproxy\d+\.eu|proxy\.daytona\.work)', host)
+            allowed = re.fullmatch(r'417[34]-[a-zA-Z0-9-]+\.(?:daytonaproxy\d+\.eu|proxy\.daytona\.work)', host)
             if upstream.scheme != 'https' or not allowed or upstream.port or upstream.username or upstream.password or upstream.path not in ('', '/') or upstream.query or upstream.fragment:
                 raise ValueError('Invalid upstream')
         except (ValueError, KeyError, TypeError):
@@ -48,9 +49,12 @@ def create_app():
         for key in list(entries):
             if entries[key]['expires'] <= now:
                 del entries[key]
-        if len(entries) >= 256:
+        project_id = str(data.get('projectId') or '')
+        if len(project_id) > 128:
+            raise web.HTTPBadRequest(text='Invalid project identifier.')
+        ticket = hmac.new(secret.encode(), ('project:' + project_id).encode(), hashlib.sha256).hexdigest()[:32] if project_id else secrets.token_hex(16)
+        if ticket not in entries and len(entries) >= 256:
             raise web.HTTPServiceUnavailable(text='Preview capacity reached.')
-        ticket = secrets.token_hex(16)
         entries[ticket] = {'upstream': f'https://{host}', 'expires': now + 3500}
         return web.json_response({'url': f'https://{ticket}.{domain}/', 'expiresInSeconds': 3500})
 

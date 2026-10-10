@@ -17,6 +17,7 @@ from daytona import (
 
 from .config import load_settings
 from .project_starter import STARTER_FILES
+from .persistence import PERSISTENT_STATE_SOURCE
 
 logger = logging.getLogger(__name__)
 
@@ -227,6 +228,10 @@ class DaytonaWorkspace:
         )
         if self._is_user_project():
             self._prepare_user_project(self.sandbox)
+            helper = REMOTE_PROJECT_ROOT + '/src/usePersistentState.js'
+            missing = self.sandbox.process.exec('test -f ' + shlex.quote(helper), timeout=10)
+            if missing.exit_code != 0:
+                self.sandbox.fs.upload_file(PERSISTENT_STATE_SOURCE.encode(), helper)
 
     def _is_user_project(self) -> bool:
         try:

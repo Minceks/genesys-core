@@ -14,10 +14,12 @@ from flask import (
 from flask_cors import CORS
 from agent.logging_config import configure_logging, request_id_context
 from agent.config import load_settings
-from agent.orchestrator import run_agent
+from agent.orchestrator import run_agent, classify_request_type
 from agent.jobs import JobManager
 from agent import user_auth
 from agent.preview_proxy import publish_preview
+from agent.verified_preview import verified_preview, restore_verified
+from agent.usage_limits import UsageLimiter, UsageLimited
 from agent.tools import list_files, read_file, write_file
 from agent.daytona_workspace import get_workspace
 from agent.promotion import (
@@ -46,6 +48,17 @@ configure_logging()
 settings = load_settings()
 
 logger = logging.getLogger(__name__)
+usage_limiter = UsageLimiter()
+
+
+def reserve_build(prompt):
+    if classify_request_type(str(prompt)) == 'chat':
+        return None
+    return usage_limiter.reserve(getattr(g, 'user', {}).get('id', 'legacy-api'))
+
+
+def limit_response(error):
+    return jsonify(status='error', message=str(error), retryAfter=error.retry_after), 429, {'Retry-After': str(error.retry_after)}
 
 
 # ============================================================
@@ -93,7 +106,7 @@ def require_api_key():
     if user_auth.configured() or request.path.startswith('/api/projects'):
         try:
             g.user = user_auth.current_user(request.headers.get('Authorization', ''))
-            project_paths = {'/list-files', '/read-file', '/write-file', '/agent/run', '/preview', '/promote', '/beta/feedback'}
+            project_paths = {'/list-files', '/read-file', '/write-file', '/agent/run', '/preview', '/restore', '/promote', '/beta/feedback'}
             if request.path in project_paths or request.path.startswith('/agent/jobs'):
                 user_auth.owned_project(get_project_id(), g.user)
             if request.path == '/promote':
@@ -409,7 +422,14 @@ def write():
 # AGENT RUN
 # ============================================================
 
-def execute_agent_request(prompt, project_id, conversation_history):
+def execute_agent_request(prompt, project_id, conversation_history, reservation=None):
+    try:
+        return _execute_agent_request(prompt, project_id, conversation_history)
+    finally:
+        usage_limiter.release(reservation)
+
+
+def _execute_agent_request(prompt, project_id, conversation_history):
     result = run_agent(
         prompt=str(
             prompt
@@ -419,9 +439,21 @@ def execute_agent_request(prompt, project_id, conversation_history):
     )
 
     if isinstance(result, dict):
+        checkpoint = result.get('checkpoint') or {}
+        if result.get('requestType') != 'chat':
+            try:
+                workspace = get_workspace(project_id)
+                if result.get('status') == 'success' and result.get('browserVerified') and checkpoint.get('status') == 'success':
+                    result['previewUrl'] = verified_preview(workspace, checkpoint)
+                elif result.get('status') != 'success':
+                    result['previewUrl'] = verified_preview(workspace)
+                    result['previousPreviewPreserved'] = bool(result['previewUrl'])
+            except Exception:
+                logger.exception('verified_preview_failed')
+                result['previewUrl'] = None
         if result.get('previewUrl'):
             try:
-                result['previewUrl'] = publish_preview(result['previewUrl'])
+                result['previewUrl'] = publish_preview(result['previewUrl'], project_id)
             except Exception:
                 logger.exception('preview_proxy_registration_failed')
                 result['previewUrl'] = None
@@ -498,12 +530,15 @@ def agent_run():
             project_id,
         )
 
-        result = execute_agent_request(prompt, project_id, conversation_history)
+        reservation = reserve_build(prompt)
+        result = execute_agent_request(prompt, project_id, conversation_history, reservation)
 
         return jsonify(
             result
         )
 
+    except UsageLimited as error:
+        return limit_response(error)
     except Exception as error:
         logger.exception("agent_run_failed")
 
@@ -529,10 +564,18 @@ def start_agent_job():
     history = [{"role": turn.get("role"), "content": str(turn.get("content") or "")[:2000]}
                for turn in (data.get("history") or [])[-10:] if isinstance(turn, dict)] if isinstance(data.get("history"), list) else []
     try:
+        reservation = reserve_build(prompt)
+    except UsageLimited as error:
+        return limit_response(error)
+    try:
         job_id = jobs.submit(project_id, request_id_context.get(),
-            lambda: execute_agent_request(prompt, project_id, history))
+            lambda: execute_agent_request(prompt, project_id, history, reservation))
     except ValueError as error:
+        usage_limiter.release(reservation, refund=True)
         return jsonify(status="error", message=str(error)), 429
+    except Exception:
+        usage_limiter.release(reservation, refund=True)
+        raise
     return jsonify(jobs.get(job_id, project_id)), 202
 
 
@@ -552,13 +595,39 @@ def reconnect_preview():
     if jobs.is_running(project_id):
         return jsonify(status="error", message="Wait for the current request to finish before reconnecting the preview."), 409
     try:
-        result = get_workspace(project_id).start_preview()
+        workspace = get_workspace(project_id)
+        workspace._ensure_sandbox_running()
+        saved = verified_preview(workspace)
+        result = {'status': 'success', 'url': saved, 'running': True} if saved else workspace.start_preview()
         if result.get('url'):
-            result['url'] = publish_preview(result['url'])
+            result['url'] = publish_preview(result['url'], project_id)
         return jsonify(result)
     except Exception:
         logger.exception("preview_reconnect_failed project_id=%s", project_id)
         return jsonify(status="error", message="Preview could not reconnect. Please retry or report this problem."), 503
+
+
+@app.route('/usage', methods=['GET'])
+def account_usage():
+    return jsonify(usage_limiter.status(getattr(g, 'user', {}).get('id', 'legacy-api')))
+
+
+@app.route('/restore', methods=['POST'])
+def restore_project():
+    project_id = get_project_id()
+    if jobs.is_running(project_id) or usage_limiter.status(getattr(g, 'user', {}).get('id', 'legacy-api'))['buildRunning']:
+        return jsonify(status='error', message='Wait for the current build to finish before restoring.'), 409
+    try:
+        workspace = get_workspace(project_id)
+        workspace._ensure_sandbox_running()
+        result = restore_verified(workspace)
+        if result.get('status') != 'success':
+            return jsonify(status='error', message='The previous version could not be restored.'), 503
+        url = verified_preview(workspace)
+        return jsonify(status='success', url=publish_preview(url, project_id), message='Last verified version restored. Previous edits are saved in the project Git stash.')
+    except Exception:
+        logger.exception('restore_failed')
+        return jsonify(status='error', message='No working version could be restored. Please retry or report this problem.'), 503
 
 
 @app.route("/beta/feedback", methods=["POST"])

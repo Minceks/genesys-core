@@ -1,8 +1,10 @@
 """Minimal, independent application files for user-owned projects."""
 
 import json
+from .persistence import PERSISTENT_STATE_SOURCE
 
 STARTER_FILES = {
+    "src/usePersistentState.js": PERSISTENT_STATE_SOURCE,
     "package.json": json.dumps({
         "name": "user-project", "private": True, "version": "0.0.0",
         "type": "module",

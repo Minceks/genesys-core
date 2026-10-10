@@ -3251,6 +3251,10 @@ def run_agent(
                             "repair the application stylesheet and layout before completing.\n"
                             + json.dumps(quality, ensure_ascii=False)
                         )
+                    report_progress('Checking requested content and interactions')
+                    content_result = get_browser(project_id).content_checks(prompt)
+                    if content_result['status'] != 'success':
+                        raise RuntimeError('Requested content or interaction verification failed. Repair these issues before completing:\n' + json.dumps(content_result, ensure_ascii=False))
 
                 browser_verified = True
                 verification_complete = True

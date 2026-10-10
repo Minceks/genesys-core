@@ -38,6 +38,12 @@ Use semantic HTML and actual installed styling tools. The clean starter has plai
 Tailwind class names do not work unless Tailwind has actually been configured.
 Build the requested interactions with meaningful loading, empty, error and success states.
 Do not use dead buttons, unrelated platform navigation or fake completed integrations.
+For ordinary user-created app data, persist changes across reloads. Import the provided
+usePersistentState hook from src/usePersistentState.js when present, use a stable descriptive
+storage key, validate loaded data shape when needed and show storageError to the user.
+Do not store secrets or passwords in browser storage. Browser storage is local to this
+device; for shared multi-user data, require a real backend and database instead of claiming sync.
+For an existing application, preserve its data keys and schema; do not discard saved data.
 When browser verification is available, inspect the actual rendered application for layout,
 readable content, clipping and the requested UI. A clean console alone is not visual proof.
 """

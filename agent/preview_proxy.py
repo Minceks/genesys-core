@@ -3,7 +3,7 @@ import os
 import httpx
 
 
-def publish_preview(url):
+def publish_preview(url, project_id=None):
     service = os.getenv('GENESYS_PREVIEW_PROXY_URL', '').rstrip('/')
     if not service:
         return url
@@ -12,7 +12,7 @@ def publish_preview(url):
         raise RuntimeError('Preview proxy configuration is incomplete.')
     with httpx.Client(timeout=15, follow_redirects=False) as client:
         response = client.post(service + '/internal/previews',
-            headers={'X-GeneSys-Proxy-Key': key}, json={'url': url})
+            headers={'X-GeneSys-Proxy-Key': key}, json={'url': url, 'projectId': project_id})
     response.raise_for_status()
     result = response.json()
     domain = os.getenv('GENESYS_PREVIEW_DOMAIN', '').strip().lower()
