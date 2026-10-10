@@ -422,20 +422,21 @@ def write():
 # AGENT RUN
 # ============================================================
 
-def execute_agent_request(prompt, project_id, conversation_history, reservation=None):
+def execute_agent_request(prompt, project_id, conversation_history, reservation=None, recovery_context=None):
     try:
-        return _execute_agent_request(prompt, project_id, conversation_history)
+        return _execute_agent_request(prompt, project_id, conversation_history, recovery_context)
     finally:
         usage_limiter.release(reservation)
 
 
-def _execute_agent_request(prompt, project_id, conversation_history):
+def _execute_agent_request(prompt, project_id, conversation_history, recovery_context=None):
     result = run_agent(
         prompt=str(
             prompt
         ),
         project_id=project_id,
         conversation_history=conversation_history,
+        recovery_context=recovery_context,
     )
 
     if isinstance(result, dict):
@@ -551,7 +552,7 @@ def agent_run():
 
 
 
-jobs = JobManager()
+jobs = JobManager(execute=execute_agent_request)
 
 
 @app.route("/agent/jobs", methods=["POST"])
@@ -569,7 +570,8 @@ def start_agent_job():
         return limit_response(error)
     try:
         job_id = jobs.submit(project_id, request_id_context.get(),
-            lambda: execute_agent_request(prompt, project_id, history, reservation), prompt=prompt)
+            prompt=prompt, history=history, reservation=reservation,
+            user_id=g.user["id"] if getattr(g, "user", None) else None)
     except ValueError as error:
         usage_limiter.release(reservation, refund=True)
         return jsonify(status="error", message=str(error)), 429

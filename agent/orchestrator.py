@@ -1865,6 +1865,7 @@ def run_agent(
     prompt: str,
     project_id: str = PROJECT_ID_DEFAULT,
     conversation_history: list[dict[str, str]] | None = None,
+    recovery_context: str | None = None,
 ) -> dict[str, Any]:
 
     prompt = (prompt or "").strip()
@@ -2008,6 +2009,9 @@ def run_agent(
             "content": prompt,
         },
     ]
+
+    if recovery_context:
+        messages.append({'role': 'system', 'content': recovery_context})
 
     model_tools = [tool for tool in TOOLS if tool.get('function', {}).get('name') in
                    {'list_files', 'read_file', 'write_file', 'edit_file'}] if project_id != PROJECT_ID_DEFAULT else TOOLS
