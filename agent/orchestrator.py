@@ -1985,7 +1985,11 @@ def run_agent(
                 "Read PROJECT.md if present. The requested application MUST appear at /, "
                 "the preview entry page. Prefer src/App.jsx for the clean React starter. "
                 "If recovered/ exists, inspect relevant preserved generated files and adapt "
-                "their functionality into this application. Do not merely create an unreachable route."
+                "their functionality into this application. recovered/ is reference-only backup source: "
+                "NEVER import or re-export a file from recovered/. Write standalone components under src/. "
+                "Remove old createRoute/Route/rootRoute wrappers, platform navigation and @/ platform imports. "
+                "Reimplement needed components using this project's actual dependencies. "
+                "Do not merely create an unreachable route."
                 if project_id != PROJECT_ID_DEFAULT else ""
             ),
         },

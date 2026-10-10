@@ -16,6 +16,6 @@ STARTER_FILES = {
     "src/App.jsx": "export default function App() { return <main><h1>Your project is ready</h1><p>Describe what you want to build in the chat.</p></main> }\n",
     "src/styles.css": "* { box-sizing: border-box; } body { margin: 0; font-family: system-ui, sans-serif; color: #172554; background: #f8fafc; } main { max-width: 960px; margin: 80px auto; padding: 24px; }\n",
     ".gitignore": "node_modules/\ndist/\n.env\n.env.*\n",
-    "PROJECT.md": "This is an independent user application. Implement requested UI in src/App.jsx and show it at /. Files under recovered/ are preserved edits from the previous workspace; read and adapt them when relevant. Never recreate the GeneSys platform here.\n",
+    "PROJECT.md": "This is an independent user application. Implement requested UI in src/App.jsx and show it at /. recovered/ contains reference-only backups: NEVER import these files into the app. Read them and rewrite relevant functionality as standalone components under src/. Remove GeneSys routing, platform navigation and platform component imports. Never recreate the GeneSys platform here.\n",
     ".genesys-user-project": "1\n",
 }

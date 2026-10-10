@@ -5,6 +5,7 @@ import shlex
 import time
 import threading
 import json
+import re
 from uuid import UUID
 from pathlib import PurePosixPath
 
@@ -963,6 +964,14 @@ for name, contents in files.items():
             )
 
         content = str(content)
+
+        if self._is_user_project() and relative.startswith('src/') and re.search(
+            r'''(?:\bfrom\s*|\bimport\s*(?:\(\s*)?|\brequire\s*\(\s*)["'][^"']*\brecovered/''', content
+        ):
+            raise ValueError(
+                "recovered/ is reference-only backup source. Read it and adapt the code "
+                "into standalone components under src/; do not import backup routes or platform files."
+            )
 
         if "[... GeneSys context compacted ...]" in content:
             raise ValueError("Compacted context cannot be saved as source code. Use an exact text edit.")
