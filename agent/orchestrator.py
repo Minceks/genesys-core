@@ -1980,7 +1980,14 @@ def run_agent(
     messages: list[dict[str, Any]] = [
         {
             "role": "system",
-            "content": SYSTEM_PROMPT,
+            "content": SYSTEM_PROMPT + (
+                "\nThis is an independent user application, not the GeneSys platform. "
+                "Read PROJECT.md if present. The requested application MUST appear at /, "
+                "the preview entry page. Prefer src/App.jsx for the clean React starter. "
+                "If recovered/ exists, inspect relevant preserved generated files and adapt "
+                "their functionality into this application. Do not merely create an unreachable route."
+                if project_id != PROJECT_ID_DEFAULT else ""
+            ),
         },
         {
             "role": "user",

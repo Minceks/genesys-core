@@ -4,6 +4,8 @@ import logging
 import shlex
 import time
 import threading
+import json
+from uuid import UUID
 from pathlib import PurePosixPath
 
 from daytona import (
@@ -13,6 +15,7 @@ from daytona import (
 )
 
 from .config import load_settings
+from .project_starter import STARTER_FILES
 
 logger = logging.getLogger(__name__)
 
@@ -221,6 +224,86 @@ class DaytonaWorkspace:
         self.sandbox = (
             self._get_or_create()
         )
+        if self._is_user_project():
+            self._prepare_user_project(self.sandbox)
+
+    def _is_user_project(self) -> bool:
+        try:
+            UUID(self.project_id)
+            return True
+        except ValueError:
+            return False
+
+    def _prepare_user_project(self, sandbox) -> None:
+        """Replace platform clones once, keeping their complete contents outside the app."""
+        marker = f"{REMOTE_PROJECT_ROOT}/.genesys-user-project"
+        check = sandbox.process.exec(f"test -f {shlex.quote(marker)}", timeout=10)
+        if check.exit_code == 0:
+            return
+        pending = sandbox.process.exec(
+            f"test -f {shlex.quote(REMOTE_PROJECT_ROOT + '/.genesys-initializing')}", timeout=10,
+        )
+        if pending.exit_code == 0:
+            self._install_user_project(sandbox)
+            return
+        existing = sandbox.process.exec(
+            f"test -d {shlex.quote(REMOTE_PROJECT_ROOT)}", timeout=10,
+        )
+        if existing.exit_code == 0:
+            origin = sandbox.process.exec(
+                "git remote get-url origin", cwd=REMOTE_PROJECT_ROOT, timeout=10,
+            )
+            if origin.exit_code != 0 or (origin.result or '').strip() != REPO_URL:
+                # A separately imported/custom application must not be replaced.
+                return
+        # Use the sandbox's Python to preserve tracked edits and untracked user files.
+        script = '''import json, pathlib, shutil, subprocess, time
+root = pathlib.Path(%s).resolve()
+files = json.loads(%s)
+changed = []
+if (root / '.git').exists():
+    for args in (['diff', '--name-only', 'HEAD', '-z'], ['ls-files', '--others', '--exclude-standard', '-z']):
+        result = subprocess.run(['git', '-C', str(root), *args], capture_output=True, check=True)
+        changed.extend(p for p in result.stdout.decode().split('\\0') if p)
+backup = root.parent / ('legacy-' + root.name + '-' + str(time.time_ns()))
+if root.exists():
+    root.rename(backup)
+root.mkdir(parents=True)
+for name in set(changed):
+    source = backup / name
+    if source.is_file() and source.resolve().is_relative_to(backup.resolve()) and not any(part.startswith('.') for part in pathlib.Path(name).parts):
+        target = root / 'recovered' / name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source, target)
+for name, contents in files.items():
+    target = root / name
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(contents)
+(root / '.genesys-initializing').touch()
+'''
+        # The marker is written only after installing and establishing a Git baseline.
+        files = {key: value for key, value in STARTER_FILES.items() if key != '.genesys-user-project'}
+        script = script % (repr(REMOTE_PROJECT_ROOT), repr(json.dumps(files)))
+        result = sandbox.process.exec("python3 -c " + shlex.quote(script), timeout=60)
+        if result.exit_code != 0:
+            raise RuntimeError(f"Project initialization failed: {result.result}")
+        sandbox.process.exec("pkill -f '[v]ite' || true", timeout=10)
+        try:
+            sandbox.process.delete_session(PREVIEW_SESSION_ID)
+        except Exception:
+            pass
+        self._install_user_project(sandbox)
+
+    def _install_user_project(self, sandbox) -> None:
+        result = sandbox.process.exec(
+            "npm install --include=dev && touch .genesys-user-project && "
+            "rm -f .genesys-initializing && git init && git add . && "
+            "git -c user.name=GeneSys -c user.email=agent@gene-sys.life commit -m 'Initialize user application' && "
+            "true",
+            cwd=REMOTE_PROJECT_ROOT, timeout=300,
+        )
+        if result.exit_code != 0:
+            raise RuntimeError(f"Project dependency setup failed: {result.result}")
 
     # ========================================================
     # ENSURE SANDBOX IS RUNNING
@@ -527,6 +610,10 @@ class DaytonaWorkspace:
         self,
         sandbox,
     ) -> None:
+
+        if self._is_user_project():
+            self._prepare_user_project(sandbox)
+            return
 
         print(
             "🔥 CLONE PROJECT: ensuring sandbox is running"
