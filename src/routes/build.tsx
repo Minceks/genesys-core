@@ -163,6 +163,8 @@ function BuildPage({ projectId, projectName, onProjects }: { projectId: string; 
   const [elapsed, setElapsed] = useState(0);
   const [previewRefreshing, setPreviewRefreshing] = useState(false);
   const [previewError, setPreviewError] = useState("");
+  const [failedPrompt, setFailedPrompt] = useState("");
+  const [restoring, setRestoring] = useState(false);
   const [reportOpen, setReportOpen] = useState(false);
   const [reportText, setReportText] = useState("");
   const [reportStatus, setReportStatus] = useState("");
@@ -432,11 +434,12 @@ function BuildPage({ projectId, projectName, onProjects }: { projectId: string; 
       overridePrompt ?? input
     ).trim();
 
-    if (!promptText || loading) {
+    if (!promptText || loading || restoring) {
       return;
     }
 
     setLoading(true);
+    setFailedPrompt("");
     setProgressStage("Preparing request");
     setElapsed(0);
     setLastRequestId("");
@@ -480,7 +483,7 @@ function BuildPage({ projectId, projectName, onProjects }: { projectId: string; 
           ? response.previewUrl
           : "";
 
-      if (isBuildRequest) {
+      if (isBuildRequest && livePreviewUrl) {
         setPreviewUrl(livePreviewUrl);
         setPreviewCode("");
         setPreviewError("");
@@ -491,7 +494,7 @@ function BuildPage({ projectId, projectName, onProjects }: { projectId: string; 
         setPreviewOnline(true);
         setPreviewKey((value) => value + 1);
         setMobileView("preview");
-      } else if (isBuildRequest && response.previewStarted === false) {
+      } else if (isBuildRequest && response.previewStarted === false && !previewUrl) {
         setPreviewOnline(false);
       }
 
@@ -627,6 +630,9 @@ function BuildPage({ projectId, projectName, onProjects }: { projectId: string; 
         },
       ]);
     } catch (error) {
+      setFailedPrompt(promptText);
+      const previousUrl = (error as { previousPreviewUrl?: string })?.previousPreviewUrl;
+      if (previousUrl) { setPreviewUrl(previousUrl); setPreviewOnline(true); setPreviewKey(value => value + 1); }
       console.error(
         "GeneSys system error:",
         error
@@ -651,6 +657,20 @@ function BuildPage({ projectId, projectName, onProjects }: { projectId: string; 
     } finally {
       setLoading(false);
     }
+  }
+
+  async function restoreWorkingVersion() {
+    if (loading || restoring) return;
+    setRestoring(true);
+    try {
+      const response = await fetch(`${CLOUD_AGENT_URL}/restore`, { method: 'POST', headers: buildCloudAgentHeaders(true), body: JSON.stringify({ projectId }) });
+      const result = await response.json();
+      if (!response.ok || result.status !== 'success') throw new Error(result.message || 'Restore failed.');
+      setPreviewUrl(result.url); setPreviewCode(''); setPreviewOnline(true); setPreviewKey(value => value + 1);
+      setFailedPrompt(''); await refreshFiles();
+      setMessages(previous => [...previous, { role: 'bot', text: result.message, agent: 'GeneSys' }]);
+    } catch (error) { setMessages(previous => [...previous, { role: 'bot', text: error instanceof Error ? error.message : 'Restore failed.', agent: 'GeneSys' }]); }
+    finally { setRestoring(false); }
   }
 
   async function handlePromote(index: number, checkpointId: string, promotionToken: string) {
@@ -1027,6 +1047,14 @@ function BuildPage({ projectId, projectName, onProjects }: { projectId: string; 
 
             <div className="border-t border-slate-200/80 bg-white p-3 sm:p-4">
               <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-2 transition-all focus-within:border-blue-300 focus-within:bg-white focus-within:shadow-[0_12px_36px_-20px_rgba(37,99,235,0.35)]">
+                {failedPrompt && <div role="status" className="mb-3 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+                  <p>{previewUrl ? 'Your previous working preview is still available.' : 'The request did not finish. You can retry it.'}</p>
+                  <div className="mt-2 flex flex-wrap gap-3">
+                    <button type="button" disabled={loading || restoring} onClick={() => void handleSend(failedPrompt)} className="font-semibold underline">Retry request</button>
+                    {previewUrl && <button type="button" disabled={loading || restoring} onClick={() => void restoreWorkingVersion()} className="font-semibold underline">{restoring ? 'Restoring…' : 'Restore last working version'}</button>}
+                  </div>
+                  {previewUrl && <p className="mt-2 text-xs">Restoring replaces the app files; current edits are backed up.</p>}
+                </div>}
                 <textarea
                   value={input}
                   onChange={(event) =>

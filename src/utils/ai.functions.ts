@@ -92,6 +92,11 @@ async function getErrorMessage(
       data &&
       typeof data.message === "string"
     ) {
+      if (response.status === 429 && Number.isFinite(data.retryAfter)) {
+        const seconds = Math.max(1, Math.ceil(data.retryAfter));
+        const wait = seconds < 60 ? `${seconds} seconds` : seconds < 3600 ? `${Math.ceil(seconds / 60)} minutes` : `${Math.ceil(seconds / 3600)} hours`;
+        return `${data.message} Try again in ${wait}.`;
+      }
       return data.message;
     }
 
@@ -190,7 +195,12 @@ export async function askGenesys(
     }
     onProgress?.(job.stage || "Complete", job.requestId || "");
     const data = job.result;
-    if (!data || data.status !== "success") throw new Error(data?.message || "The request failed. Please retry or report this problem.");
+    if (!data || data.status !== "success") {
+      const error = Object.assign(new Error(data?.message || "The request failed. Please retry or report this problem."), {
+        previousPreviewUrl: data?.previousPreviewPreserved ? data.previewUrl : null,
+      });
+      throw error;
+    }
 
     return {
       requestType: data.requestType === "chat" ? "chat" : "build",

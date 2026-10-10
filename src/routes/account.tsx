@@ -3,6 +3,8 @@ import { createRoute, Navigate } from '@tanstack/react-router'
 import type { Session } from '@supabase/supabase-js'
 import { Route as rootRoute } from './__root'
 import { supabase } from '../lib/supabase'
+import { ProfileSettings } from '../components/ProfileSettings'
+import { CLOUD_AGENT_URL } from '../utils/ai.functions'
 
 export const Route = createRoute({ getParentRoute: () => rootRoute, path: '/account', component: AccountDashboard })
 type Project = { id: string; name: string; created_at: string }
@@ -15,8 +17,16 @@ function AccountDashboard() {
   const [message, setMessage] = useState('')
   const [projectName, setProjectName] = useState('')
   const [projectError, setProjectError] = useState('')
+  const [usage, setUsage] = useState<{ hourlyRemaining: number; hourlyLimit: number; dailyRemaining: number; dailyLimit: number } | null>(null)
   const projectDialog = useRef<HTMLDialogElement>(null)
   const userId = session?.user.id
+  useEffect(() => {
+    let active = true
+    setUsage(null)
+    if (session?.access_token) fetch(`${CLOUD_AGENT_URL}/usage`, { headers: { Authorization: `Bearer ${session.access_token}` }, signal: AbortSignal.timeout(15000) })
+      .then(response => response.ok ? response.json() : null).then(data => { if (active) setUsage(data) }).catch(() => {})
+    return () => { active = false }
+  }, [session?.access_token])
   useEffect(() => {
     if (!supabase) { setReady(true); setMessage('Authentication is not configured.'); return }
     let active = true
@@ -79,13 +89,14 @@ function AccountDashboard() {
     <header className="border-b bg-white px-6 py-5"><nav className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-4"><a className="text-xl font-bold text-blue-600" href="/">GeneSys</a><div className="flex gap-5 text-sm"><a href="/">Home</a><a href="#projects">My projects</a><a href="#profile">Profile</a><button disabled={busy} onClick={() => action('signout')}>Sign out</button></div></nav></header>
     <div className="mx-auto max-w-6xl px-6 py-10">
       <h1 className="text-3xl font-semibold">Your workspace</h1><p className="mt-2 text-slate-500">Manage your projects and account.</p>
+      {usage && <p className="mt-4 text-sm text-slate-600">Beta builds available: <strong>{usage.hourlyRemaining}/{usage.hourlyLimit}</strong> this hour · <strong>{usage.dailyRemaining}/{usage.dailyLimit}</strong> today.</p>}
       {message && <p role="status" className="mt-6 rounded-xl border border-blue-100 bg-blue-50 p-4 text-blue-900">{message}</p>}
       <div className="mt-8 grid gap-8 lg:grid-cols-[1fr_320px]">
         <section id="projects"><div className="flex items-center justify-between"><h2 className="text-xl font-semibold">My projects</h2><button disabled={busy} onClick={() => { setProjectName(''); setProjectError(''); projectDialog.current?.showModal() }} className="rounded-xl bg-blue-600 px-4 py-3 text-sm font-semibold text-white disabled:opacity-50">{busy ? 'Please wait…' : 'New project'}</button></div>
           <div className="mt-5 grid gap-4 sm:grid-cols-2">{projects.map(project => <a key={project.id} href={`/build?projectId=${encodeURIComponent(project.id)}`} className="rounded-2xl border border-slate-200 bg-white p-6 hover:border-blue-400"><h3 className="font-semibold">{project.name}</h3><p className="mt-2 text-xs text-slate-500">Created {new Date(project.created_at).toLocaleDateString()}</p><span className="mt-6 inline-block text-sm font-semibold text-blue-600">Open project →</span></a>)}</div>
           {!busy && projects.length === 0 && <p className="mt-5 rounded-2xl border border-dashed p-8 text-slate-500">Create your first project to get started.</p>}
         </section>
-        <aside id="profile" className="h-fit rounded-2xl border border-slate-200 bg-white p-6"><h2 className="text-xl font-semibold">Your profile</h2><p className="mt-5 text-xs font-semibold uppercase text-slate-400">Email</p><p className="mt-1 break-all text-sm">{session.user.email ?? 'No email address'}</p><p className="mt-5 text-xs font-semibold uppercase text-slate-400">Member since</p><p className="mt-1 text-sm">{new Date(session.user.created_at).toLocaleDateString()}</p><button disabled={busy || !session.user.email} onClick={() => action('reset')} className="mt-6 block text-sm font-semibold text-blue-600 disabled:opacity-50">Send password reset email</button><button disabled={busy} onClick={() => action('signout')} className="mt-4 text-sm text-slate-600">Sign out</button></aside>
+        <ProfileSettings user={session.user} busy={busy} onReset={() => void action('reset')} onSignOut={() => void action('signout')} />
       </div>
     </div>
     <dialog ref={projectDialog} aria-labelledby="new-project-title" onCancel={event => { if (busy) event.preventDefault() }} className="m-auto w-[calc(100%-2rem)] max-w-md rounded-3xl border border-slate-200 bg-white p-7 text-slate-900 shadow-xl backdrop:bg-slate-900/40">
