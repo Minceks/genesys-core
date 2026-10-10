@@ -1,4 +1,4 @@
-from agent.build_context import InspectionCache, initial_source_context
+from agent.build_context import InspectionCache, initial_source_context, tools_for_repair
 from agent.project_intelligence import scan_project
 
 
@@ -43,3 +43,14 @@ def test_large_files_are_not_added_to_prompt():
     cache = InspectionCache(Workspace())
     cache.reads['src/App.jsx'] = {'status': 'success', 'content': 'x' * 7000, 'truncated': False}
     assert not initial_source_context(cache, ['src/App.jsx'], ['src/App.jsx'])
+
+
+def test_persistence_helper_is_included_in_current_source():
+    context = initial_source_context(InspectionCache(Workspace()), ['.genesys-user-project', 'src/usePersistentState.js'], [])
+    assert 'FILE: src/usePersistentState.js' in context
+
+
+def test_repair_tools_stop_inspection_and_preserve_edits():
+    tools = [{'function': {'name': name}} for name in ['read_file', 'list_files', 'edit_file', 'write_file']]
+    assert tools_for_repair(tools, 1) == tools
+    assert [tool['function']['name'] for tool in tools_for_repair(tools, 2)] == ['edit_file', 'write_file']

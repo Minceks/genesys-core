@@ -15,7 +15,7 @@ from .ai_provider import (
 from .config import load_settings
 from .daytona_workspace import get_workspace
 from .design_guidance import project_design_guidance
-from .build_context import InspectionCache, initial_source_context
+from .build_context import InspectionCache, initial_source_context, tools_for_repair
 from .project_intelligence import (
     scan_project,
     build_project_context,
@@ -2118,6 +2118,7 @@ def run_agent(
     last_tool_signature: tuple[str, str] | None = None
     repeated_tool_count = 0
     pre_edit_read_count = 0
+    repair_inspection_count = 0
     PRE_EDIT_READ_LIMIT = 8
 
     MAX_REPAIR_ATTEMPTS = 3
@@ -3453,6 +3454,15 @@ def run_agent(
                     }
                 )
 
+                repair_inspection_count = 0
+                current_source = initial_source_context(InspectionCache(workspace), known_files, modified_files)
+                if current_source:
+                    messages.append({'role': 'system', 'content':
+                        'Repair the reported issue using the current source below. You may inspect two additional files, '
+                        'then use edit_file or write_file to make the smallest repair and respond without tool calls. '
+                        'For local data persistence, import { usePersistentState } from "./usePersistentState" '
+                        'and use usePersistentState(stableKey, initialValue) for user-created data, preserving existing storage keys.\n\n'
+                        + current_source})
                 continue
 
         # ----------------------------------------------------
@@ -3549,11 +3559,12 @@ def run_agent(
         # ASK AI PROVIDER FOR NEXT ACTION
         # ----------------------------------------------------
 
+        step_tools = tools_for_repair(model_tools, repair_inspection_count) if last_failure_type else model_tools
         try:
 
             response = provider.generate(
                 messages,
-                model_tools,
+                step_tools,
             )
 
         except Exception as exc:
@@ -3635,7 +3646,7 @@ def run_agent(
 
                     response = fallback_provider.generate(
                         fallback_messages,
-                        model_tools,
+                        step_tools,
                     )
 
                     print(
@@ -3701,7 +3712,7 @@ def run_agent(
 
                     response = fallback_provider.generate(
                         messages,
-                        model_tools,
+                        step_tools,
                     )
 
                     provider = fallback_provider
@@ -3865,6 +3876,8 @@ def run_agent(
                 )
                 else {}
             )
+            if last_failure_type and tool_name in {'read_file', 'list_files'}:
+                repair_inspection_count += 1
 
             # ----------------------------------------------
             # REPETITION DETECTION

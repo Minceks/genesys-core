@@ -1,5 +1,10 @@
 """Bounded initial source context shared with the model and provider fallbacks."""
 
+def tools_for_repair(tools, inspections):
+    if inspections < 2:
+        return tools
+    return [tool for tool in tools if tool['function']['name'] not in {'read_file', 'list_files'}]
+
 
 class InspectionCache:
     def __init__(self, workspace):
@@ -17,12 +22,12 @@ class InspectionCache:
 
 def initial_source_context(cache, files, targets):
     available = set(files or [])
-    priority = ['src/App.jsx', 'src/App.tsx', 'src/styles.css'] if '.genesys-user-project' in available else []
+    priority = ['src/App.jsx', 'src/App.tsx', 'src/styles.css', 'src/usePersistentState.js'] if '.genesys-user-project' in available else []
     candidates = list(dict.fromkeys(priority + list(targets or [])))
     parts = []
     remaining = 12000
     for path in candidates:
-        if len(parts) >= 4 or path not in available or not path.endswith(('.jsx', '.tsx', '.css')) or path.startswith('recovered/'):
+        if len(parts) >= 4 or path not in available or not path.endswith(('.js', '.jsx', '.tsx', '.css')) or path.startswith('recovered/'):
             continue
         result = cache.read_file(path)
         content = result.get('content') if isinstance(result, dict) else None
