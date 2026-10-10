@@ -1,4 +1,5 @@
 import { getBetaProjectId } from "./project";
+import { getAccessToken } from '../lib/supabase';
 
 // ============================================================
 // GeneSys frontend agent client
@@ -35,6 +36,7 @@ export function buildCloudAgentHeaders(
   return {
     ...(includeJson ? { "Content-Type": "application/json" } : {}),
     ...(API_KEY ? { "X-API-Key": API_KEY } : {}),
+    ...(getAccessToken() ? { Authorization: `Bearer ${getAccessToken()}` } : {}),
   };
 }
 
@@ -115,6 +117,7 @@ export async function askGenesys(
   prompt: string,
   history: Array<{ role: "user" | "assistant"; content: string }> = [],
   onProgress?: (stage: string, requestId: string) => void,
+  projectId = getBetaProjectId(),
 ): Promise<GenesysAgentResponse> {
   const cleanedPrompt = prompt.trim();
 
@@ -134,6 +137,7 @@ export async function askGenesys(
         method: "POST",
 
         headers: {
+          ...buildCloudAgentHeaders(true),
           "Content-Type":
             "application/json",
           "Accept":
@@ -144,7 +148,7 @@ export async function askGenesys(
         },
 
         body: JSON.stringify({
-          projectId: getBetaProjectId(),
+          projectId,
           prompt:
             cleanedPrompt,
           history: history.slice(-10).map((turn) => ({
@@ -172,7 +176,7 @@ export async function askGenesys(
       let poll: Response | undefined;
       for (let attempt = 0; attempt < 3; attempt++) {
         try {
-          poll = await fetch(`${CLOUD_AGENT_URL}/agent/jobs/${job.jobId}?projectId=${encodeURIComponent(getBetaProjectId())}`, {
+          poll = await fetch(`${CLOUD_AGENT_URL}/agent/jobs/${job.jobId}?projectId=${encodeURIComponent(projectId)}`, {
             headers: buildCloudAgentHeaders(), signal: AbortSignal.timeout(20000),
           });
           if (poll.status < 500 || attempt === 2) break;

@@ -1,5 +1,5 @@
-import { getBetaProjectId } from "@/utils/project";
-import { createRoute } from "@tanstack/react-router";
+import { supabase } from '../lib/supabase';
+import { createRoute, Navigate } from "@tanstack/react-router";
 import { Route as rootRoute } from "./__root";
 import React, {
   useEffect,
@@ -156,8 +156,7 @@ function extractFiles(
 // PAGE
 // ============================================================
 
-function BuildPage() {
-  const [projectId] = useState(getBetaProjectId);
+function BuildPage({ projectId, projectName, onProjects }: { projectId: string; projectName: string; onProjects: () => void }) {
   const chatStorageKey = `genesys_chat_${projectId}`;
   const [progressStage, setProgressStage] = useState("Preparing request");
   const [lastRequestId, setLastRequestId] = useState("");
@@ -470,6 +469,7 @@ function BuildPage() {
               content: message.text,
             })),
           (stage, requestId) => { setProgressStage(stage); setLastRequestId(requestId); },
+          projectId,
         );
 
       const text = response.text || "";
@@ -743,14 +743,13 @@ function BuildPage() {
                 <span className="font-semibold text-slate-600">App builder</span>
               </div>
               <div className="truncate text-xs font-semibold text-slate-900 sm:text-sm">
-                {projectTree.routes.length + projectTree.components.length > 0
-                  ? `Beta project ${projectId.slice(-8)}`
-                  : "New project"}
+                {projectName}
               </div>
             </div>
           </div>
 
           <div className="flex items-center gap-2">
+            <button type="button" onClick={onProjects} disabled={loading || Boolean(promotingCheckpoint)} className="rounded-lg px-2 py-1 text-xs font-medium text-blue-700 disabled:opacity-50">Projects</button>
             <button type="button" onClick={() => setReportOpen(true)} className="rounded-lg px-2 py-1 text-xs font-medium text-blue-700 hover:bg-blue-50">Report a problem</button>
             <div className="mr-1 flex items-center rounded-lg border border-slate-200 bg-slate-50 p-0.5 xl:hidden" role="group" aria-label="Builder panels">
               <button
@@ -1171,5 +1170,34 @@ function BuildPage() {
 export const Route = createRoute({
   getParentRoute: () => rootRoute,
   path: "/build",
-  component: BuildPage,
+  validateSearch: (search: Record<string, unknown>) => ({ projectId: typeof search.projectId === 'string' ? search.projectId : '' }),
+  component: OwnedBuilder,
 });
+
+function OwnedBuilder() {
+  const { projectId } = Route.useSearch()
+  const [state, setState] = useState<'loading' | 'ready' | 'signin' | 'error'>('loading')
+  const [name, setName] = useState('')
+  const [message, setMessage] = useState('')
+  useEffect(() => {
+    let active = true
+    setState('loading')
+    if (!supabase) { setState('error'); setMessage('Authentication is not configured.'); return }
+    async function load() {
+      const { data: { session }, error } = await supabase!.auth.getSession()
+      if (!active) return
+      if (error) throw error
+      if (!session) { setState('signin'); return }
+      const { data, error: lookupError } = await supabase!.from('projects').select('id,name').eq('id', projectId).single()
+      if (lookupError || !data) throw new Error('Project not found or access denied.')
+      if (active) { setName(data.name); setState('ready') }
+    }
+    if (projectId) void load().catch(error => { if (active) { setMessage(error.message || 'Unable to open project.'); setState('error') } })
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => { if (active && event === 'SIGNED_OUT') setState('signin') })
+    return () => { active = false; subscription.unsubscribe() }
+  }, [projectId])
+  if (!projectId) return <Navigate to="/account" />
+  if (state === 'signin') return <Navigate to="/auth" />
+  if (state === 'ready') return <BuildPage key={projectId} projectId={projectId} projectName={name} onProjects={() => { window.location.href = '/account' }} />
+  return <main className="min-h-screen bg-slate-50 p-12 text-slate-900"><p role="status">{state === 'loading' ? 'Opening your project…' : message}</p><a className="mt-5 block text-blue-600" href="/account">Return to dashboard</a></main>
+}

@@ -34,7 +34,7 @@ export function Navbar() {
         </div>
 
         <div className="hidden items-center gap-3 md:flex">
-          <Link to="/dashboard" className="rounded-xl px-4 py-2.5 text-sm font-semibold text-slate-700 no-underline transition hover:bg-slate-100">
+          <Link to="/account" className="rounded-xl px-4 py-2.5 text-sm font-semibold text-slate-700 no-underline transition hover:bg-slate-100">
             Dashboard
           </Link>
           <Link to="/build" className="glow-button inline-flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold no-underline transition hover:-translate-y-0.5">
@@ -59,7 +59,7 @@ export function Navbar() {
             <a href="/#features" onClick={closeMenu} className="rounded-lg px-3 py-3 text-sm font-medium text-slate-700 hover:bg-slate-50">Features</a>
             <a href="/#how-it-works" onClick={closeMenu} className="rounded-lg px-3 py-3 text-sm font-medium text-slate-700 hover:bg-slate-50">How it works</a>
             <Link to="/pricing" onClick={closeMenu} className="rounded-lg px-3 py-3 text-sm font-medium text-slate-700 no-underline hover:bg-slate-50">Pricing</Link>
-            <Link to="/dashboard" onClick={closeMenu} className="rounded-lg px-3 py-3 text-sm font-medium text-slate-700 no-underline hover:bg-slate-50">Dashboard</Link>
+            <Link to="/account" onClick={closeMenu} className="rounded-lg px-3 py-3 text-sm font-medium text-slate-700 no-underline hover:bg-slate-50">Dashboard</Link>
             <Link to="/build" onClick={closeMenu} className="glow-button mt-2 inline-flex items-center justify-center gap-2 rounded-xl px-4 py-3 text-sm font-semibold no-underline">
               Start building <ArrowUpRight size={16} />
             </Link>

@@ -37,11 +37,11 @@ export function AppShell({
               <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-blue-600 text-white shadow-sm shadow-blue-600/20"><Cpu size={19} /></span>
               <span className="text-sm font-extrabold tracking-[-0.04em] text-slate-950">GeneSys<span className="text-blue-600">.</span></span>
             </Link>
-            <Link to="/dashboard" aria-label="Back to dashboard" className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 no-underline transition hover:bg-slate-100 hover:text-slate-700"><ArrowUpRight size={16} /></Link>
+            <Link to="/account" aria-label="Back to dashboard" className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 no-underline transition hover:bg-slate-100 hover:text-slate-700"><ArrowUpRight size={16} /></Link>
           </div>
 
           <div className="mt-8 space-y-1">
-            <Link to="/dashboard" className="flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-xs font-medium text-slate-600 no-underline transition hover:bg-slate-50 hover:text-blue-700"><LayoutDashboard size={16} /> Workspace</Link>
+            <Link to="/account" className="flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-xs font-medium text-slate-600 no-underline transition hover:bg-slate-50 hover:text-blue-700"><LayoutDashboard size={16} /> Workspace</Link>
             <div className="flex items-center gap-2.5 rounded-xl bg-blue-50 px-3 py-2.5 text-xs font-semibold text-blue-700"><FolderKanban size={16} /> App builder</div>
           </div>
 
