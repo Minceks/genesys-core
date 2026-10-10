@@ -75,6 +75,10 @@ You MUST follow this workflow:
 14. Do not claim success merely because files were written.
 15. Runtime/UI verification is required when the application can be launched.
 16. Do not make unnecessary changes to unrelated files.
+17. Finish all files needed for the requested application, including its styles and interactions,
+before ending your implementation turn. When implementation or a repair is complete, respond
+without tool calls; the orchestrator will then run mandatory verification. A single file edit
+does not mean the application is finished.
 
 IMPORTANT TOOL LIMITATION:
 
@@ -2012,6 +2016,8 @@ def run_agent(
 
     changed_since_build = False
 
+    implementation_ready = False
+
     recovery_attempts = 0
     max_recovery_attempts = 2
     recovery_report = None
@@ -2397,7 +2403,7 @@ def run_agent(
         # FORCE BUILD AFTER FILE CHANGES
         # ----------------------------------------------------
 
-        if changed_since_build and not recovery_waiting_for_model:
+        if changed_since_build and implementation_ready and not recovery_waiting_for_model:
             print(
                 "📝 Files changed. "
                 "Next action will be the mandatory build."
@@ -3415,6 +3421,16 @@ def run_agent(
         # RESERVE THE LAST STEPS FOR MANDATORY VERIFICATION AND REPAIR.
         # The model must not spend this reserve on new exploration after its
         # normal implementation budget has ended.
+        if step > MAX_STEPS and changed_since_build and not implementation_ready and not recovery_waiting_for_model:
+            return {
+                "status": "error",
+                "message": "Implementation did not finish within the step budget. Your partial files are saved; retry to finish the application.",
+                "modifiedFiles": modified_files,
+                "buildPassed": False,
+                "browserVerified": False,
+                "steps": steps_used,
+            }
+
         if (
             step > MAX_STEPS
             and not changed_since_build
@@ -3705,6 +3721,11 @@ def run_agent(
 
         if not tool_calls:
 
+            if changed_since_build:
+                implementation_ready = True
+                recovery_waiting_for_model = False
+                continue
+
             # If the application has already passed all
             # mandatory checks, return success.
             if (
@@ -3928,6 +3949,7 @@ def run_agent(
             } and isinstance(result, dict) and result.get("status") == "success":
 
                 changed_since_build = True
+                implementation_ready = False
 
                 # Any file change invalidates the previous
                 # build, preview, and browser verification.

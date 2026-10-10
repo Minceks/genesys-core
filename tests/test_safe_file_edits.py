@@ -23,6 +23,19 @@ def test_placeholder_write_is_rejected_before_remote_io():
         workspace.write_file("src/Hero.tsx", "[... GeneSys context compacted ...]")
 
 
+@pytest.mark.parametrize("content", [
+    'import Page from "../recovered/src/routes/expenses";',
+    'export { default } from "../recovered/src/routes/expenses";',
+    'const Page = import("../recovered/src/routes/expenses");',
+    'const Page = require("../recovered/src/routes/expenses");',
+])
+def test_recovered_import_is_rejected_before_remote_io(content):
+    workspace = DaytonaWorkspace.__new__(DaytonaWorkspace)
+    workspace.project_id = "568fece4-42cc-47be-9778-9ca6b7b120b4"
+    with pytest.raises(ValueError, match="reference-only backup"):
+        workspace.write_file("src/App.jsx", content)
+
+
 def test_large_full_rewrite_is_rejected(monkeypatch):
     workspace = SimpleNamespace(read_file=lambda _: {
         "content": "a" * (READ_FILE_MAX_CHARS + 1), "truncated": False,

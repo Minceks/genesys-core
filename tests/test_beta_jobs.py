@@ -49,6 +49,8 @@ def test_background_failure_is_reported_and_releases_project():
 
 def test_beta_routes_require_auth_and_return_request_references(monkeypatch):
     import cloud_agent
+    monkeypatch.delenv("SUPABASE_URL", raising=False)
+    monkeypatch.delenv("SUPABASE_PUBLISHABLE_KEY", raising=False)
     from types import SimpleNamespace
     manager = JobManager()
     monkeypatch.setattr(cloud_agent, "jobs", manager)

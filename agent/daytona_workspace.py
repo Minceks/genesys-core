@@ -965,6 +965,9 @@ for name, contents in files.items():
 
         content = str(content)
 
+        if "[... GeneSys context compacted ...]" in content:
+            raise ValueError("Compacted context cannot be saved as source code. Use an exact text edit.")
+
         if self._is_user_project() and relative.startswith('src/') and re.search(
             r'''(?:\bfrom\s*|\bimport\s*(?:\(\s*)?|\brequire\s*\(\s*)["'][^"']*\brecovered/''', content
         ):
@@ -972,9 +975,6 @@ for name, contents in files.items():
                 "recovered/ is reference-only backup source. Read it and adapt the code "
                 "into standalone components under src/; do not import backup routes or platform files."
             )
-
-        if "[... GeneSys context compacted ...]" in content:
-            raise ValueError("Compacted context cannot be saved as source code. Use an exact text edit.")
 
         if len(content) > MAX_WRITE_CHARS:
             raise ValueError(
