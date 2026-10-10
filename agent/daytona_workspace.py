@@ -1506,6 +1506,9 @@ _workspaces: dict[
     DaytonaWorkspace,
 ] = {}
 
+_workspace_cache_guard = threading.Lock()
+_workspace_locks: dict[str, threading.Lock] = {}
+
 print("🔧 Daytona workspace module loaded")
 
 def get_workspace(
