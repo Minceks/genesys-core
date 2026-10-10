@@ -1,3 +1,4 @@
+import type { PendingBuild } from '../utils/pendingBuild';
 import { supabase } from '../lib/supabase';
 import { createRoute, Navigate } from "@tanstack/react-router";
 import { Route as rootRoute } from "./__root";
@@ -10,6 +11,7 @@ import React, {
 import { AppShell } from "@/components/AppShell";
 import {
   askGenesys,
+  recoverBackgroundBuild,
   buildCloudAgentHeaders,
   CLOUD_AGENT_URL,
 } from "@/utils/ai.functions";
@@ -176,6 +178,8 @@ function BuildPage({ projectId, projectName, onProjects }: { projectId: string; 
   const [input, setInput] = useState("");
 
   const [loading, setLoading] = useState(false);
+  const [recoveringBuild, setRecoveringBuild] = useState(true);
+  const requestInFlight = useRef(false);
   const [promotingCheckpoint, setPromotingCheckpoint] = useState("");
 
   const [previewCode, setPreviewCode] = useState("");
@@ -304,6 +308,28 @@ function BuildPage({ projectId, projectName, onProjects }: { projectId: string; 
   // ==========================================================
 
   useEffect(() => {
+    let mounted = true;
+    async function recover() {
+      if (requestInFlight.current || document.hidden) return;
+      const build = await recoverBackgroundBuild(projectId);
+      if (!mounted) return;
+      setRecoveringBuild(false);
+      if (build && !requestInFlight.current) void handleSend(build.prompt, build);
+    }
+    void recover();
+    const wake = () => { if (!document.hidden) void recover(); };
+    document.addEventListener('visibilitychange', wake);
+    window.addEventListener('online', wake);
+    window.addEventListener('focus', wake);
+    return () => {
+      mounted = false;
+      document.removeEventListener('visibilitychange', wake);
+      window.removeEventListener('online', wake);
+      window.removeEventListener('focus', wake);
+    };
+  }, [projectId]);
+
+  useEffect(() => {
     if (messages.some(message => message.buildPassed)) void refreshFiles();
     if (previewUrl) void reloadPreview();
   }, []);
@@ -428,16 +454,18 @@ function BuildPage({ projectId, projectName, onProjects }: { projectId: string; 
   // ==========================================================
 
   async function handleSend(
-    overridePrompt?: string
+    overridePrompt?: string,
+    resumeBuild?: PendingBuild,
   ) {
     const promptText = (
       overridePrompt ?? input
     ).trim();
 
-    if (!promptText || loading || restoring) {
+    if (!promptText || requestInFlight.current || loading || restoring || (recoveringBuild && !resumeBuild)) {
       return;
     }
 
+    requestInFlight.current = true;
     setLoading(true);
     setFailedPrompt("");
     setProgressStage("Preparing request");
@@ -473,6 +501,7 @@ function BuildPage({ projectId, projectName, onProjects }: { projectId: string; 
             })),
           (stage, requestId) => { setProgressStage(stage); setLastRequestId(requestId); },
           projectId,
+          resumeBuild,
         );
 
       const text = response.text || "";
@@ -655,6 +684,7 @@ function BuildPage({ projectId, projectName, onProjects }: { projectId: string; 
         },
       ]);
     } finally {
+      requestInFlight.current = false;
       setLoading(false);
     }
   }
@@ -1029,14 +1059,14 @@ function BuildPage({ projectId, projectName, onProjects }: { projectId: string; 
                 )
               )}
 
-              {loading && (
+              {(loading || recoveringBuild) && (
                 <div className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-white p-4 text-xs text-slate-400">
                   <Loader2
                     size={16}
                     className="animate-spin text-blue-500"
                   />
 
-                    {progressStage} ? {elapsed}s
+                    <div><p>{recoveringBuild ? 'Checking for a background build…' : `${progressStage} · ${elapsed}s`}</p><p className="mt-1 text-slate-500">You can lock your phone. Building continues on the server; reopen this project to see the result.</p></div>
                 </div>
               )}
             </div>
@@ -1068,7 +1098,7 @@ function BuildPage({ projectId, projectName, onProjects }: { projectId: string; 
                   placeholder="Describe what you want to build or change..."
                   aria-label="Describe what you want to build or change"
                   rows={3}
-                  disabled={loading}
+                  disabled={loading || recoveringBuild}
                   className="w-full resize-none bg-transparent px-4 py-2 text-sm text-slate-900 outline-none placeholder:text-slate-400"
                 />
 
@@ -1081,7 +1111,7 @@ function BuildPage({ projectId, projectName, onProjects }: { projectId: string; 
                       }
                       aria-label={loading ? "Working on your request" : "Send request"}
                     disabled={
-                      loading ||
+                      loading || recoveringBuild ||
                       !input.trim()
                     }
                     className="flex h-9 w-9 items-center justify-center rounded-xl bg-blue-600 text-white shadow-md shadow-blue-600/20 transition hover:-translate-y-0.5 hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-30"
