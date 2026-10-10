@@ -2009,6 +2009,16 @@ def run_agent(
         },
     ]
 
+    model_tools = [tool for tool in TOOLS if tool.get('function', {}).get('name') in
+                   {'list_files', 'read_file', 'write_file', 'edit_file'}] if project_id != PROJECT_ID_DEFAULT else TOOLS
+    if project_id != PROJECT_ID_DEFAULT:
+        messages.append({'role': 'system', 'content':
+            'Your tools are for source inspection and editing only. Diff review, builds, previews, '
+            'browser checks and checkpoints run automatically after implementation. '
+            'Do not call verification tools or repeat manual diff checks. For a small edit, '
+            'change only the requested component and preserve existing stylesheet tokens. '
+            'Finish the edits, then respond without tool calls.'})
+
     modified_files: list[str] = []
 
     inspected = False
@@ -3539,7 +3549,7 @@ def run_agent(
 
             response = provider.generate(
                 messages,
-                TOOLS,
+                model_tools,
             )
 
         except Exception as exc:
@@ -3621,7 +3631,7 @@ def run_agent(
 
                     response = fallback_provider.generate(
                         fallback_messages,
-                        TOOLS,
+                        model_tools,
                     )
 
                     print(
@@ -3687,7 +3697,7 @@ def run_agent(
 
                     response = fallback_provider.generate(
                         messages,
-                        TOOLS,
+                        model_tools,
                     )
 
                     provider = fallback_provider
