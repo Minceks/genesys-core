@@ -16,6 +16,7 @@ from agent.logging_config import configure_logging, request_id_context
 from agent.config import load_settings
 from agent.orchestrator import run_agent
 from agent.jobs import JobManager
+from agent import user_auth
 from agent.tools import list_files, read_file, write_file
 from agent.daytona_workspace import get_workspace
 from agent.promotion import (
@@ -67,6 +68,7 @@ CORS(
             "allow_headers": [
                 "Content-Type",
                 "X-API-Key",
+                "Authorization",
             ],
         }
     },
@@ -85,6 +87,20 @@ def require_api_key():
         "/health",
         "/api/v1/health",
     }:
+        return None
+
+    if user_auth.configured() or request.path.startswith('/api/projects'):
+        try:
+            g.user = user_auth.current_user(request.headers.get('Authorization', ''))
+            project_paths = {'/list-files', '/read-file', '/write-file', '/agent/run', '/preview', '/promote', '/beta/feedback'}
+            if request.path in project_paths or request.path.startswith('/agent/jobs'):
+                user_auth.owned_project(get_project_id(), g.user)
+            if request.path == '/promote':
+                admins = {value.strip() for value in os.getenv('GENESYS_PROMOTION_ADMIN_IDS', '').split(',') if value.strip()}
+                if g.user['id'] not in admins:
+                    raise user_auth.AccessError('Production promotion requires administrator access.', 403)
+        except user_auth.AccessError as error:
+            return jsonify(status='error', message=str(error), requestId=request_id_context.get()), error.status
         return None
 
     expected_key = str(getattr(settings, "api_key", "") or "").strip()
@@ -145,6 +161,21 @@ def finish_request_logging(response):
 # HELPERS
 # ============================================================
 
+@app.route('/api/projects', methods=['POST'])
+def create_user_project():
+    try:
+        return jsonify(user_auth.create_project(get_json_body().get('name'), g.user)), 201
+    except user_auth.AccessError as error:
+        return jsonify(status='error', message=str(error)), error.status
+
+
+@app.route('/api/projects/<project_id>', methods=['GET'])
+def get_user_project(project_id):
+    try:
+        return jsonify(user_auth.owned_project(project_id, g.user))
+    except user_auth.AccessError as error:
+        return jsonify(status='error', message=str(error)), error.status
+
 def get_project_id() -> str:
     """
     Accept projectId from:
@@ -154,12 +185,7 @@ def get_project_id() -> str:
     Defaults to the first GeneSys project.
     """
 
-    data = (
-        request.get_json(
-            silent=True
-        )
-        or {}
-    )
+    data = get_json_body()
 
     project_id = (
         data.get("projectId")
@@ -277,13 +303,7 @@ def read():
                 }
             ), 400
 
-        project_id = (
-            data.get("projectId")
-            or request.args.get(
-                "projectId"
-            )
-            or "genesys-project"
-        )
+        project_id = get_project_id()
 
         result = read_file(
             filename=str(
@@ -356,12 +376,7 @@ def write():
                 }
             ), 400
 
-        project_id = (
-            data.get(
-                "projectId"
-            )
-            or "genesys-project"
-        )
+        project_id = get_project_id()
 
         result = write_file(
             filename=str(
@@ -448,12 +463,7 @@ def agent_run():
                 }
             ), 400
 
-        project_id = (
-            data.get(
-                "projectId"
-            )
-            or "genesys-project"
-        )
+        project_id = get_project_id()
 
         project_id = (
             str(project_id).strip()
@@ -504,7 +514,7 @@ jobs = JobManager()
 def start_agent_job():
     data = get_json_body()
     prompt = str(data.get("prompt") or "").strip()
-    project_id = str(data.get("projectId") or "").strip()
+    project_id = get_project_id()
     if not prompt or len(prompt) > 8000 or not project_id or len(project_id) > 128:
         return jsonify(status="error", message="A project and a prompt of at most 8000 characters are required."), 400
     history = [{"role": turn.get("role"), "content": str(turn.get("content") or "")[:2000]}
@@ -519,7 +529,7 @@ def start_agent_job():
 
 @app.route("/agent/jobs/<job_id>", methods=["GET"])
 def get_agent_job(job_id):
-    job = jobs.get(job_id, request.args.get("projectId", ""))
+    job = jobs.get(job_id, get_project_id())
     if job is None:
         return jsonify(status="error", message="This request is no longer available. The service may have restarted; please retry."), 404
     return jsonify(job)
@@ -527,7 +537,7 @@ def get_agent_job(job_id):
 
 @app.route("/preview", methods=["POST"])
 def reconnect_preview():
-    project_id = str(get_json_body().get("projectId") or "").strip()
+    project_id = get_project_id()
     if not project_id or len(project_id) > 128:
         return jsonify(status="error", message="projectId is required."), 400
     if jobs.is_running(project_id):
@@ -563,9 +573,7 @@ def promote_verified_checkpoint():
     data = get_json_body()
     checkpoint_id = str(data.get("checkpointId") or "").strip()
     promotion_token = str(data.get("promotionToken") or "").strip()
-    project_id = str(
-        data.get("projectId") or "genesys-project"
-    ).strip()
+    project_id = get_project_id()
 
     if not checkpoint_id:
         return jsonify(
