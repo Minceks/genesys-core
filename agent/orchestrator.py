@@ -60,10 +60,11 @@ SYSTEM_PROMPT = """
 Generated apps run inside a sandboxed iframe. Never use window.confirm,
 window.alert or window.prompt: use in-page UI or reversible actions with Undo.
 Read submitted form fields with FormData(event.currentTarget), not form named
-properties. Give expense forms accessible Category and Amount labels, an Add
-expense button, and a Remove button for each expense. Persist added/deleted
-expenses across reloads. Label filter clearing as Reset filters; do not silently
-delete user data when resetting filters. Keep accessible labels in all designs.
+properties. Give every control an accessible name. Implement the requested actions and
+expected outcomes, validation, and persistence where required. Label reset actions
+precisely; never silently delete user data when clearing filters. Before editing,
+identify the requested behaviors and their expected outcomes. The generic browser
+verifier will derive checks from the original request and execute them after building.
 You are GeneSys, an autonomous software engineering agent.
 
 Your job is to modify a real software project inside a Daytona workspace.
@@ -3292,10 +3293,10 @@ def run_agent(
                         require_images=bool(re.search(r"\b(photographer|photography|photographic)\b", prompt, re.I) and re.search(r"\b(portfolio|gallery|website|site)\b", prompt, re.I))
                     )
                     report_progress('Checking requested content and interactions')
-                    content_result = get_browser(project_id).content_checks(prompt)
+                    content_result = get_browser(project_id).content_checks(prompt, provider)
                     verification = {
                         "passed": (["Desktop and mobile layout"] if quality['status'] == 'success' else []) + content_result.get('testedInteractions', []),
-                        "unverified": ["Functions outside the listed checks, external services, and real multi-user behavior."] if content_result.get('testedInteractions') else ["App functions: no supported interaction checks ran."]
+                        "unverified": content_result.get("unverified", []) + ["Functions outside the listed checks and real multi-user behavior."]
                     }
                     interaction_console = get_browser(project_id).get_console()
                     if interaction_console.get('hasRuntimeErrors'):

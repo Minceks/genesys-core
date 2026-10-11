@@ -13,7 +13,7 @@ from playwright.sync_api import (
 
 from .daytona_workspace import get_workspace
 from .visual_quality import SNAPSHOT_SCRIPT, assess_visual_quality
-from .content_checks import verify_content
+from .functional_verification import verify_functions
 
 
 # ============================================================
@@ -316,8 +316,8 @@ class BrowserSession:
     # ========================================================
 
     @browser_thread
-    def content_checks(self, prompt) -> dict[str, Any]:
-        return verify_content(self.start(), prompt)
+    def content_checks(self, prompt, provider) -> dict[str, Any]:
+        return verify_functions(self.start(), prompt, provider)
 
     @browser_thread
     def visual_quality(self, *, allow_unstyled=False, require_images=False) -> dict[str, Any]:
