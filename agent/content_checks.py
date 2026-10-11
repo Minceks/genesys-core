@@ -26,6 +26,57 @@ def verify_content(page, prompt):
         elif requirement['unique'] and visible > 1:
             issues.append(f"Required heading/subtitle is duplicated: {requirement['text']}. Render it once.")
     tested = []
+    if re.search(r'\bexpenses?\b', prompt, re.I):
+        category = page.get_by_role('textbox', name=re.compile(r'^(category|description|expense name)$', re.I))
+        amount = page.get_by_role('spinbutton', name=re.compile(r'^amount', re.I))
+        add = page.get_by_role('button', name=re.compile(r'^add(?: expense)?$', re.I))
+        marker = 'GeneSys verification expense'
+        if category.count() != 1 or amount.count() != 1 or add.count() != 1:
+            issues.append('Expense workflow cannot be verified. Provide accessible Category and Amount fields and an Add expense button.')
+        else:
+            try:
+                category.fill(marker)
+                amount.fill('12.50')
+                add.click()
+                page.wait_for_timeout(200)
+                item = page.get_by_text(marker, exact=True)
+                if not item.count():
+                    raise ValueError('Adding an expense does not show the submitted expense.')
+                tested.append('add expense')
+                page.reload(wait_until='networkidle')
+                item = page.get_by_text(marker, exact=True)
+                if not item.count():
+                    raise ValueError('Added expense disappears after reload. Persist expense data.')
+                tested.append('expense reload persistence')
+                container = item.first
+                for _ in range(6):
+                    remove = container.get_by_role('button', name=re.compile(r'^(remove|delete)(?: expense)?$', re.I))
+                    if remove.count() == 1:
+                        remove.click()
+                        break
+                    container = container.locator('..')
+                else:
+                    raise ValueError('Provide a Remove button for each expense.')
+                page.wait_for_timeout(200)
+                dialog = page.get_by_role('dialog')
+                if dialog.count() == 1 and dialog.is_visible():
+                    confirm = dialog.get_by_role('button', name=re.compile(r'^(confirm(?: removal)?|remove(?: expense)?|delete(?: expense)?)$', re.I))
+                    if confirm.count() == 1:
+                        confirm.click()
+                page.wait_for_timeout(200)
+                if page.get_by_text(marker, exact=True).count():
+                    raise ValueError('Remove expense does not remove the item. Native browser dialogs are blocked in embedded previews; use in-page confirmation or Undo.')
+                tested.append('remove expense')
+                page.reload(wait_until='networkidle')
+                if page.get_by_text(marker, exact=True).count():
+                    raise ValueError('Removed expense returns after reload.')
+                tested.append('expense removal persistence')
+            except Exception as error:
+                issues.append(str(error)[:600])
+            finally:
+                # Verification uses an isolated browser; clear only starter-owned local data.
+                page.evaluate("Object.keys(localStorage).filter(k => k.startsWith('user-app:')).forEach(k => localStorage.removeItem(k))")
+                page.reload(wait_until='networkidle')
     # Isolated verification browser, synthetic data, and only an explicitly requested
     # book-list flow. Never click arbitrary destructive/account/payment controls.
     if re.search(r'\b(book|reading)\b', prompt, re.I):

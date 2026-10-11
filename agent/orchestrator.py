@@ -57,6 +57,13 @@ PROJECT_ID_DEFAULT = "genesys-project"
 # ============================================================
 
 SYSTEM_PROMPT = """
+Generated apps run inside a sandboxed iframe. Never use window.confirm,
+window.alert or window.prompt: use in-page UI or reversible actions with Undo.
+Read submitted form fields with FormData(event.currentTarget), not form named
+properties. Give expense forms accessible Category and Amount labels, an Add
+expense button, and a Remove button for each expense. Persist added/deleted
+expenses across reloads. Label filter clearing as Reset filters; do not silently
+delete user data when resetting filters. Keep accessible labels in all designs.
 You are GeneSys, an autonomous software engineering agent.
 
 Your job is to modify a real software project inside a Daytona workspace.
