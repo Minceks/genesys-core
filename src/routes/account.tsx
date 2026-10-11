@@ -1,3 +1,4 @@
+import "@/components/genesys/polish.css";
 import { useEffect, useRef, useState } from 'react'
 import { createRoute, Navigate } from '@tanstack/react-router'
 import type { Session } from '@supabase/supabase-js'
@@ -85,16 +86,17 @@ function AccountDashboard() {
 
   if (!ready) return <main className="min-h-screen bg-slate-50 p-12 text-slate-900" role="status">Loading your dashboard…</main>
   if (!session) return <Navigate to="/auth" />
-  return <main className="min-h-screen bg-slate-50 text-slate-900">
-    <header className="border-b bg-white px-6 py-5"><nav className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-4"><a className="text-xl font-bold text-blue-600" href="/">GeneSys</a><div className="flex gap-5 text-sm"><a href="/">Home</a><a href="#projects">My projects</a><a href="#profile">Profile</a><button disabled={busy} onClick={() => action('signout')}>Sign out</button></div></nav></header>
+  return <main className="genesys-workspace min-h-screen bg-slate-50 text-slate-900">
+    <header className="border-b bg-white px-6 py-5"><nav className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-4"><a className="text-xl font-bold text-blue-600" href="/">GeneSys</a><div className="flex flex-wrap gap-x-5 gap-y-3 text-sm"><a href="/">Home</a><a href="#projects">My projects</a><a href="#profile">Profile</a><button disabled={busy} onClick={() => action('signout')}>Sign out</button></div></nav></header>
     <div className="mx-auto max-w-6xl px-6 py-10">
-      <h1 className="text-3xl font-semibold">Your workspace</h1><p className="mt-2 text-slate-500">Manage your projects and account.</p>
+      <div className="mb-3 text-xs font-semibold uppercase tracking-[0.15em] text-blue-600">Your creative workspace</div><h1 className="text-3xl font-semibold tracking-tight sm:text-4xl">A little idea. Your next project.</h1><p className="mt-3 max-w-xl text-sm leading-6 text-slate-500">Everything you are building, in one place. Open a project to pick up where you left off.</p>
+      <div className="mt-7 flex flex-wrap gap-3"><span className="rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-500"><strong className="mr-2 text-slate-900">{projects.length}</strong> {projects.length === 1 ? 'project' : 'projects'} in your workspace</span><span className="rounded-xl border border-blue-100 bg-blue-50 px-4 py-3 text-sm text-blue-700">Private workspace / Beta</span></div>
       {usage && <p className="mt-4 text-sm text-slate-600">Beta builds available: <strong>{usage.hourlyRemaining}/{usage.hourlyLimit}</strong> this hour · <strong>{usage.dailyRemaining}/{usage.dailyLimit}</strong> today.</p>}
       {message && <p role="status" className="mt-6 rounded-xl border border-blue-100 bg-blue-50 p-4 text-blue-900">{message}</p>}
       <div className="mt-8 grid gap-8 lg:grid-cols-[1fr_320px]">
         <section id="projects"><div className="flex items-center justify-between"><h2 className="text-xl font-semibold">My projects</h2><button disabled={busy} onClick={() => { setProjectName(''); setProjectError(''); projectDialog.current?.showModal() }} className="rounded-xl bg-blue-600 px-4 py-3 text-sm font-semibold text-white disabled:opacity-50">{busy ? 'Please wait…' : 'New project'}</button></div>
-          <div className="mt-5 grid gap-4 sm:grid-cols-2">{projects.map(project => <a key={project.id} href={`/build?projectId=${encodeURIComponent(project.id)}`} className="rounded-2xl border border-slate-200 bg-white p-6 hover:border-blue-400"><h3 className="font-semibold">{project.name}</h3><p className="mt-2 text-xs text-slate-500">Created {new Date(project.created_at).toLocaleDateString()}</p><span className="mt-6 inline-block text-sm font-semibold text-blue-600">Open project →</span></a>)}</div>
-          {!busy && projects.length === 0 && <p className="mt-5 rounded-2xl border border-dashed p-8 text-slate-500">Create your first project to get started.</p>}
+          <div className="mt-5 grid gap-4 sm:grid-cols-2">{projects.map(project => <a key={project.id} href={`/build?projectId=${encodeURIComponent(project.id)}`} className="group rounded-2xl border border-slate-200 bg-white p-6 shadow-sm hover:border-blue-300 hover:shadow-md"><div aria-hidden="true" className="mb-5 flex h-11 w-11 items-center justify-center rounded-xl bg-blue-50 text-lg font-semibold text-blue-600">{project.name.charAt(0).toUpperCase()}</div><h3 className="truncate text-base font-semibold tracking-tight">{project.name}</h3><p className="mt-2 text-xs text-slate-500">Created {new Date(project.created_at).toLocaleDateString()}</p><span className="mt-6 inline-block text-sm font-semibold text-blue-600">Open project →</span></a>)}</div>
+          {!busy && projects.length === 0 && <p className="mt-5 rounded-2xl border border-dashed p-8 text-slate-500">Your workspace is a blank canvas. Choose New project, give it a name, and tell GeneSys what you want to create.</p>}
         </section>
         <ProfileSettings user={session.user} busy={busy} onReset={() => void action('reset')} onSignOut={() => void action('signout')} />
       </div>

@@ -1,0 +1,10 @@
+.genesys-hero { background-image: radial-gradient(ellipse at 85% 10%, #eff6ff 0%, transparent 55%); }
+.hero-space { position: relative; overflow: hidden; }
+.hero-space-one { background: linear-gradient(125deg, #e8e1d6 0 45%, #cec5b5 45% 64%, #f5f1e9 64%); }
+.hero-space-one::after { content: ""; position: absolute; width: 50%; height: 55%; left: 28%; bottom: 0; border-radius: 50% 50% 0 0; background: linear-gradient(90deg,#9eac9b,#dce1d5); box-shadow: -15px 0 35px #574d4220; }
+.hero-space-two { background: linear-gradient(150deg, #b8cbd0, #edf1ec 55%, #c4b59b 56%); }
+.hero-space-two::after { content: ""; position: absolute; inset: 15% 18% 30%; border: 7px solid #ffffff90; border-radius: 50% 50% 0 0; background: linear-gradient(140deg,#ffffff30,#536c7240); }
+.genesys-workspace a, .genesys-workspace button { transition: background-color .18s, border-color .18s, box-shadow .18s; }
+.genesys-workspace :is(a,button,input,textarea):focus-visible { outline: 2px solid #2563eb; outline-offset: 3px; }
+.genesys-workspace { background-image: radial-gradient(ellipse at top right, #eff6ff80, transparent 55%); }
+@media(prefers-reduced-motion:reduce) { .genesys-workspace * { transition: none !important; } }

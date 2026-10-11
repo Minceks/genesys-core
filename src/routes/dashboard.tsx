@@ -1,3 +1,4 @@
+import "@/components/genesys/polish.css";
 import { createRoute, Link } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import {
@@ -47,7 +48,7 @@ function DashboardPage() {
       : "All systems ready";
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-900 lg:flex">
+    <div className="genesys-workspace min-h-screen bg-slate-50 text-slate-900 lg:flex">
       <aside className="flex border-b border-slate-200 bg-white px-5 py-4 lg:min-h-screen lg:w-[248px] lg:shrink-0 lg:flex-col lg:border-b-0 lg:border-r lg:px-4 lg:py-6">
         <Link to="/" className="flex shrink-0 items-center gap-2.5 px-1 no-underline">
           <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-blue-600 text-white shadow-md shadow-blue-600/20"><Cpu size={19} /></span>
@@ -97,7 +98,7 @@ function DashboardPage() {
           <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
             <div>
               <div className="mb-2 text-xs font-bold uppercase tracking-[0.16em] text-blue-600">Your workspace</div>
-              <h1 className="text-3xl font-semibold tracking-[-0.045em] text-slate-950 sm:text-4xl">What will you make today?</h1>
+              <h1 className="text-3xl font-semibold tracking-[-0.045em] text-slate-950 sm:text-4xl">Your next idea starts here.</h1>
               <p className="mt-2 text-sm leading-6 text-slate-600">Create a new app or keep moving on a project you already started.</p>
             </div>
             <div className="inline-flex w-fit items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-600 shadow-sm">

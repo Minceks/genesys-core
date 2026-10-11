@@ -1,3 +1,4 @@
+import "@/components/genesys/polish.css";
 import type { PendingBuild } from '../utils/pendingBuild';
 import { supabase } from '../lib/supabase';
 import { createRoute, Navigate } from "@tanstack/react-router";
@@ -781,12 +782,12 @@ function BuildPage({ projectId, projectName, onProjects }: { projectId: string; 
       previewOnline={previewOnline}
       onRefreshFiles={refreshFiles}
     >
-      <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-background">
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-slate-50 genesys-workspace">
         {/* ==================================================
             HEADER
         ================================================== */}
 
-        <header className="flex h-14 shrink-0 items-center justify-between border-b border-slate-200/80 bg-white/95 px-3 backdrop-blur sm:px-5">
+        <header className="flex min-h-16 shrink-0 flex-wrap gap-2 items-center justify-between py-2 border-b border-slate-200/80 bg-white/95 px-3 backdrop-blur sm:px-5">
           <div className="flex min-w-0 items-center gap-3">
             <div className="hidden h-8 w-8 items-center justify-center rounded-xl bg-blue-50 text-blue-700 sm:flex">
               <Brain size={16} />
@@ -894,7 +895,7 @@ function BuildPage({ projectId, projectName, onProjects }: { projectId: string; 
               className="min-h-0 flex-1 space-y-4 overflow-y-auto bg-gradient-to-b from-white to-slate-50/70 p-4 sm:p-5"
             >
               {messages.length === 0 && (
-                <div className="rounded-3xl border border-slate-200 bg-white p-5 text-center shadow-sm shadow-slate-900/[0.03] sm:p-6">
+                <div className="rounded-3xl border border-blue-100 bg-white p-6 text-center shadow-sm shadow-blue-900/[0.03] sm:p-8">
                   <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-br from-blue-50 to-indigo-50 ring-1 ring-blue-100">
                     <Brain
                       size={24}
@@ -903,11 +904,11 @@ function BuildPage({ projectId, projectName, onProjects }: { projectId: string; 
                   </div>
 
                   <h3 className="text-lg font-bold text-slate-900">
-                    What would you like to build?
+                    Make something yours.
                   </h3>
 
                   <p className="mx-auto mt-2 max-w-xs text-xs leading-5 text-slate-500">
-                    Start with a goal. You can refine the design after you see it working.
+                    Describe your idea, who it is for, and the style you like. Pick a starting point below or write your own.
                   </p>
 
                   <div className="mt-5 space-y-2 text-left">
