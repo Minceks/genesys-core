@@ -19,7 +19,7 @@ function AccountDashboard() {
   const [message, setMessage] = useState('')
   const [projectName, setProjectName] = useState('')
   const [projectError, setProjectError] = useState('')
-  const [usage, setUsage] = useState<{ hourlyRemaining: number; hourlyLimit: number; dailyRemaining: number; dailyLimit: number } | null>(null)
+  const [usage, setUsage] = useState<{ hourlyRemaining: number; hourlyLimit: number; dailyRemaining: number | null; dailyLimit: number; dailyUnlimited?: boolean; dailyTokenLimit?: number | null; dailyTokensUsed?: number; dailyTokensRemaining?: number | null; tokenResetAt?: number } | null>(null)
   const projectDialog = useRef<HTMLDialogElement>(null)
   const [projectMenu, setProjectMenu] = useState<{ project: Project; x: number; y: number } | null>(null)
   const [deletingProject, setDeletingProject] = useState<Project | null>(null)
@@ -125,7 +125,8 @@ function AccountDashboard() {
     <div className="mx-auto max-w-6xl px-6 py-10">
       <div className="mb-3 text-xs font-semibold uppercase tracking-[0.15em] text-blue-600">Your creative workspace</div><h1 className="text-3xl font-semibold tracking-tight sm:text-4xl">A little idea. Your next project.</h1><p className="mt-3 max-w-xl text-sm leading-6 text-slate-500">Everything you are building, in one place. Open a project to pick up where you left off.</p>
       <div className="mt-7 flex flex-wrap gap-3"><span className="rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-500"><strong className="mr-2 text-slate-900">{projects.length}</strong> {projects.length === 1 ? 'project' : 'projects'} in your workspace</span><span className="rounded-xl border border-blue-100 bg-blue-50 px-4 py-3 text-sm text-blue-700">Private workspace / Beta</span></div>
-      {usage && <p className="mt-4 text-sm text-slate-600">Beta builds available: <strong>{usage.hourlyRemaining}/{usage.hourlyLimit}</strong> this hour · <strong>{usage.dailyRemaining}/{usage.dailyLimit}</strong> today.</p>}
+      {usage && <p className="mt-4 text-sm text-slate-600">Beta builds available: <strong>{usage.hourlyRemaining}/{usage.hourlyLimit}</strong> this hour · <strong>{usage.dailyUnlimited ? "Unlimited" : `${usage.dailyRemaining}/${usage.dailyLimit}`}</strong> today.</p>}
+      {usage && <p className="mt-2 text-sm text-slate-500">Daily model usage: {(usage.dailyTokensUsed ?? 0).toLocaleString()} tokens / {usage.dailyUnlimited ? 'Unlimited for your account' : (usage.dailyTokenLimit ?? 0).toLocaleString()}. {usage.tokenResetAt ? `Resets ${new Date(usage.tokenResetAt).toLocaleString()}.` : ''}</p>}
       {message && <p role="status" className="mt-6 rounded-xl border border-blue-100 bg-blue-50 p-4 text-blue-900">{message}</p>}
       <div className="mt-8 grid gap-8 lg:grid-cols-[1fr_320px]">
         <section id="projects"><div className="flex items-center justify-between"><h2 className="text-xl font-semibold">My projects</h2><button disabled={busy} onClick={() => { setProjectName(''); setProjectError(''); projectDialog.current?.showModal() }} className="rounded-xl bg-blue-600 px-4 py-3 text-sm font-semibold text-white disabled:opacity-50">{busy ? 'Please wait…' : 'New project'}</button></div>
