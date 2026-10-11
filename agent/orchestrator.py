@@ -2039,6 +2039,7 @@ def run_agent(
     build_passed = False
     preview_started = False
     browser_verified = False
+    verification = {"passed": [], "unverified": ["Requested app functions have not been tested."]}
     verification_complete = False
 
     changed_since_build = False
@@ -2084,6 +2085,7 @@ def run_agent(
             "buildPassed": build_passed,
             "previewStarted": preview_started,
             "browserVerified": browser_verified,
+            "verification": verification if browser_verified else {"passed": [], "unverified": ["Browser verification incomplete."]},
             "previewUrl": preview_url,
             "errorType": "agent_timeout",
         }
@@ -2918,6 +2920,7 @@ def run_agent(
                         "buildPassed": build_passed,
                         "previewStarted": preview_started,
                         "browserVerified": browser_verified,
+            "verification": verification if browser_verified else {"passed": [], "unverified": ["Browser verification incomplete."]},
                         "previewUrl": preview_url,
                         "errorType": "build",
                         "repairAttempts": repair_attempts,
@@ -3097,6 +3100,7 @@ def run_agent(
                         "buildPassed": build_passed,
                         "previewStarted": preview_started,
                         "browserVerified": browser_verified,
+            "verification": verification if browser_verified else {"passed": [], "unverified": ["Browser verification incomplete."]},
                         "previewUrl": preview_url,
                         "errorType": "preview",
                         "repairAttempts": repair_attempts,
@@ -3289,6 +3293,10 @@ def run_agent(
                     )
                     report_progress('Checking requested content and interactions')
                     content_result = get_browser(project_id).content_checks(prompt)
+                    verification = {
+                        "passed": (["Desktop and mobile layout"] if quality['status'] == 'success' else []) + content_result.get('testedInteractions', []),
+                        "unverified": ["Functions outside the listed checks, external services, and real multi-user behavior."] if content_result.get('testedInteractions') else ["App functions: no supported interaction checks ran."]
+                    }
                     interaction_console = get_browser(project_id).get_console()
                     if interaction_console.get('hasRuntimeErrors'):
                         raise RuntimeError('Runtime errors occurred during interaction checks: ' + _tool_result_text(interaction_console))
@@ -3350,6 +3358,7 @@ def run_agent(
                         "buildPassed": build_passed,
                         "previewStarted": preview_started,
                         "browserVerified": browser_verified,
+            "verification": verification if browser_verified else {"passed": [], "unverified": ["Browser verification incomplete."]},
                         "previewUrl": preview_url,
                         "checkpoint": checkpoint_result,
                 }
@@ -3415,6 +3424,7 @@ def run_agent(
                         "buildPassed": build_passed,
                         "previewStarted": preview_started,
                         "browserVerified": browser_verified,
+            "verification": verification if browser_verified else {"passed": [], "unverified": ["Browser verification incomplete."]},
                         "previewUrl": preview_url,
                         "errorType": "browser_runtime",
                         "repairAttempts": repair_attempts,
@@ -3562,6 +3572,7 @@ def run_agent(
                 "buildPassed": build_passed,
                 "previewStarted": preview_started,
                 "browserVerified": browser_verified,
+            "verification": verification if browser_verified else {"passed": [], "unverified": ["Browser verification incomplete."]},
                 "previewUrl": preview_url,
                 "checkpoint": checkpoint_result,
             }
@@ -3729,6 +3740,7 @@ def run_agent(
                     "buildPassed": build_passed,
                     "previewStarted": preview_started,
                     "browserVerified": browser_verified,
+            "verification": verification if browser_verified else {"passed": [], "unverified": ["Browser verification incomplete."]},
                     "previewUrl": preview_url,
                     "checkpoint": checkpoint_result,
                 }
@@ -4070,6 +4082,7 @@ def run_agent(
             "buildPassed": build_passed,
             "previewStarted": preview_started,
             "browserVerified": browser_verified,
+            "verification": verification if browser_verified else {"passed": [], "unverified": ["Browser verification incomplete."]},
             "previewUrl": preview_url,
         }
 
@@ -4102,5 +4115,6 @@ def run_agent(
         "buildPassed": build_passed,
         "previewStarted": preview_started,
         "browserVerified": browser_verified,
+            "verification": verification if browser_verified else {"passed": [], "unverified": ["Browser verification incomplete."]},
         "previewUrl": preview_url,
     }
