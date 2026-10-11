@@ -3386,6 +3386,10 @@ def run_agent(
 
             except Exception as exc:
 
+                if 'cannot schedule new futures after' in str(exc).lower():
+                    # Interpreter/executor shutdown is infrastructure failure,
+                    # not evidence that the generated application is broken.
+                    raise
                 repair_attempts += 1
                 self_healing_attempted = True
                 last_failure_type = (

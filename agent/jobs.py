@@ -135,6 +135,11 @@ class JobManager:
             state = 'completed' if result.get('status') == 'success' else 'failed'
             self.update(job_id, state=state, stage='Complete' if state == 'completed' else 'Request failed', result=result)
         except Exception as error:
+            if 'cannot schedule new futures after' in str(error).lower():
+                logger.warning('background_job_interrupted_by_shutdown job=%s', job_id)
+                # Keep the durable running row. The new worker claims it after
+                # the lease expires, retaining progress and restart accounting.
+                return
             logger.exception("background_agent_failed")
             detail = str(error).lower()
             failure = "Workspace storage is full. Your project is saved; report this so an administrator can free capacity." if "disk limit" in detail else "The workspace or AI service could not complete the request. Your files are saved; retry or report this problem."

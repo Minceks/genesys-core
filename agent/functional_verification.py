@@ -181,9 +181,10 @@ def verify_functions(page, prompt, provider, attempt=0, feedback="", sources=Non
     requirements = plan.get('requirements')
     if not isinstance(requirements, list) or not requirements or any(
         not isinstance(item, dict) or not isinstance(item.get('id'), str)
-        or not item.get('id') or not isinstance(item.get('name'), str)
+        or not item.get('id').strip() or not isinstance(item.get('name'), str)
+        or not item.get('name').strip()
         for item in requirements
-    ):
+    ) or len({item['id'] for item in requirements}) != len(requirements):
         if attempt == 0:
             return verify_functions(page, prompt, provider, attempt=1,
                 feedback='Return a complete requirements array and covers IDs on each check.', sources=sources)

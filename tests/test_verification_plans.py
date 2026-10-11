@@ -84,3 +84,13 @@ def test_malformed_coverage_is_a_verifier_error():
     assert result['unverifiedCore']
     assert not result['issues']
     assert page.mutations == 0
+
+
+def test_duplicate_requirement_ids_cannot_claim_complete_coverage():
+    page = Page()
+    provider = Provider({'requirements': [
+        {'id': 'counter', 'name': 'Increase count'},
+        {'id': 'counter', 'name': 'Reset count'}], 'checks': []})
+    result = verify_functions(page, 'Build a counter with reset', provider)
+    assert result['unverifiedCore']
+    assert page.mutations == 0
