@@ -1942,6 +1942,14 @@ def run_agent(
         project_id=project_id
     )
 
+    product_brief = None
+    if project_id != PROJECT_ID_DEFAULT:
+        from .product_design import prepare_design
+        report_progress('Identifying product type and design direction')
+        product_brief = prepare_design(workspace, prompt)
+        print('Product design:', product_brief['productType'], product_brief['subtype'])
+
+
     recovery_checkpoint_id = None
 
     # Checkpoint discovery is helpful for rollback, but it must not prevent
@@ -1996,6 +2004,13 @@ def run_agent(
             "content": prompt,
         },
     ]
+
+    if product_brief:
+        messages.append({'role':'system','content':
+            'SAVED PRODUCT DESIGN BRIEF: Use this product type to choose the appropriate layout, '
+            'assets, interactions and technical approach. User preferences take priority. '
+            'Treat the checks as requirements to implement, not proof they passed. '
+            + json.dumps(product_brief, ensure_ascii=False)})
 
     if recovery_context:
         messages.append({'role': 'system', 'content': recovery_context})
