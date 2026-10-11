@@ -131,10 +131,12 @@ class JobManager:
             result = self.execute(job['prompt'], job['projectId'], history, reservation, recovery)
             state = 'completed' if result.get('status') == 'success' else 'failed'
             self.update(job_id, state=state, stage='Complete' if state == 'completed' else 'Request failed', result=result)
-        except Exception:
+        except Exception as error:
             logger.exception("background_agent_failed")
+            detail = str(error).lower()
+            failure = "Workspace storage is full. Your project is saved; report this so an administrator can free capacity." if "disk limit" in detail else "The workspace or AI service could not complete the request. Your files are saved; retry or report this problem."
             try:
-                self.update(job_id, state='failed', stage='Request failed', result={"status":"error", "message":"The request failed. Your project files are preserved; please retry."})
+                self.update(job_id, state='failed', stage='Request failed', result={"status":"error", "message":failure})
             except Exception:
                 logger.exception("durable_job_result_save_failed")
         finally:

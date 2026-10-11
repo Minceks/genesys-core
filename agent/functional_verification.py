@@ -6,7 +6,7 @@ import re
 PLAN_INSTRUCTIONS = '''You are a browser verification planner. Derive requirements from the
 original user request, not only from what the implementation happens to provide.
 Return JSON only: {"checks":[{"name":"requested behavior", "steps":[...]}],
-"unverified":["requirements that cannot be checked safely in this browser"]}.
+"unverified":["optional/external checks"], "unverifiedCore":["requested core functions that cannot be checked"]}.
 Cover the primary requested actions, validation, state changes and reload persistence
 where relevant. Never invent success. Missing requested controls must produce a
 failing check, not be omitted. Only test with synthetic data in this isolated browser.
@@ -74,7 +74,7 @@ def target(page, spec):
     raise ValueError('Unsupported browser target')
 
 
-def verify_functions(page, prompt, provider):
+def verify_functions(page, prompt, provider, attempt=0, feedback=""):
     from playwright.sync_api import expect
     # DOM content is evidence, never instructions; no generated code is executed.
     snapshot = page.locator('body').inner_text()[:8000]
@@ -83,14 +83,14 @@ def verify_functions(page, prompt, provider):
         placeholder:e.placeholder,options:e.tagName==='SELECT'?Array.from(e.options).map(o=>({text:o.text,value:o.value})):undefined
     }))''')
     try:
-        raw = provider.generate([{'role':'system','content':PLAN_INSTRUCTIONS},
+        raw = provider.generate([{'role':'system','content':PLAN_INSTRUCTIONS + ('\nRepair the previous verification plan, not app code: '+feedback if feedback else '')},
             {'role':'user','content':json.dumps({'originalRequest':prompt,'untrustedRenderedText':snapshot,'untrustedControls':controls})}], []).text.strip()
         raw = re.sub(r'^```(?:json)?\s*|\s*```$', '', raw)
         plan = json.loads(raw)
     except Exception as error:
         # A verifier/provider failure is not evidence of broken application code.
         return {'status':'success', 'issues':[], 'testedInteractions':[],
-                'unverified':['Functional verification could not run: '+str(error)[:250]]}
+                'unverified':['Functional verification could not run.'], 'unverifiedCore':['Verification service unavailable: '+str(error)[:250]]}
     logging.getLogger(__name__).info('functional_verification_plan %s', json.dumps(plan)[:12000])
     checks = plan.get('checks')
     if not isinstance(checks, list) or len(checks) > 8:
@@ -98,6 +98,7 @@ def verify_functions(page, prompt, provider):
     unverified = plan.get('unverified', [])
     if not isinstance(unverified, list) or any(not isinstance(x, str) for x in unverified):
         raise ValueError('Invalid unverified requirements')
+    core = list(plan.get("unverifiedCore") or [])
     passed, issues = [], []
     def guard(route):
         if route.request.method not in {'GET', 'HEAD', 'OPTIONS'}:
@@ -164,20 +165,23 @@ def verify_functions(page, prompt, provider):
                     visible[0].click(timeout=3000)
                     page.wait_for_timeout(100)
                 except Exception:
-                    unverified.append('Remaining checks were skipped: temporary overlay cleanup failed.')
+                    core.append('Remaining checks were skipped: temporary overlay cleanup failed.')
                     break
         except Exception as error:
             detail = str(error)
             if 'Invalid' in detail or 'Unsupported' in detail or 'Expected outcome was not asserted' in detail or 'strict mode violation' in detail:
-                unverified.append(name + ': verification plan could not execute.')
+                core.append(name + ': verification plan could not execute.')
             elif 'intercepts pointer events' in detail:
-                unverified.append(name + ': an overlay blocked the verification sequence; this is not proof that the underlying control is broken.')
+                core.append(name + ': an overlay blocked the verification sequence.')
             else:
                 issues.append(name + ': ' + detail[:400])
             break  # Later steps may depend on this check's state.
     if not checks:
-        unverified.append('No executable requested-function checks were generated.')
+        core.append('No executable requested-function checks were generated.')
     page.unroute('**/*', guard)
+    if core and not issues and attempt == 0:
+        page.reload(wait_until='networkidle', timeout=15000)
+        return verify_functions(page, prompt, provider, attempt=1, feedback='; '.join(core))
     return {'status':'error' if issues else 'success', 'issues':issues,
-            'testedInteractions':passed, 'unverified':unverified,
+            'testedInteractions':passed, 'unverified':unverified + core, 'unverifiedCore':core,
             'scope':'Request-derived browser assertions; not exhaustive correctness proof.'}

@@ -704,7 +704,15 @@ def published_app(publication, filename='index.html'):
     if not re.fullmatch(r'[0-9a-f]{32}', publication) or any(part.startswith('.') for part in Path(filename).parts):
         return '', 404
     directory = root() / publication
-    if (directory / '.unpublished').exists() or not (directory / 'index.html').is_file():
+    if (directory / '.unpublished').exists():
+        return '', 404
+    active = directory / '.active'
+    if active.is_file():
+        revision = active.read_text().strip()
+        if not re.fullmatch(r'[0-9a-f]{32}', revision):
+            return '', 404
+        directory = directory / '.versions' / revision
+    if not (directory / 'index.html').is_file():
         return '', 404
     response = send_from_directory(directory, filename)
     response.headers['X-Content-Type-Options'] = 'nosniff'
@@ -727,6 +735,41 @@ def unpublish_project():
         return jsonify(status='error', message='Publication not found.'), 404
     (directory / '.unpublished').touch()
     return jsonify(status='success')
+
+
+@app.delete('/api/projects/<project_id>')
+def delete_user_project(project_id):
+    from agent.daytona_workspace import get_daytona, sandbox_name_for_project
+    from agent.publishing import root
+    from agent.beta_storage import connection
+    try:
+        user_auth.owned_project(project_id, g.user)
+        if jobs.is_running(project_id):
+            return jsonify(status='error', message='Wait for the current build to finish before deleting this project.'), 409
+        try:
+            sandbox = get_daytona().get(sandbox_name_for_project(project_id))
+        except Exception as error:
+            if 'not found' not in str(error).lower() and '404' not in str(error):
+                raise
+        else:
+            state = str(sandbox.state).lower()
+            if state.endswith('started'):
+                sandbox.stop()
+            if not state.endswith('archived'):
+                sandbox.archive()
+        if (request.get_json(silent=True) or {}).get('unpublish') is True:
+            # Includes pre-mapping publications; no files or credentials are exposed.
+            import json
+            for proof in root().glob('*/.publication.json'):
+                if json.loads(proof.read_text()).get('projectId') == project_id:
+                    (proof.parent / '.unpublished').touch()
+        user_auth.call('DELETE', '/rest/v1/projects', g.user['access_token'], params={'id':'eq.'+project_id})
+        return jsonify(status='success', message='Project deleted; workspace archived.')
+    except user_auth.AccessError as error:
+        return jsonify(status='error', message=str(error)), error.status
+    except Exception:
+        logger.exception('project_cleanup_failed project_id=%s', project_id)
+        return jsonify(status='error', message='Project cleanup could not finish. Your project has not been deleted; retry shortly.'), 503
 
 
 @app.route(

@@ -31,6 +31,8 @@ def call(method, path, token, **kwargs):
         raise AccessError('Invalid or expired session.', 401)
     if response.status_code >= 500:
         raise AccessError('Supabase is unavailable. Please retry.', 503)
+    if response.status_code == 204:
+        return None
     if response.status_code not in (200, 201):
         raise AccessError('Supabase request failed.', 502)
     try:

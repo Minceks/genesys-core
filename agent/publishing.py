@@ -2,8 +2,10 @@
 import io
 import json
 import os
+import re
 from pathlib import Path, PurePosixPath
 import shlex
+import shutil
 import tarfile
 import uuid
 
@@ -21,7 +23,12 @@ def publish(workspace, project_id, checkpoint_id, commit):
         'cat ../.genesys-verified-preview/.proof.json', cwd=REMOTE_PROJECT_ROOT, timeout=10)
     if proof.exit_code != 0 or json.loads(proof.result) != {'checkpointId': checkpoint_id, 'commit': commit}:
         raise ValueError('Rebuild and verify this version before publishing.')
-    publication = uuid.uuid4().hex
+    from .beta_storage import connection
+    with connection() as db:
+        db.execute('CREATE TABLE IF NOT EXISTS project_publications(project_id TEXT PRIMARY KEY, publication TEXT UNIQUE NOT NULL)')
+        db.execute('INSERT OR IGNORE INTO project_publications VALUES(?,?)', (project_id, uuid.uuid4().hex))
+        publication = db.execute('SELECT publication FROM project_publications WHERE project_id=?', (project_id,)).fetchone()[0]
+    revision = uuid.uuid4().hex
     archive = '/tmp/genesys-publish-' + publication + '.tar'
     result = workspace.sandbox.process.exec(
         'tar -cf ' + shlex.quote(archive) + ' --exclude=.proof.json -C ../.genesys-verified-preview .',
@@ -34,7 +41,8 @@ def publish(workspace, project_id, checkpoint_id, commit):
         workspace.sandbox.process.exec('rm -f ' + shlex.quote(archive), timeout=10)
     if len(blob) > 25 * 1024 * 1024:
         raise ValueError('The published build exceeds the 25 MB beta limit.')
-    destination = root() / publication
+    base = root() / publication
+    destination = base / ".versions" / revision
     total = 0
     with tarfile.open(fileobj=io.BytesIO(blob)) as bundle:
         members = bundle.getmembers()
@@ -49,12 +57,23 @@ def publish(workspace, project_id, checkpoint_id, commit):
             raise ValueError('The build has no index.html.')
         destination.mkdir(parents=True)
         bundle.extractall(destination, filter='data')
+    active = base / '.active'
+    if active.is_file():
+        previous = active.read_text().strip()
+        if re.fullmatch(r'[0-9a-f]{32}', previous):
+            assets = base / '.versions' / previous / 'assets'
+            if assets.is_dir():
+                shutil.copytree(assets, destination / 'assets', dirs_exist_ok=True)
     # Vite's default root-relative hashed assets need the publication prefix.
     index = destination / 'index.html'
     content = index.read_text(encoding='utf-8')
     content = content.replace('"/assets/', f'"/apps/{publication}/assets/').replace("'/assets/", f"'/apps/{publication}/assets/")
     index.write_text(content, encoding='utf-8')
-    (destination / '.publication.json').write_text(json.dumps({
+    (base / '.publication.json').write_text(json.dumps({
         'projectId': project_id, 'checkpointId': checkpoint_id, 'commit': commit
     }), encoding='utf-8')
+    pointer = base / ('.active-' + revision)
+    pointer.write_text(revision, encoding='ascii')
+    os.replace(pointer, base / '.active')
+    (base / '.unpublished').unlink(missing_ok=True)
     return publication
