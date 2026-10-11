@@ -10,6 +10,7 @@ from flask import (
     g,
     jsonify,
     request,
+    send_from_directory,
 )
 from flask_cors import CORS
 from agent.logging_config import configure_logging, request_id_context
@@ -97,6 +98,8 @@ def begin_request_logging():
 
 @app.before_request
 def require_api_key():
+    if request.method in {'GET', 'HEAD'} and request.path.startswith('/apps/'):
+        return None
     if request.method == "OPTIONS" or request.path.rstrip("/") in {
         "/health",
         "/api/v1/health",
@@ -106,7 +109,7 @@ def require_api_key():
     if user_auth.configured() or request.path.startswith('/api/projects'):
         try:
             g.user = user_auth.current_user(request.headers.get('Authorization', ''))
-            project_paths = {'/list-files', '/read-file', '/write-file', '/agent/run', '/preview', '/restore', '/promote', '/beta/feedback'}
+            project_paths = {'/publish', '/list-files', '/read-file', '/write-file', '/agent/run', '/preview', '/restore', '/promote', '/beta/feedback'}
             if request.path in project_paths or request.path.startswith('/agent/jobs'):
                 user_auth.owned_project(get_project_id(), g.user)
             if request.path == '/promote':
@@ -658,6 +661,51 @@ def beta_feedback():
 # ============================================================
 # VERIFIED PRODUCTION PROMOTION
 # ============================================================
+
+@app.post('/publish')
+def publish_project():
+    from agent.publishing import publish
+    enabled = os.getenv('GENESYS_PUBLISH_ENABLED', '').lower() == 'true'
+    allowed = {value.strip() for value in os.getenv('GENESYS_PUBLISH_TEST_USER_IDS', '').split(',') if value.strip()}
+    if not user_auth.configured() or (not enabled and getattr(g, 'user', {}).get('id') not in allowed):
+        return jsonify(status='error', message='Publishing is in testing. It is not enabled for this account yet.'), 503
+    if not os.getenv('RAILWAY_VOLUME_MOUNT_PATH') and os.getenv('RAILWAY_ENVIRONMENT_ID'):
+        return jsonify(status='error', message='Publishing needs persistent storage.'), 503
+    data = request.get_json(silent=True) or {}
+    checkpoint = str(data.get('checkpointId') or '')
+    project_id = get_project_id()
+    commit = verify_checkpoint_promotion_token(str(data.get('promotionToken') or ''),
+        signing_key=settings.promotion_signing_key or '', project_id=project_id, checkpoint_id=checkpoint)
+    if not settings.promotion_signing_key or not commit:
+        return jsonify(status='error', message='Verification expired. Build and verify the project again.'), 403
+    if jobs.is_running(project_id):
+        return jsonify(status='error', message='Wait for the current build to finish.'), 409
+    try:
+        publication = publish(get_workspace(project_id), project_id, checkpoint, commit)
+        return jsonify(status='success', url=request.url_root.rstrip('/') + '/apps/' + publication + '/')
+    except ValueError as error:
+        return jsonify(status='error', message=str(error)), 400
+    except Exception:
+        logger.exception('project_publish_failed project_id=%s', project_id)
+        return jsonify(status='error', message='Publishing failed. Your verified project is preserved.'), 503
+
+
+@app.get('/apps/<publication>/')
+@app.get('/apps/<publication>/<path:filename>')
+def published_app(publication, filename='index.html'):
+    import re
+    from agent.publishing import root
+    from pathlib import Path
+    if not re.fullmatch(r'[0-9a-f]{32}', publication) or any(part.startswith('.') for part in Path(filename).parts):
+        return '', 404
+    directory = root() / publication
+    if not (directory / 'index.html').is_file():
+        return '', 404
+    response = send_from_directory(directory, filename)
+    response.headers['X-Content-Type-Options'] = 'nosniff'
+    response.headers['Content-Security-Policy'] = "sandbox allow-scripts allow-forms allow-popups allow-downloads"
+    return response
+
 
 @app.route(
     "/promote",
