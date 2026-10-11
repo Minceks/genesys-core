@@ -2383,6 +2383,39 @@ def run_agent(
     # AGENT LOOP
     # --------------------------------------------------------
 
+    # Parallelize only an untouched clean starter. Existing applications use
+    # the established edit flow, preserving ownership and verification semantics.
+    if os.getenv('GENESYS_PARALLEL_BUILD', 'false').lower() == 'true' and not recovery_context and project_id != PROJECT_ID_DEFAULT:
+        try:
+            starter = workspace.read_file('src/App.jsx')
+            starter_text = starter.get('content', '') if isinstance(starter, dict) else ''
+            if 'Your project is ready' in starter_text and settings.openai_api_key and settings.gemini_api_key:
+                from .parallel_build import draft_project
+                report_progress('Building UI and application logic in parallel')
+                shared_source = '\n'.join(str(item.get('content', '')) for item in messages if item.get('role') == 'system')
+                drafts = draft_project(prompt, shared_source, provider_for, agent_deadline)
+                if drafts:
+                    for path, content in drafts.items():
+                        result = workspace.write_file(path, content)
+                        if not isinstance(result, dict) or result.get('status') != 'success':
+                            raise RuntimeError('Could not apply parallel draft: ' + path)
+                        if path not in modified_files:
+                            modified_files.append(path)
+                    changed_since_build = True
+                    implementation_ready = True
+                    messages.append({'role':'system','content':
+                        'Parallel workers implemented the shared application interface. Files: ' + ', '.join(drafts) +
+                        '. Preserve their changes; repair only verification failures.'})
+        except Exception:
+            import logging
+            logging.getLogger(__name__).exception('parallel_build_fell_back')
+            # Successfully written files are tracked even if a later write fails.
+            changed_since_build = bool(modified_files)
+            implementation_ready = False
+            messages.append({'role':'system','content':
+                'Parallel drafting did not complete. Inspect current files and finish the original request. '
+                'Preserve any completed changes. Do not duplicate implemented features.'})
+
     for step in range(1, TOTAL_MAX_STEPS + 1):
 
         steps_used = step
