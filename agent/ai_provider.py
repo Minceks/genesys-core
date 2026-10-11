@@ -1,10 +1,12 @@
 import json
+import os
 import time
 import uuid
 from dataclasses import dataclass, field
 from typing import Any
 
 from .config import load_settings
+from .model_context import bounded_messages
 
 # ============================================================
 # CONFIGURATION
@@ -814,6 +816,7 @@ class GeminiProvider(AIProvider):
         """
 
         from google.genai import types
+        messages = bounded_messages(messages, tools)
 
         contents: list[
             types.Content
@@ -1202,7 +1205,7 @@ class GroqProvider(AIProvider):
 
         prepared_messages = (
             prepare_messages_for_groq(
-                messages
+                bounded_messages(messages, tools, limit=4000)
             )
         )
 
@@ -1424,6 +1427,7 @@ class OpenAIProvider(AIProvider):
         self.client = client or OpenAI(api_key=settings.openai_api_key, timeout=60.0, max_retries=0)
 
     def generate(self, messages, tools):
+        messages = bounded_messages(messages, tools)
         # Strip provider-specific signatures without truncating source context.
         prepared = []
         for message in messages:
@@ -1440,7 +1444,7 @@ class OpenAIProvider(AIProvider):
                     for call in message['tool_calls']]
             prepared.append(item)
         options = dict(model=self.model, messages=prepared,
-                       max_completion_tokens=12000)
+                       max_completion_tokens=min(12000, max(2000, int(os.getenv('GENESYS_OUTPUT_TOKEN_LIMIT', '6000')))))
         if self.model.startswith(('gpt-5', 'gpt-6', 'o3', 'o4')):
             options['reasoning_effort'] = 'low'
         if tools:

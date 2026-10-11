@@ -14,6 +14,8 @@ SNAPSHOT_SCRIPT = """() => {
   const customBackground = !['rgb(255, 255, 255)','rgba(0, 0, 0, 0)'].includes(color);
   const text = document.body.innerText.trim();
   return { width: innerWidth, overflow: document.documentElement.scrollWidth > innerWidth + 2,
+    loadedImages: [...document.images].filter(el => visible(el) && el.complete && el.naturalWidth > 0).length,
+    brokenImages: [...document.images].filter(el => visible(el) && el.complete && el.naturalWidth === 0).length,
     controls: controls.length, styledControls, composedLayout, customBackground,
     textLength: text.length, hasGraphics: !!document.querySelector('canvas,svg,img,video'),
     starterVisible: text.includes('Your project is ready') && text.includes('Describe what you want to build'),
@@ -21,10 +23,14 @@ SNAPSHOT_SCRIPT = """() => {
 }"""
 
 
-def assess_visual_quality(snapshots, *, allow_unstyled=False):
+def assess_visual_quality(snapshots, *, allow_unstyled=False, require_images=False):
     issues = []
     for snapshot in snapshots:
         width = snapshot['width']
+        if require_images and snapshot.get('loadedImages', 0) < 2:
+            issues.append(f'At {width}px, the photography portfolio needs at least two visible, successfully loaded photos; include actual hero and gallery images.')
+        if require_images and snapshot.get('brokenImages', 0):
+            issues.append(f'At {width}px, portfolio photos failed to load. Replace broken image sources.')
         if snapshot['overflow']:
             issues.append(f"At {width}px, the page overflows horizontally; make the layout responsive.")
         if snapshot['starterVisible']:

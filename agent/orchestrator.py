@@ -1,5 +1,6 @@
 from __future__ import annotations
 from .progress import report_progress
+from .model_context import text_safe
 
 import json
 import os
@@ -603,6 +604,7 @@ def _tool_result_text(result: Any) -> str:
     Convert tool output into a model-readable string.
     """
 
+    result = text_safe(result)
     if isinstance(result, str):
         return result
 
@@ -3227,7 +3229,8 @@ def run_agent(
                 if project_id != PROJECT_ID_DEFAULT:
                     report_progress("Checking visual layout")
                     quality = get_browser(project_id).visual_quality(
-                        allow_unstyled=bool(re.search(r"\b(unstyled|browser[- ]default|no css|plain html)\b", prompt, re.I))
+                        allow_unstyled=bool(re.search(r"\b(unstyled|browser[- ]default|no css|plain html)\b", prompt, re.I)),
+                        require_images=bool(re.search(r"\b(photographer|photography|photographic)\b", prompt, re.I) and re.search(r"\b(portfolio|gallery|website|site)\b", prompt, re.I))
                     )
                     report_progress('Checking requested content and interactions')
                     content_result = get_browser(project_id).content_checks(prompt)

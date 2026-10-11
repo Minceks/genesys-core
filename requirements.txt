@@ -9,3 +9,4 @@ daytona
 playwright
 google-genai
 openai>=1.66,<3
+tiktoken>=0.9,<1

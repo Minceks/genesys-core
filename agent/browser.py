@@ -320,7 +320,7 @@ class BrowserSession:
         return verify_content(self.start(), prompt)
 
     @browser_thread
-    def visual_quality(self, *, allow_unstyled=False) -> dict[str, Any]:
+    def visual_quality(self, *, allow_unstyled=False, require_images=False) -> dict[str, Any]:
         page = self.start()
         original = page.viewport_size
         snapshots = []
@@ -328,11 +328,13 @@ class BrowserSession:
             for width, height in ((1280, 800), (390, 844)):
                 page.set_viewport_size({'width': width, 'height': height})
                 page.wait_for_timeout(200)
+                if require_images:
+                    page.evaluate("""async () => { await Promise.race([Promise.all([...document.images].filter(img => { const r=img.getBoundingClientRect(); return r.width>0 && r.height>0; }).map(img => { img.loading = 'eager'; return img.decode().catch(() => {}); })), new Promise(resolve => setTimeout(resolve, 5000))]); }""")
                 snapshots.append(page.evaluate(SNAPSHOT_SCRIPT))
         finally:
             if original:
                 page.set_viewport_size(original)
-        return assess_visual_quality(snapshots, allow_unstyled=allow_unstyled)
+        return assess_visual_quality(snapshots, allow_unstyled=allow_unstyled, require_images=require_images)
 
     @browser_thread
     def get_console(

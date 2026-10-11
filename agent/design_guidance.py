@@ -30,6 +30,15 @@ same stylesheet edit, so subsequent requests can retain the design without an ex
 On an existing app, inspect and reuse its visual tokens; change its theme only when requested.
 Create a composed page with a clear focal point, useful information hierarchy, balanced density,
 purposeful whitespace, polished typography and details appropriate to the requested product.
+For photographers' portfolios and other image-led sites, include actual photographic images
+in the hero and gallery, not blank cards, gradients or icon substitutes. Use the user's provided
+photos first. Without uploaded photos, use representative stock sample images, label the collection
+as sample photography, and never claim these are the user's own photographs. For sample sources use
+https://images.unsplash.com/photo-1500534623283-312aade485b7?auto=format&fit=crop&w=1200&q=80
+https://images.unsplash.com/photo-1470071459604-3b5ec3a7fe05?auto=format&fit=crop&w=1200&q=80
+https://images.unsplash.com/photo-1441974231531-c6227db76b6e?auto=format&fit=crop&w=1200&q=80
+Use descriptive alt text, responsive widths, aspect ratios, object-fit, and lazy loading below the fold.
+Make image collections easy to replace with the user's real photos. Images must load in verification.
 Avoid applying the same card grid, gradients, blue accents or generic hero to every request.
 Keep text legible: aim for WCAG AA contrast, visible keyboard focus, descriptive labels,
 usable touch targets and responsive layouts without horizontal overflow.
