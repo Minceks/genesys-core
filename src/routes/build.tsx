@@ -73,6 +73,7 @@ type ChatMessage = {
   promotionToken?: string;
   promotionUrl?: string;
   publishedUrl?: string;
+  publicationId?: string;
   promotionError?: string;
   steps?: AgentStep[];
 };
@@ -373,10 +374,11 @@ function BuildPage({ projectId, projectName, onProjects }: { projectId: string; 
     setPreviewError("");
     try {
       const response = await fetch(`${CLOUD_AGENT_URL}/preview`, {
-        method: "POST", headers: buildCloudAgentHeaders(true),
+        method: "POST", headers: buildCloudAgentHeaders(true), signal: AbortSignal.timeout(25000),
         body: JSON.stringify({ projectId }),
       });
       const data = await response.json();
+      if (response.status === 401) throw new Error("Your session expired. Sign in again to reconnect. Your project is saved.");
       if (!response.ok || data.status !== "success" || !data.url) throw new Error(data.message || "Preview could not reconnect.");
       setPreviewOnline(false);
       setPreviewUrl(data.url);
@@ -736,7 +738,7 @@ function BuildPage({ projectId, projectName, onProjects }: { projectId: string; 
       }
       setMessages((previous) => previous.map((message, itemIndex) =>
         itemIndex === index
-          ? { ...message, ...(publish ? { publishedUrl: data.url } : { promotionUrl: data.url }) }
+          ? { ...message, ...(publish ? { publishedUrl: data.url, publicationId: data.publicationId } : { promotionUrl: data.url }) }
           : message
       ));
     } catch (error) {
@@ -771,6 +773,16 @@ function BuildPage({ projectId, projectName, onProjects }: { projectId: string; 
         void handleSend();
       }
     }
+  }
+
+  async function unpublish(index: number, publicationId: string) {
+    if (!window.confirm("Unpublish this app? Its public link will stop working.")) return;
+    try {
+      const response = await fetch(`${CLOUD_AGENT_URL}/publish`, { method: "DELETE", headers: buildCloudAgentHeaders(true), body: JSON.stringify({ projectId, publicationId }) });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.message || "Could not unpublish.");
+      setMessages(previous => previous.map((message, i) => i === index ? { ...message, publishedUrl: undefined, publicationId: undefined } : message));
+    } catch (error) { setMessages(previous => previous.map((message, i) => i === index ? { ...message, promotionError: String(error) } : message)); }
   }
 
   // ==========================================================
@@ -1041,6 +1053,7 @@ function BuildPage({ projectId, projectName, onProjects }: { projectId: string; 
                             <p className="mb-2 text-sm font-semibold text-green-800">Your app is published.</p>
                             <a href={message.publishedUrl} target="_blank" rel="noopener noreferrer" className="inline-flex rounded-lg bg-blue-600 px-3 py-2 text-xs font-semibold text-white">Open published app <ExternalLink size={13} className="ml-2" /></a>
                             <p className="mt-2 text-xs text-slate-600">Share this link:</p>
+                            {message.publicationId && <button type="button" onClick={() => void unpublish(index, message.publicationId!)} className="mt-2 text-xs font-semibold text-red-600">Unpublish app</button>}
                             <input aria-label="Published app link" readOnly value={message.publishedUrl} onFocus={(event) => event.target.select()} className="mt-1 w-full rounded border border-slate-200 bg-slate-50 p-2 text-xs text-slate-700" />
                           </div>
                         ) : (
