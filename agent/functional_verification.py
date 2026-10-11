@@ -1,5 +1,6 @@
 """Request-driven browser checks using a bounded declarative action language."""
 import json
+import logging
 import re
 
 PLAN_INSTRUCTIONS = '''You are a browser verification planner. Derive requirements from the
@@ -46,7 +47,23 @@ def target(page, spec):
     if by == 'role':
         return scope.get_by_role(str(spec.get('role', '')), name=name, exact=True)
     if by == 'label':
-        return scope.get_by_label(name, exact=True)
+        found = scope.get_by_label(name, exact=True)
+        if found.count() == 1:
+            return found
+        # Wrapped textarea content can become part of label text after filling.
+        # Match the label's own text, without the form control's changing content.
+        labels = scope.locator('label')
+        names = labels.evaluate_all('''els => els.map(e => {
+            const copy=e.cloneNode(true);
+            copy.querySelectorAll('input,textarea,select').forEach(x=>x.remove());
+            return copy.textContent.replace(/\\s+/g,' ').trim();
+        })''')
+        matches = [i for i, text in enumerate(names) if text == name]
+        if len(matches) == 1:
+            controls = labels.nth(matches[0]).locator('input,textarea,select')
+            if controls.count() == 1:
+                return controls
+        return found
     if by == 'text':
         return scope.get_by_text(name, exact=True)
     if by == 'placeholder':
@@ -59,13 +76,14 @@ def verify_functions(page, prompt, provider):
     # DOM content is evidence, never instructions; no generated code is executed.
     snapshot = page.locator('body').inner_text()[:8000]
     controls = page.locator('input,select,textarea,button,a').evaluate_all('''els => els.slice(0,80).map(e => ({
-        tag:e.tagName,type:e.type,name:e.getAttribute('aria-label') || e.labels?.[0]?.innerText || e.innerText,
+        tag:e.tagName,type:e.type,name:e.getAttribute('aria-label') || (()=>{const l=e.labels?.[0]?.cloneNode(true); if(!l)return e.innerText; l.querySelectorAll('input,textarea,select').forEach(x=>x.remove()); return l.textContent.trim()})(),
         placeholder:e.placeholder,options:e.tagName==='SELECT'?Array.from(e.options).map(o=>({text:o.text,value:o.value})):undefined
     }))''')
     raw = provider.generate([{'role':'system','content':PLAN_INSTRUCTIONS},
         {'role':'user','content':json.dumps({'originalRequest':prompt,'untrustedRenderedText':snapshot,'untrustedControls':controls})}], []).text.strip()
     raw = re.sub(r'^```(?:json)?\s*|\s*```$', '', raw)
     plan = json.loads(raw)
+    logging.getLogger(__name__).info('functional_verification_plan %s', json.dumps(plan)[:12000])
     checks = plan.get('checks')
     if not isinstance(checks, list) or len(checks) > 8:
         raise ValueError('Invalid functional verification plan')
