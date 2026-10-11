@@ -606,9 +606,13 @@ function BuildPage({ projectId, projectName, onProjects }: { projectId: string; 
         {
           role: "bot",
 
-          text:
-            cleanDisplay ||
-            "GeneSys architectural synchronization complete.",
+          text: isBuildRequest
+            ? response.buildPassed && response.browserVerified
+              ? 'Your project is ready. Open the preview to try it.'
+              : response.buildPassed
+                ? 'The build passed. Browser verification is still incomplete.'
+                : 'Your project was updated. Check the build status below.'
+            : cleanDisplay || 'GeneSys completed your request.',
 
           agent:
             response.agent ||
