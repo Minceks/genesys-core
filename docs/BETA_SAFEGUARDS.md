@@ -4,7 +4,7 @@ Build quota history persists on the Railway job volume; restart recovery checks 
 Hourly/daily limits and cooldown still use existing configuration. One active job per user is enforced
 by the durable queue's unique index. Legacy synchronous routes remain process-local for active execution.
 
-`GENESYS_DAILY_MODEL_TOKEN_BUDGET` defaults to 2,000,000 reserved estimated tokens globally per UTC day.
+`GENESYS_DAILY_MODEL_TOKEN_BUDGET` defaults to 2,000,000 reserved estimated tokens globally per UTC day. Set it to `0` to explicitly disable the internal daily block; paid API usage and provider-side limits still apply.
 Each provider call reserves a conservative input/output/retry allowance before contacting the provider.
 Reservations are not refunded. This is conservative usage accounting, not exact billed tokens or a dollar
 spending cap. Set a separate provider-account spending limit for invoice protection.

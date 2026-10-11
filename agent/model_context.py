@@ -32,7 +32,12 @@ class ModelBudgetExceeded(RuntimeError):
 
 
 def reserve_model_budget(tokens):
-    limit = max(10000, int(os.getenv('GENESYS_DAILY_MODEL_TOKEN_BUDGET', '2000000')))
+    configured_limit = int(os.getenv('GENESYS_DAILY_MODEL_TOKEN_BUDGET', '2000000'))
+    # An explicit zero disables GeneSys's internal daily block. Provider limits
+    # and per-request context/output bounds remain independent.
+    if configured_limit == 0:
+        return
+    limit = max(10000, configured_limit)
     day = int(time.time() // 86400)
     with connection() as db:
         db.execute('BEGIN IMMEDIATE')
