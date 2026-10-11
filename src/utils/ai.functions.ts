@@ -226,7 +226,8 @@ export async function askGenesys(
     const data = job.result;
     if (!data || data.status !== "success") {
       const error = Object.assign(new Error(data?.message || "The request failed. Please retry or report this problem."), {
-        previousPreviewUrl: data?.previousPreviewPreserved ? data.previewUrl : null,
+        previousPreviewUrl: data?.previousPreviewPreserved || (data?.buildPassed && data?.previewStarted)
+          ? data.previewUrl : null,
       });
       throw error;
     }
