@@ -1449,12 +1449,30 @@ class OpenAIProvider(AIProvider):
             options['reasoning_effort'] = 'low'
         if tools:
             options.update(tools=tools, tool_choice='auto', parallel_tool_calls=True)
-        response = self.client.chat.completions.create(**options)
-        if not response.choices:
-            raise RuntimeError('OpenAI returned no completion.')
-        choice = response.choices[0]
-        if choice.finish_reason in {'length', 'content_filter'}:
-            raise RuntimeError('OpenAI completion was truncated or blocked; no partial tool call was executed.')
+        # A length limit is recoverable. Discard the incomplete response,
+        # then regenerate a smaller atomic edit with a bounded larger allowance.
+        ceiling = min(24000, max(options['max_completion_tokens'],
+                      int(os.getenv('GENESYS_OUTPUT_TOKEN_CEILING', '12000'))))
+        for attempt in range(2):
+            response = self.client.chat.completions.create(**options)
+            if not response.choices:
+                raise RuntimeError('OpenAI returned no completion.')
+            choice = response.choices[0]
+            if choice.finish_reason != 'length':
+                break
+            if attempt == 1:
+                raise RuntimeError('OpenAI still exceeded the output allowance after a smaller-edit retry; falling back without executing partial changes.')
+            options['max_completion_tokens'] = min(ceiling, options['max_completion_tokens'] * 2)
+            if tools:
+                options['parallel_tool_calls'] = False
+            options['messages'] = bounded_messages(prepared + [{'role': 'user', 'content':
+                'Your previous response exceeded the output allowance and was discarded. '
+                'No edits from that response were executed. Make only one small, complete '
+                'tool call now. Prefer a targeted edit_file patch over rewriting a large file. '
+                'Split larger implementations into independent components and subsequent calls. '
+                'Keep explanations short. Never omit required code or insert placeholders.'}], tools)
+        if choice.finish_reason == 'content_filter':
+            raise RuntimeError('OpenAI completion was blocked; no partial tool call was executed.')
         message = choice.message
         allowed = {tool['function']['name'] for tool in tools}
         calls = []

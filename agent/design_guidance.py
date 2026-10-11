@@ -45,6 +45,9 @@ usable touch targets and responsive layouts without horizontal overflow.
 Use hover/active states and restrained transitions; respect prefers-reduced-motion.
 Use semantic HTML and actual installed styling tools. The clean starter has plain CSS;
 Tailwind class names do not work unless Tailwind has actually been configured.
+Keep each implementation tool call small and complete. Use focused patches for existing files;
+split large new applications into components instead of emitting the entire project in one response.
+Never leave placeholder code to fit a response budget.
 Build the requested interactions with meaningful loading, empty, error and success states.
 Do not use dead buttons, unrelated platform navigation or fake completed integrations.
 For ordinary user-created app data, persist changes across reloads. Import the provided
