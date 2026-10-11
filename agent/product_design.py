@@ -52,7 +52,7 @@ def prepare_design(workspace, prompt):
         previous = json.loads(result.get('content', '')) if result.get('status') == 'success' else None
         if not isinstance(previous, dict) or previous.get('productType') not in PRODUCTS:
             previous = None
-    except (ValueError, TypeError, AttributeError):
+    except (FileNotFoundError, ValueError, TypeError, AttributeError):
         previous = None
     selected = next((name for name, pattern in PRODUCTS.items() if re.search(pattern, prompt, re.I)), None)
     replacement = bool(re.search(r'\b(build|create|make|replace|convert|turn|transform|redesign)\b', prompt, re.I))
