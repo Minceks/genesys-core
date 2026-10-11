@@ -1,3 +1,4 @@
+from .user_allowance import record as record_model_usage
 import json
 import os
 import time
@@ -1092,6 +1093,7 @@ class GeminiProvider(AIProvider):
             )
         )
 
+        record_model_usage(response)
         if not response.candidates:
             return AIResponse()
 
@@ -1238,6 +1240,7 @@ class GroqProvider(AIProvider):
                     **request_options
                 )
 
+                record_model_usage(response)
                 choice = response.choices[0]
 
                 message = choice.message
@@ -1455,6 +1458,7 @@ class OpenAIProvider(AIProvider):
                       int(os.getenv('GENESYS_OUTPUT_TOKEN_CEILING', '12000'))))
         for attempt in range(2):
             response = self.client.chat.completions.create(**options)
+            record_model_usage(response)
             if not response.choices:
                 raise RuntimeError('OpenAI returned no completion.')
             choice = response.choices[0]

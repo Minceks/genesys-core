@@ -1,3 +1,4 @@
+from agent.user_allowance import account_context
 import logging
 import hmac
 import os
@@ -426,10 +427,12 @@ def write():
 # ============================================================
 
 def execute_agent_request(prompt, project_id, conversation_history, reservation=None, recovery_context=None):
+    token = account_context.set(reservation[0] if reservation else None)
     try:
         return _execute_agent_request(prompt, project_id, conversation_history, recovery_context)
     finally:
         usage_limiter.release(reservation)
+        account_context.reset(token)
 
 
 def _execute_agent_request(prompt, project_id, conversation_history, recovery_context=None):

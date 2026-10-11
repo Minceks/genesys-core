@@ -1,3 +1,4 @@
+from .user_allowance import allowance, exempt
 """Persistent rolling build limits with durable job awareness."""
 import os
 import threading
@@ -26,6 +27,7 @@ class UsageLimiter:
         return bool(db.execute("SELECT 1 FROM jobs WHERE user_id=? AND state IN ('queued','running') LIMIT 1", (user_id,)).fetchone())
 
     def reserve(self, user_id):
+        tokens = allowance(user_id)
         with self.lock, connection() as db:
             db.execute('BEGIN IMMEDIATE')
             now = self.clock()
@@ -34,7 +36,9 @@ class UsageLimiter:
             if self.running(db, user_id):
                 raise UsageLimited('One build is already running for your account. Wait for it to finish.', 10)
             hourly = [value for value in history if now-value < 3600]
-            if len(history) >= self.daily:
+            if not exempt(user_id) and tokens['dailyTokensRemaining'] < int(os.getenv('GENESYS_BUILD_TOKEN_HEADROOM', '50000')):
+                raise UsageLimited('Daily account allowance is too low to start another build. Existing builds can finish.', tokens['tokenResetAt']/1000-now)
+            if not exempt(user_id) and len(history) >= self.daily:
                 raise UsageLimited('Daily beta build limit reached. Please return later.', 86400-(now-history[0]))
             if len(hourly) >= self.hourly:
                 raise UsageLimited('Hourly beta build limit reached. Please return later.', 3600-(now-hourly[0]))
@@ -59,5 +63,6 @@ class UsageLimiter:
             history = [row[0] for row in db.execute('SELECT created FROM build_usage WHERE user_id=? AND created>?', (user_id, now-86400))]
             return {'hourlyLimit':self.hourly,'dailyLimit':self.daily,
                     'hourlyRemaining':max(0,self.hourly-sum(now-value<3600 for value in history)),
-                    'dailyRemaining':max(0,self.daily-len(history)),
+                    'dailyRemaining':None if exempt(user_id) else max(0,self.daily-len(history)),
+                    **allowance(user_id),
                     'buildRunning':self.running(db,user_id),'scope':'persistent backend accounting'}
