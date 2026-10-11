@@ -70,6 +70,7 @@ type ChatMessage = {
   checkpointId?: string;
   promotionToken?: string;
   promotionUrl?: string;
+  publishedUrl?: string;
   promotionError?: string;
   steps?: AgentStep[];
 };
@@ -707,7 +708,7 @@ function BuildPage({ projectId, projectName, onProjects }: { projectId: string; 
     finally { setRestoring(false); }
   }
 
-  async function handlePromote(index: number, checkpointId: string, promotionToken: string) {
+  async function handlePromote(index: number, checkpointId: string, promotionToken: string, publish = false) {
     if (promotingCheckpoint) return;
     setPromotingCheckpoint(checkpointId);
     setMessages((previous) => previous.map((message, itemIndex) =>
@@ -717,7 +718,7 @@ function BuildPage({ projectId, projectName, onProjects }: { projectId: string; 
     ));
 
     try {
-      const response = await fetch(`${CLOUD_AGENT_URL}/promote`, {
+      const response = await fetch(`${CLOUD_AGENT_URL}/${publish ? "publish" : "promote"}`, {
         method: "POST",
         headers: buildCloudAgentHeaders(true),
         body: JSON.stringify({ projectId, checkpointId, promotionToken }),
@@ -732,7 +733,7 @@ function BuildPage({ projectId, projectName, onProjects }: { projectId: string; 
       }
       setMessages((previous) => previous.map((message, itemIndex) =>
         itemIndex === index
-          ? { ...message, promotionUrl: data.url }
+          ? { ...message, ...(publish ? { publishedUrl: data.url } : { promotionUrl: data.url }) }
           : message
       ));
     } catch (error) {
@@ -1027,6 +1028,12 @@ function BuildPage({ projectId, projectName, onProjects }: { projectId: string; 
                         <div className="mb-2 text-[10px] font-semibold text-blue-900">
                           Build passed and browser verification completed.
                         </div>
+                        {message.publishedUrl ? (
+                          <a href={message.publishedUrl} target="_blank" rel="noopener noreferrer" className="mb-3 inline-flex rounded-lg bg-blue-600 px-3 py-2 text-xs font-semibold text-white">Open published app</a>
+                        ) : (
+                          <button type="button" disabled={Boolean(promotingCheckpoint) || loading} onClick={() => void handlePromote(index, message.checkpointId!, message.promotionToken!, true)} className="mb-3 mr-3 rounded-lg bg-blue-600 px-3 py-2 text-xs font-semibold text-white disabled:opacity-60">{promotingCheckpoint === message.checkpointId ? "Working..." : "Publish app"}</button>
+                        )}
+                        <p className="mb-3 text-xs text-slate-600">Publishing shares this verified version publicly. Beta publishing is available to test accounts first.</p>
                         {message.promotionUrl ? (
                           <a
                             href={message.promotionUrl}
