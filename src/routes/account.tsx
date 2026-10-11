@@ -23,6 +23,7 @@ function AccountDashboard() {
   const projectDialog = useRef<HTMLDialogElement>(null)
   const [projectMenu, setProjectMenu] = useState<{ project: Project; x: number; y: number } | null>(null)
   const [deletingProject, setDeletingProject] = useState<Project | null>(null)
+  const [unpublishOnDelete, setUnpublishOnDelete] = useState(true)
   const deleteDialog = useRef<HTMLDialogElement>(null)
   const menuRef = useRef<HTMLDivElement>(null)
   useEffect(() => {
@@ -44,9 +45,12 @@ function AccountDashboard() {
     if (!deletingProject || busy || !supabase || !userId) return
     setBusy(true); setMessage('')
     try {
-      const { data, error } = await supabase.from('projects').delete().eq('id', deletingProject.id).eq('owner_id', userId).select('id')
-      if (error) throw error
-      if (!data?.length) throw new Error('The project could not be deleted. Refresh and try again.')
+      const response = await fetch(`${CLOUD_AGENT_URL}/api/projects/${deletingProject.id}`, {
+        method: 'DELETE', headers: { Authorization: `Bearer ${session?.access_token}`, 'Content-Type':'application/json' },
+        body: JSON.stringify({ unpublish: unpublishOnDelete }),
+      })
+      const data = await response.json()
+      if (!response.ok) throw new Error(data.message || 'Project cleanup failed. Please retry.')
       setProjects(previous => previous.filter(project => project.id !== deletingProject.id))
       setMessage('Project deleted from your workspace.')
       deleteDialog.current?.close()
@@ -144,7 +148,8 @@ function AccountDashboard() {
     </div>}
     <dialog ref={deleteDialog} aria-labelledby="delete-project-title" onCancel={event => { if (busy) event.preventDefault() }} className="m-auto w-[calc(100%-2rem)] max-w-md rounded-3xl border border-slate-200 bg-white p-7 text-slate-900 shadow-xl backdrop:bg-slate-900/40">
       <h2 id="delete-project-title" className="text-xl font-semibold">Delete project?</h2>
-      <p className="mt-3 break-words text-sm leading-6 text-slate-600">Remove <strong>{deletingProject?.name}</strong> from your workspace? This cannot be undone. Existing published links are not removed by this action.</p>
+      <p className="mt-3 break-words text-sm leading-6 text-slate-600">Remove <strong>{deletingProject?.name}</strong> from your workspace? This cannot be undone. Its workspace will be archived.</p>
+      <label className="mt-4 flex items-center gap-2 text-sm"><input type="checkbox" checked={unpublishOnDelete} onChange={event => setUnpublishOnDelete(event.target.checked)} /> Also unpublish its public links</label>
       <div className="mt-6 flex justify-end gap-3"><button type="button" disabled={busy} onClick={() => deleteDialog.current?.close()} className="rounded-xl px-4 py-3 text-sm font-semibold text-slate-600">Cancel</button><button type="button" disabled={busy} onClick={() => void deleteProject()} className="rounded-xl bg-red-600 px-4 py-3 text-sm font-semibold text-white disabled:opacity-50">{busy ? 'Deleting...' : 'Delete project'}</button></div>
     </dialog>
     <dialog ref={projectDialog} aria-labelledby="new-project-title" onCancel={event => { if (busy) event.preventDefault() }} className="m-auto w-[calc(100%-2rem)] max-w-md rounded-3xl border border-slate-200 bg-white p-7 text-slate-900 shadow-xl backdrop:bg-slate-900/40">
