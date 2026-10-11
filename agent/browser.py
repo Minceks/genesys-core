@@ -317,7 +317,25 @@ class BrowserSession:
 
     @browser_thread
     def content_checks(self, prompt, provider) -> dict[str, Any]:
-        return verify_functions(self.start(), prompt, provider)
+        page = self.start()
+        workspace = get_workspace(self.project_id)
+        sources = {}
+        try:
+            files = workspace.list_files().get('files', [])
+            candidates = [p for p in files if p.startswith('src/') and p.endswith(('.js', '.jsx', '.ts', '.tsx')) and not p.endswith('.gen.ts')]
+            candidates.sort(key=lambda p: (0 if p in {'src/App.jsx', 'src/App.tsx'} else 1 if 'use' in p or '/lib/' in p or '/utils/' in p else 2, p))
+            remaining = 24000
+            for path in candidates[:8]:
+                content = workspace.read_file(path).get('content', '')
+                if isinstance(content, str):
+                    sources[path] = content[:min(8000, remaining)]
+                    remaining -= len(sources[path])
+                    if remaining <= 0:
+                        break
+        except Exception:
+            # Missing source evidence must not be interpreted as server storage.
+            pass
+        return verify_functions(page, prompt, provider, sources=sources)
 
     @browser_thread
     def visual_quality(self, *, allow_unstyled=False, require_images=False) -> dict[str, Any]:
