@@ -117,7 +117,13 @@ def verify_functions(page, prompt, provider):
                     continue
                 locator = target(page, step.get('target'))
                 if action == 'visible':
-                    expect(locator).to_be_visible(timeout=3000)
+                    # Visibility means at least one matching element is visible,
+                    # not that the same label occurs only once on the page.
+                    # Wait for a match, then examine all matches without choosing
+                    # an arbitrary action target.
+                    expect(locator.first).to_be_attached(timeout=3000)
+                    if not any(locator.nth(i).is_visible() for i in range(locator.count())):
+                        raise ValueError('No matching element is visible')
                     asserted = True
                 elif action == 'absent':
                     expect(locator).to_have_count(0, timeout=3000)
@@ -127,7 +133,9 @@ def verify_functions(page, prompt, provider):
                     asserted = True
                 elif action in {'fill', 'select', 'click'}:
                     if locator.count() != 1:
-                        raise ValueError('Control is missing or ambiguous')
+                        if locator.count() > 1:
+                            raise ValueError('Invalid verification plan: action target is ambiguous; use a unique role/name or item scope')
+                        raise ValueError('Requested control is missing')
                     if action == 'fill': locator.fill(str(step.get('value', ''))[:500], timeout=3000)
                     if action == 'select': locator.select_option(str(step.get('value', ''))[:200], timeout=3000)
                     if action == 'click':
@@ -145,7 +153,7 @@ def verify_functions(page, prompt, provider):
             passed.append(name)
         except Exception as error:
             detail = str(error)
-            if 'Invalid' in detail or 'Unsupported' in detail or 'Expected outcome was not asserted' in detail:
+            if 'Invalid' in detail or 'Unsupported' in detail or 'Expected outcome was not asserted' in detail or 'strict mode violation' in detail:
                 unverified.append(name + ': verification plan could not execute.')
             else:
                 issues.append(name + ': ' + detail[:400])
