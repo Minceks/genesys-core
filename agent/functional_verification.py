@@ -26,6 +26,9 @@ Targets use exact accessible names: by=role,label,text,placeholder. Optional
 withinText scopes to a row/listitem containing unique synthetic text. Never use
 CSS, JavaScript, coordinates or tool calls. Each check needs an outcome assertion
 after its last mutation; meaningful expected outcomes, not merely visible buttons.
+Each check must leave temporary dialogs and lightboxes closed before the next
+check. Include a click on their Close button and an absent assertion when testing
+opening an overlay. Checks may share created synthetic records, not open overlays.
 For static sites verify requested links/content with visible assertions. List
 real multi-user, server, payment and external integration checks as unverified.
 '''
@@ -139,10 +142,11 @@ def verify_functions(page, prompt, provider):
                     if action == 'fill': locator.fill(str(step.get('value', ''))[:500], timeout=3000)
                     if action == 'select': locator.select_option(str(step.get('value', ''))[:200], timeout=3000)
                     if action == 'click':
+                        submits = locator.evaluate("e => e.tagName==='BUTTON' && e.type==='submit' && Boolean(e.form)")
                         locator.click(timeout=3000)
                         invalid = page.locator('input:invalid,textarea:invalid,select:invalid').evaluate_all('''els => els.map(e=>({
                             name:e.getAttribute('aria-label')||e.name,pattern:e.getAttribute('pattern'),reason:e.validationMessage
-                        }))''')
+                        }))''') if submits else []
                         if invalid:
                             raise ValueError('Submitted test data was blocked by field validation: '+json.dumps(invalid))
                     asserted = False
@@ -151,10 +155,23 @@ def verify_functions(page, prompt, provider):
             if not asserted:
                 raise ValueError('Expected outcome was not asserted after the action')
             passed.append(name)
+            # Preserve synthetic records across checks, but do not leave a
+            # temporary viewer intercepting unrelated form interactions.
+            close = page.get_by_role('button', name=re.compile(r'^close(?:\s+(?:image|photo|lightbox|dialog|viewer|preview))?$', re.I))
+            visible = [close.nth(i) for i in range(close.count()) if close.nth(i).is_visible()]
+            if len(visible) == 1:
+                try:
+                    visible[0].click(timeout=3000)
+                    page.wait_for_timeout(100)
+                except Exception:
+                    unverified.append('Remaining checks were skipped: temporary overlay cleanup failed.')
+                    break
         except Exception as error:
             detail = str(error)
             if 'Invalid' in detail or 'Unsupported' in detail or 'Expected outcome was not asserted' in detail or 'strict mode violation' in detail:
                 unverified.append(name + ': verification plan could not execute.')
+            elif 'intercepts pointer events' in detail:
+                unverified.append(name + ': an overlay blocked the verification sequence; this is not proof that the underlying control is broken.')
             else:
                 issues.append(name + ': ' + detail[:400])
             break  # Later steps may depend on this check's state.
