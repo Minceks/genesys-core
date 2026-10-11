@@ -3725,6 +3725,15 @@ def run_agent(
 
         if not tool_calls:
 
+            if recovery_context and not build_attempted and not changed_since_build:
+                # Recovery can find the requested implementation already saved.
+                # A no-edit completion must still enter deterministic build and
+                # browser checks instead of asking the model to continue forever.
+                changed_since_build = True
+                implementation_ready = True
+                recovery_waiting_for_model = False
+                continue
+
             if changed_since_build:
                 implementation_ready = True
                 recovery_waiting_for_model = False
