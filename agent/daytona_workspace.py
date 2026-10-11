@@ -783,6 +783,18 @@ for name, contents in files.items():
     # LIST FILES
     # ========================================================
 
+    def build_fingerprint(self) -> str:
+        """Identify source and dependencies associated with an existing build."""
+        result = self.sandbox.process.exec(
+            "find . -type f -not -path './node_modules/*' "
+            "-not -path './.git/*' -not -path './.genesys*' "
+            "-print0 | sort -z | xargs -0 sha256sum | sha256sum",
+            cwd=REMOTE_PROJECT_ROOT, timeout=30,
+        )
+        if result.exit_code != 0:
+            raise RuntimeError('Could not identify build sources')
+        return str(result.result).split()[0]
+
     def list_files(
         self,
     ) -> dict[str, Any]:

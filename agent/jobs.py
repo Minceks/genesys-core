@@ -48,12 +48,13 @@ class JobManager:
         finally:
             db.close()
 
-    def submit(self, project_id, request_id, prompt="", history=None, reservation=None, user_id=None):
+    def submit(self, project_id, request_id, prompt="", history=None, reservation=None, user_id=None, verification_retry=None):
         job_id = uuid.uuid4().hex
         now = time.time()
         payload = {"jobId": job_id, "projectId": project_id, "prompt": prompt,
                    "createdAt": now * 1000, "requestId": request_id,
                    "state": "running", "stage": "Waiting for a worker", "restartCount": 0}
+        payload['verificationRetry'] = verification_retry
         with self.connection() as db:
             db.execute("BEGIN IMMEDIATE")
             db.execute("DELETE FROM jobs WHERE state IN ('completed','failed') AND updated < ?", (now - 86400,))
@@ -128,6 +129,8 @@ class JobManager:
                     "already implemented, finish implementation without edits so mandatory build and "
                     "browser verification can run again. Report what was retained, completed, and verified. "
                     "Last recorded stage (informational, not proof of completion): " + job.get('previousStage', 'unknown'))
+            if job.get('verificationRetry'):
+                recovery = {'verificationRetry': job['verificationRetry']}
             result = self.execute(job['prompt'], job['projectId'], history, reservation, recovery)
             state = 'completed' if result.get('status') == 'success' else 'failed'
             self.update(job_id, state=state, stage='Complete' if state == 'completed' else 'Request failed', result=result)

@@ -1860,10 +1860,12 @@ def run_agent(
     prompt: str,
     project_id: str = PROJECT_ID_DEFAULT,
     conversation_history: list[dict[str, str]] | None = None,
-    recovery_context: str | None = None,
+    recovery_context: str | dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-
     prompt = (prompt or "").strip()
+    verification_retry = recovery_context.get('verificationRetry') if isinstance(recovery_context, dict) else None
+    if isinstance(recovery_context, dict):
+        recovery_context = None
 
     if not prompt:
         return {
@@ -2410,7 +2412,7 @@ def run_agent(
 
     # Parallelize only an untouched clean starter. Existing applications use
     # the established edit flow, preserving ownership and verification semantics.
-    if os.getenv('GENESYS_PARALLEL_BUILD', 'false').lower() == 'true' and not recovery_context and project_id != PROJECT_ID_DEFAULT:
+    if os.getenv('GENESYS_PARALLEL_BUILD', 'false').lower() == 'true' and not recovery_context and not verification_retry and project_id != PROJECT_ID_DEFAULT:
         try:
             starter = workspace.read_file('src/App.jsx')
             starter_text = starter.get('content', '') if isinstance(starter, dict) else ''
@@ -2440,6 +2442,11 @@ def run_agent(
             messages.append({'role':'system','content':
                 'Parallel drafting did not complete. Inspect current files and finish the original request. '
                 'Preserve any completed changes. Do not duplicate implemented features.'})
+
+    if verification_retry and workspace.build_fingerprint() == verification_retry:
+        build_attempted = True
+        build_passed = True
+        report_progress('Retrying verification of the saved build')
 
     for step in range(1, TOTAL_MAX_STEPS + 1):
 
@@ -3296,7 +3303,8 @@ def run_agent(
                     content_result = get_browser(project_id).content_checks(prompt, provider)
                     verification = {
                         "passed": (["Desktop and mobile layout"] if quality['status'] == 'success' else []) + content_result.get('testedInteractions', []),
-                        "unverified": content_result.get("unverified", []) + ["Functions outside the listed checks and real multi-user behavior."]
+                        "unverified": content_result.get("unverified", []) + ["Functions outside the listed checks and real multi-user behavior."],
+                        "coverage": content_result.get('coverage', {})
                     }
                     if content_result.get('unverifiedCore') and not content_result.get('issues'):
                         return {"status":"error", "message":"The build is saved, but core function checks could not finish. Retry verification or report the problem.",

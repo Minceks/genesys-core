@@ -446,13 +446,18 @@ def _execute_agent_request(prompt, project_id, conversation_history, recovery_co
     )
 
     if isinstance(result, dict):
+        if result.get('buildPassed'):
+            try:
+                result['buildFingerprint'] = get_workspace(project_id).build_fingerprint()
+            except Exception:
+                logger.exception('build_fingerprint_failed')
         checkpoint = result.get('checkpoint') or {}
         if result.get('requestType') != 'chat':
             try:
                 workspace = get_workspace(project_id)
                 if result.get('status') == 'success' and result.get('browserVerified') and checkpoint.get('status') == 'success':
                     result['previewUrl'] = verified_preview(workspace, checkpoint)
-                elif result.get('status') != 'success':
+                elif result.get('status') != 'success' and not result.get('previewUrl'):
                     result['previewUrl'] = verified_preview(workspace)
                     result['previousPreviewPreserved'] = bool(result['previewUrl'])
             except Exception:
@@ -575,8 +580,15 @@ def start_agent_job():
     except UsageLimited as error:
         return limit_response(error)
     try:
+        previous = jobs.latest(project_id)
+        previous_result = (previous or {}).get('result') or {}
+        verification_retry = None
+        if (previous and previous.get('state') == 'failed' and previous.get('prompt') == prompt
+            and previous_result.get('buildPassed') and previous_result.get('buildFingerprint')):
+            verification_retry = previous_result['buildFingerprint']
         job_id = jobs.submit(project_id, request_id_context.get(),
             prompt=prompt, history=history, reservation=reservation,
+            verification_retry=verification_retry,
             user_id=g.user["id"] if getattr(g, "user", None) else None)
     except ValueError as error:
         usage_limiter.release(reservation, refund=True)
