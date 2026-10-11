@@ -11,6 +11,15 @@ Also return coreRequestEvidence: an array of {"requirement": "exact entry from
 unverifiedCore", "requestQuote": "exact words from originalRequest requiring it"}.
 Do not infer requirements from 'typical flows'. If the request explicitly asks for
 an app type, quote those words when an essential function of that type is missing.
+An app type alone does NOT request server infrastructure, multi-device sync,
+external message delivery, or server undo. These require explicit request wording.
+All deletion checks must explicitly select the unique synthetic item created by
+this plan. Never delete sample content. After creating a project, it may become
+selected: do not assert another project's disappearance when deleting it.
+Do not assert empty or whitespace text; use invalid-input or real feedback/state.
+An uploaded photo's alt/caption must come from the add handler, not a sample photo.
+Do not click controls that send external messages, even when testing validation;
+fill invalid data and assert field validity without submitting.
 Cover the primary requested actions, validation, state changes and reload persistence
 where relevant. Never invent success. Missing requested controls must produce a
 failing check, not be omitted. Only test with synthetic data in this isolated browser.
@@ -68,6 +77,8 @@ def target(page, spec):
         if scope.count() != 1:
             raise ValueError('Synthetic item could not be uniquely identified')
     name = re.sub(r'\s+', ' ', str(spec.get('name', ''))).strip()[:200]
+    if not name:
+        raise ValueError('Invalid verification plan: empty target name')
     by = spec.get('by')
     if by == 'role':
         return scope.get_by_role(str(spec.get('role', '')), name=name, exact=True)
@@ -137,6 +148,28 @@ def verify_functions(page, prompt, provider, attempt=0, feedback="", sources=Non
         # requested requirement may block completion on the planner's say-so.
         unverified += [item for item in core if item not in supported]
         core = [item for item in core if item in supported]
+    # Validate the complete plan before any mutation. Planner errors must never
+    # consume app repair attempts or trigger edits to working application code.
+    try:
+        for check in checks:
+            if not isinstance(check, dict) or not isinstance(check.get('steps'), list):
+                raise ValueError('Invalid verification plan structure')
+            steps = check['steps']
+            if not 1 <= len(steps) <= 12:
+                raise ValueError('Invalid verification plan step count')
+            for step in steps:
+                if not isinstance(step, dict):
+                    raise ValueError('Invalid verification plan step')
+                if step.get('action') != 'reload':
+                    spec = step.get('target')
+                    if not isinstance(spec, dict) or not str(spec.get('name', '')).strip():
+                        raise ValueError('Invalid verification plan: empty target name')
+            if steps[-1].get('action') not in {'visible', 'absent', 'value', 'attribute', 'invalid'}:
+                raise ValueError('Invalid verification plan: missing final outcome assertion')
+    except ValueError as error:
+        if attempt == 0:
+            return verify_functions(page, prompt, provider, attempt=1, feedback=str(error), sources=sources)
+        return {'status':'success', 'issues':[], 'testedInteractions':[], 'unverified':[str(error)], 'unverifiedCore':[str(error)]}
     passed, issues = [], []
     def guard(route):
         if route.request.method not in {'GET', 'HEAD', 'OPTIONS'}:
