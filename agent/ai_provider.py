@@ -1411,3 +1411,56 @@ class GroqProvider(AIProvider):
         raise RuntimeError(
             "Groq request failed after retries."
         )
+
+
+class OpenAIProvider(AIProvider):
+    """OpenAI Chat Completions adapter for the existing tool execution loop."""
+
+    def __init__(self, model=None, client=None):
+        if not settings.openai_api_key and client is None:
+            raise RuntimeError("OPENAI_API_KEY is missing from backend configuration.")
+        from openai import OpenAI
+        self.model = model or settings.genesys_openai_model
+        self.client = client or OpenAI(api_key=settings.openai_api_key, timeout=60.0, max_retries=0)
+
+    def generate(self, messages, tools):
+        # Strip provider-specific signatures without truncating source context.
+        prepared = []
+        for message in messages:
+            role = message.get('role')
+            if role not in {'system', 'user', 'assistant', 'tool'}:
+                continue
+            item = {'role': role, 'content': message.get('content') or ''}
+            if role == 'tool':
+                item['tool_call_id'] = message['tool_call_id']
+            if role == 'assistant' and message.get('tool_calls'):
+                item['tool_calls'] = [{'id': call['id'], 'type': 'function',
+                    'function': {'name': call['function']['name'],
+                                 'arguments': call['function']['arguments']}}
+                    for call in message['tool_calls']]
+            prepared.append(item)
+        options = dict(model=self.model, messages=prepared,
+                       max_completion_tokens=12000)
+        if self.model.startswith(('gpt-5', 'gpt-6', 'o3', 'o4')):
+            options['reasoning_effort'] = 'low'
+        if tools:
+            options.update(tools=tools, tool_choice='auto', parallel_tool_calls=True)
+        response = self.client.chat.completions.create(**options)
+        if not response.choices:
+            raise RuntimeError('OpenAI returned no completion.')
+        choice = response.choices[0]
+        if choice.finish_reason in {'length', 'content_filter'}:
+            raise RuntimeError('OpenAI completion was truncated or blocked; no partial tool call was executed.')
+        message = choice.message
+        allowed = {tool['function']['name'] for tool in tools}
+        calls = []
+        for call in message.tool_calls or []:
+            if call.function.name not in allowed:
+                raise RuntimeError('OpenAI requested a tool outside the current phase.')
+            arguments = json.loads(call.function.arguments)
+            if not isinstance(arguments, dict):
+                raise RuntimeError('OpenAI tool arguments must be a JSON object.')
+            calls.append(AIToolCall(id=call.id, name=call.function.name, arguments=arguments))
+        if not calls and not message.content:
+            raise RuntimeError('OpenAI returned an empty completion.')
+        return AIResponse(text=message.content or '', tool_calls=calls)

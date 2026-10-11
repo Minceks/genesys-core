@@ -14,6 +14,7 @@ DEFAULT_AGENT_TIMEOUT_SECONDS = 240
 VALID_PROVIDERS = {
     "groq",
     "gemini",
+    "openai",
 }
 
 
@@ -46,6 +47,9 @@ class Settings:
     daytona_api_key: str
     groq_api_key: str
     gemini_api_key: str
+
+    openai_api_key: str = ""
+    genesys_openai_model: str = "gpt-5-mini"
 
     genesys_model: str = DEFAULT_GENESYS_MODEL
     genesys_gemini_model: str = DEFAULT_GEMINI_MODEL
@@ -142,6 +146,8 @@ def load_settings() -> Settings:
         gemini_api_key=_required_env(
             "GEMINI_API_KEY"
         ),
+        openai_api_key=_optional_env("OPENAI_API_KEY", ""),
+        genesys_openai_model=_optional_env("GENESYS_OPENAI_MODEL", "gpt-5-mini"),
         genesys_model=_optional_env(
             "GENESYS_MODEL",
             DEFAULT_GENESYS_MODEL,

@@ -11,6 +11,7 @@ from .ai_provider import (
     AIResponse,
     GeminiProvider,
     GroqProvider,
+    OpenAIProvider,
 )
 from .config import load_settings
 from .daytona_workspace import get_workspace
@@ -371,9 +372,7 @@ def _answer_chat_question(
     try:
         response = provider.generate(chat_messages, [])
     except Exception:
-        if settings.provider_name != "groq" or FALLBACK_PROVIDER != "gemini":
-            raise
-        response = GeminiProvider(model=GEMINI_MODEL).generate(
+        response = provider_for(FALLBACK_PROVIDER).generate(
             chat_messages,
             [],
         )
@@ -537,34 +536,19 @@ def _compact_messages(
 # PROVIDER
 # ============================================================
 
+def provider_for(name):
+    if name == 'openai':
+        return OpenAIProvider(model=settings.genesys_openai_model)
+    if name == 'groq':
+        return GroqProvider(model=MODEL)
+    if name == 'gemini':
+        return GeminiProvider(model=GEMINI_MODEL)
+    raise RuntimeError(f'Unsupported provider: {name}')
+
+
 def get_provider():
-    """
-    Select the configured AI provider.
+    return provider_for(settings.provider_name)
 
-    Default:
-        Groq
-
-    Supported:
-        groq
-        gemini
-    """
-
-    provider_name = settings.provider_name
-
-    if provider_name == "groq":
-        return GroqProvider(
-            model=MODEL,
-        )
-
-    if provider_name == "gemini":
-        return GeminiProvider(
-            model=GEMINI_MODEL,
-        )
-
-    raise RuntimeError(
-        f"Unsupported GENESYS_PROVIDER={provider_name!r}. "
-        f"Expected 'groq' or 'gemini'."
-    )
 
 
 # ============================================================
@@ -2067,9 +2051,7 @@ def run_agent(
             "agent": "genesys",
             "provider": active_provider_name,
             "model": (
-                GEMINI_MODEL
-                if active_provider_name == "gemini"
-                else MODEL
+                provider.model
             ),
             "steps": steps_used,
             "modifiedFiles": modified_files,
@@ -2870,9 +2852,7 @@ def run_agent(
                         "agent": "genesys",
                         "provider": active_provider_name,
                         "model": (
-                            GEMINI_MODEL
-                            if active_provider_name == "gemini"
-                            else MODEL
+                            provider.model
                         ),
                         "steps": steps_used,
                         "modifiedFiles": modified_files,
@@ -3051,9 +3031,7 @@ def run_agent(
                         "agent": "genesys",
                         "provider": active_provider_name,
                         "model": (
-                            GEMINI_MODEL
-                            if active_provider_name == "gemini"
-                            else MODEL
+                            provider.model
                         ),
                         "steps": steps_used,
                         "modifiedFiles": modified_files,
@@ -3302,9 +3280,7 @@ def run_agent(
                         "agent": "genesys",
                         "provider": active_provider_name,
                         "model": (
-                            GEMINI_MODEL
-                            if active_provider_name == "gemini"
-                            else MODEL
+                            provider.model
                         ),
                         "steps": steps_used,
                         "modifiedFiles": modified_files,
@@ -3369,9 +3345,7 @@ def run_agent(
                         "agent": "genesys",
                         "provider": active_provider_name,
                         "model": (
-                            GEMINI_MODEL
-                            if active_provider_name == "gemini"
-                            else MODEL
+                            provider.model
                         ),
                         "steps": steps_used,
                         "modifiedFiles": modified_files,
@@ -3518,9 +3492,7 @@ def run_agent(
                 "agent": "genesys",
                 "provider": active_provider_name,
                 "model": (
-                    GEMINI_MODEL
-                    if active_provider_name == "gemini"
-                    else MODEL
+                    provider.model
                 ),
                 "steps": steps_used,
                 "modifiedFiles": modified_files,
@@ -3590,174 +3562,35 @@ def run_agent(
             # PROVIDER FALLBACK: GROQ <-> GEMINI
             # ------------------------------------------------
 
-            if active_provider_name == "groq":
-
-                print(
-                    "⚠️ Groq failed. Falling back to Gemini..."
-                )
-
-                try:
-
-                    fallback_provider = GeminiProvider(
-                        model=GEMINI_MODEL,
-                    )
-
-                    # The previous provider may have produced function calls
-                    # that do not contain Gemini 3 thought signatures.
-                    # Do not replay those provider-specific tool turns into
-                    # Gemini. Preserve normal conversation text and let Gemini
-                    # issue fresh tool calls with its own signatures.
-                    fallback_messages = []
-
-                    for message in messages:
-                        role = message.get(
-                            "role"
-                        )
-
-                        if role == "tool":
-                            # Preserve inspected source/tool outcomes as plain context rather
-                            # than discarding them with provider-specific function signatures.
-                            content = str(message.get('content') or '')
-                            if len(content) <= 4000:
-                                fallback_messages.append({'role': 'system', 'content': 'Previous tool result (already executed):\n' + content})
-                            continue
-
-                        if role == "assistant":
-                            cleaned_message = dict(
-                                message
-                            )
-
-                            cleaned_message.pop(
-                                "tool_calls",
-                                None,
-                            )
-
-                            fallback_messages.append(
-                                cleaned_message
-                            )
-                            continue
-
-                        fallback_messages.append(
-                            dict(message)
-                        )
-
-                    fallback_messages.append({'role': 'system', 'content':
-                        'Continue the same task from current progress. Do not restart inspection. '
-                        f'Already modified files: {modified_files}. Implementation steps remaining: {max(0, MAX_STEPS - step)}. '
-                        'Finish remaining application files and styles, then respond without tool calls for verification.'})
-                    if time.monotonic() >= agent_deadline:
-                        return _agent_timeout_result()
-
-                    response = fallback_provider.generate(
-                        fallback_messages,
-                        step_tools,
-                    )
-
-                    print(
-                        "✅ Gemini fallback succeeded; using Gemini for the rest of this run."
-                    )
-                    # Keep subsequent Gemini calls on Gemini-compatible history.
-                    messages = fallback_messages
-                    provider = fallback_provider
-                    active_provider_name = FALLBACK_PROVIDER
-
-                except Exception as fallback_exc:
-
-                    fallback_error = str(
-                        fallback_exc
-                    )
-
-                    print(
-                        "❌ Gemini fallback also failed:"
-                    )
-                    print(
-                        fallback_error
-                    )
-
-                    return {
-                        "status": "error",
-                        "message": (
-                            "AI provider request failed."
-                        ),
-                        "text": (
-                            f"Groq failed: {error_text}\n"
-                            f"Gemini fallback failed: "
-                            f"{fallback_error}"
-                        ),
-                        "agent": "genesys",
-                        "provider": active_provider_name,
-                        "model": (
-                            GEMINI_MODEL
-                            if active_provider_name == "gemini"
-                            else MODEL
-                        ),
-                        "steps": steps_used,
-                        "modifiedFiles": modified_files,
-                        "buildAttempted": build_attempted,
-                        "buildPassed": build_passed,
-                        "previewStarted": preview_started,
-                        "browserVerified": browser_verified,
-                        "errorType": "ai_request",
-                    }
-
-            else:
-
-                print(
-                    "⚠️ Gemini failed. Falling back to Groq..."
-                )
-
-                try:
-                    fallback_provider = GroqProvider(
-                        model=MODEL,
-                    )
-
-                    if time.monotonic() >= agent_deadline:
-                        return _agent_timeout_result()
-
-                    response = fallback_provider.generate(
-                        messages,
-                        step_tools,
-                    )
-
-                    provider = fallback_provider
-                    active_provider_name = "groq"
-
-                    print(
-                        "✅ Groq fallback succeeded; using Groq for the rest of this run."
-                    )
-
-                except Exception as fallback_exc:
-                    fallback_error = str(fallback_exc)
-
-                    print(
-                        "❌ Groq fallback also failed:"
-                    )
-                    print(fallback_error)
-
-                    return {
-                        "status": "error",
-                        "message": (
-                            "AI provider request failed."
-                        ),
-                        "text": (
-                            f"Gemini failed: {error_text}\n"
-                            f"Groq fallback failed: {fallback_error}"
-                        ),
-                        "agent": "genesys",
-                        "provider": active_provider_name,
-                        "model": (
-                            GEMINI_MODEL
-                            if active_provider_name == "gemini"
-                            else MODEL
-                        ),
-                        "steps": steps_used,
-                        "modifiedFiles": modified_files,
-                        "buildAttempted": build_attempted,
-                        "buildPassed": build_passed,
-                        "previewStarted": preview_started,
-                        "browserVerified": browser_verified,
-                        "errorType": "ai_request",
-                    }
+            fallback_name = FALLBACK_PROVIDER if active_provider_name != FALLBACK_PROVIDER else settings.provider_name
+            try:
+                if time.monotonic() >= agent_deadline:
+                    return _agent_timeout_result()
+                fallback_provider = provider_for(fallback_name)
+                fallback_messages = []
+                for message in messages:
+                    if message.get('role') == 'tool':
+                        fallback_messages.append({'role': 'system', 'content':
+                            'Previous tool result (already executed):\n' + str(message.get('content') or '')})
+                    else:
+                        cleaned = {'role': message.get('role'), 'content': message.get('content') or ''}
+                        fallback_messages.append(cleaned)
+                fallback_messages.append({'role': 'system', 'content':
+                    'Continue from existing source context and saved progress. Do not restart inspection. '
+                    f'Already modified files: {modified_files}. Finish missing edits, then stop for verification.'})
+                response = fallback_provider.generate(fallback_messages, step_tools)
+                messages = fallback_messages
+                provider = fallback_provider
+                active_provider_name = fallback_name
+                print(f'Provider fallback succeeded: {fallback_name}')
+            except Exception:
+                traceback.print_exc()
+                return {'status': 'error', 'message': 'AI providers are temporarily unavailable. Your project files are preserved; please retry.',
+                    'agent': 'genesys', 'provider': active_provider_name, 'model': provider.model,
+                    'steps': steps_used, 'modifiedFiles': modified_files,
+                    'buildAttempted': build_attempted, 'buildPassed': build_passed,
+                    'previewStarted': preview_started, 'browserVerified': browser_verified,
+                    'errorType': 'ai_request'}
 
         # ----------------------------------------------------
         if time.monotonic() >= agent_deadline:
@@ -3815,9 +3648,7 @@ def run_agent(
                     "agent": "genesys",
                     "provider": active_provider_name,
                     "model": (
-                        GEMINI_MODEL
-                        if active_provider_name == "gemini"
-                        else MODEL
+                        provider.model
                     ),
                     "steps": steps_used,
                     "modifiedFiles": modified_files,
@@ -4158,9 +3989,7 @@ def run_agent(
             "agent": "genesys",
             "provider": active_provider_name,
             "model": (
-                GEMINI_MODEL
-                if active_provider_name == "gemini"
-                else MODEL
+                provider.model
             ),
             "steps": steps_used,
             "modifiedFiles": modified_files,
@@ -4192,9 +4021,7 @@ def run_agent(
         "agent": "genesys",
         "provider": active_provider_name,
         "model": (
-            GEMINI_MODEL
-            if active_provider_name == "gemini"
-            else MODEL
+            provider.model
         ),
         "steps": steps_used,
         "modifiedFiles": modified_files,

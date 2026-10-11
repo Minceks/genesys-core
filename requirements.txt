@@ -8,3 +8,4 @@ groq
 daytona
 playwright
 google-genai
+openai>=1.66,<3
