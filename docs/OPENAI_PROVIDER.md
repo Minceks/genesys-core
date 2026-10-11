@@ -7,3 +7,5 @@ Calls have a 60-second timeout and no SDK retries; the orchestrator handles boun
 Source context and current phase tool restrictions are preserved on provider changes.
 Keys must never use VITE prefixes. This adds one provider to the existing autonomous job flow;
 parallel builders are a separate feature. No live OpenAI generation check has been performed.
+
+With OpenAI primary and Gemini fallback, Groq is the final provider. Provider failures move forward in this order during a build rather than switching back to an earlier provider.

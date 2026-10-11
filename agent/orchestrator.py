@@ -369,13 +369,14 @@ def _answer_chat_question(
                 }
             )
     chat_messages.append({"role": "user", "content": prompt})
-    try:
-        response = provider.generate(chat_messages, [])
-    except Exception:
-        response = provider_for(FALLBACK_PROVIDER).generate(
-            chat_messages,
-            [],
-        )
+    order = list(dict.fromkeys([settings.provider_name, FALLBACK_PROVIDER, 'groq']))
+    for name in order:
+        try:
+            response = provider_for(name).generate(chat_messages, [])
+            break
+        except Exception:
+            if name == order[-1]:
+                raise
     answer = (response.text or "").strip()
     if not answer:
         answer = "I couldn't generate an answer just now. Please try again."
@@ -3559,32 +3560,37 @@ def run_agent(
             traceback.print_exc()
 
             # ------------------------------------------------
-            # PROVIDER FALLBACK: GROQ <-> GEMINI
+            # ORDERED PROVIDER FALLBACK
             # ------------------------------------------------
 
-            fallback_name = FALLBACK_PROVIDER if active_provider_name != FALLBACK_PROVIDER else settings.provider_name
-            try:
-                if time.monotonic() >= agent_deadline:
-                    return _agent_timeout_result()
-                fallback_provider = provider_for(fallback_name)
-                fallback_messages = []
-                for message in messages:
-                    if message.get('role') == 'tool':
-                        fallback_messages.append({'role': 'system', 'content':
-                            'Previous tool result (already executed):\n' + str(message.get('content') or '')})
-                    else:
-                        cleaned = {'role': message.get('role'), 'content': message.get('content') or ''}
-                        fallback_messages.append(cleaned)
-                fallback_messages.append({'role': 'system', 'content':
-                    'Continue from existing source context and saved progress. Do not restart inspection. '
-                    f'Already modified files: {modified_files}. Finish missing edits, then stop for verification.'})
-                response = fallback_provider.generate(fallback_messages, step_tools)
-                messages = fallback_messages
-                provider = fallback_provider
-                active_provider_name = fallback_name
-                print(f'Provider fallback succeeded: {fallback_name}')
-            except Exception:
-                traceback.print_exc()
+            order = list(dict.fromkeys([settings.provider_name, FALLBACK_PROVIDER, 'groq']))
+            remaining = order[order.index(active_provider_name) + 1:]
+            for fallback_name in remaining:
+                try:
+                    if time.monotonic() >= agent_deadline:
+                        return _agent_timeout_result()
+                    fallback_provider = provider_for(fallback_name)
+                    fallback_messages = []
+                    for message in messages:
+                        if message.get('role') == 'tool':
+                            fallback_messages.append({'role': 'system', 'content':
+                                'Previous tool result (already executed):\n' + str(message.get('content') or '')})
+                        else:
+                            cleaned = {'role': message.get('role'), 'content': message.get('content') or ''}
+                            fallback_messages.append(cleaned)
+                    fallback_messages.append({'role': 'system', 'content':
+                        'Continue from existing source context and saved progress. Do not restart inspection. '
+                        f'Already modified files: {modified_files}. Finish missing edits, then stop for verification.'})
+                    response = fallback_provider.generate(fallback_messages, step_tools)
+                    messages = fallback_messages
+                    provider = fallback_provider
+                    active_provider_name = fallback_name
+                    print(f'Provider fallback succeeded: {fallback_name}')
+                    break
+                except Exception:
+                    traceback.print_exc()
+                    print(f'Provider fallback failed: {fallback_name}')
+            else:
                 return {'status': 'error', 'message': 'AI providers are temporarily unavailable. Your project files are preserved; please retry.',
                     'agent': 'genesys', 'provider': active_provider_name, 'model': provider.model,
                     'steps': steps_used, 'modifiedFiles': modified_files,
