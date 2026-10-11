@@ -61,6 +61,8 @@ def prepare_design(workspace, prompt):
         brief = dict(previous)
         brief['latestRequest'] = prompt
         brief['designPolicy'] = 'Preserve the existing direction; apply explicit user changes only.'
+        if re.search(r'\b(redesign|modernize|restyle)\b', prompt, re.I):
+            brief['designPolicy'] = 'Refresh the visual direction as requested while preserving working behavior.'
     else:
         selected = selected or 'website'
         subtype = ('2.5D' if re.search(r'2[.]5d', prompt, re.I) else '3D' if re.search(r'\b3d\b', prompt, re.I) else '2D') if selected == 'game' else selected
@@ -71,6 +73,15 @@ def prepare_design(workspace, prompt):
         if previous:
             brief['purposeChangedFrom'] = previous['productType']
             brief['designPolicy'] += ' The product purpose changed; replace unsuitable inherited theme and layout.'
+    if not brief.get('designResearch') or re.search(r'\b(redesign|modernize|restyle)\b', prompt, re.I):
+        from .design_research import research_design
+        brief['designResearch'] = research_design(prompt, brief['productType'])
+    if brief['designResearch']['family'] == 'gaming-editorial':
+        brief['visual'] = ('Modern gaming editorial: large featured artwork, bold condensed headings, '
+            'cinematic crops, clear rankings and image-led asymmetric sections. Consider a dark '
+            'neutral palette and restrained bright accent unless the user specifies another style. '
+            'Keep administration separate from the public showcase; avoid generic beige CRUD cards.')
+        brief['layout'] = 'Featured game hero, curated ranked discoveries, genre/platform browsing and focused game detail.'
     brief['qualityStandard'] = {
         'composition': 'Distinctive focal point, purposeful section rhythm and product-appropriate density.',
         'typography': 'Coherent type hierarchy, readable body copy and deliberate line lengths.',
