@@ -2443,10 +2443,17 @@ def run_agent(
                 'Parallel drafting did not complete. Inspect current files and finish the original request. '
                 'Preserve any completed changes. Do not duplicate implemented features.'})
 
-    if verification_retry and workspace.build_fingerprint() == verification_retry:
-        build_attempted = True
-        build_passed = True
-        report_progress('Retrying verification of the saved build')
+    if verification_retry:
+        if workspace.build_fingerprint() == verification_retry:
+            build_attempted = True
+            build_passed = True
+            report_progress('Retrying verification of the saved build')
+        else:
+            # Changed files invalidate build proof, but do not require another
+            # implementation pass. Rebuild first and repair only actual failures.
+            changed_since_build = True
+            implementation_ready = True
+            report_progress('Rebuilding saved changes before verification')
 
     for step in range(1, TOTAL_MAX_STEPS + 1):
 

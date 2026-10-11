@@ -93,7 +93,17 @@ def bounded_messages(messages, tools, limit=None):
             break
         if len(ids) > per_item:
             item = dict(item, content=enc.decode(ids[:per_item-40]) + '\n[Context shortened. Read the current file before changing omitted source.]')
-        kept[index] = item
+        # Count the serialized candidate, including JSON escaping and envelope
+        # overhead. Raw content tokens alone can substantially undercount code.
+        candidate = dict(item)
+        while count([kept[key] for key in sorted(kept)] + [candidate]) > allowance:
+            candidate_ids = enc.encode(candidate['content'], disallowed_special=())
+            if len(candidate_ids) < 128:
+                candidate = None
+                break
+            candidate = dict(candidate, content=enc.decode(candidate_ids[:max(64, len(candidate_ids) * 3 // 4)]))
+        if candidate is not None:
+            kept[index] = candidate
     result = [kept[index] for index in sorted(kept)]
     if count(result) > allowance:
         raise ValueError('Unable to fit context into the configured input budget.')

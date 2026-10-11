@@ -584,8 +584,11 @@ def start_agent_job():
         previous_result = (previous or {}).get('result') or {}
         verification_retry = None
         if (previous and previous.get('state') == 'failed' and previous.get('prompt') == prompt
-            and previous_result.get('buildPassed') and previous_result.get('buildFingerprint')):
-            verification_retry = previous_result['buildFingerprint']
+            and (previous_result.get('buildPassed')
+                 or previous.get('verificationRetry')
+                 or (previous_result.get('errorType') == 'ai_request'
+                     and previous_result.get('modifiedFiles')))):
+            verification_retry = previous_result.get('buildFingerprint') or 'rebuild-saved-project'
         job_id = jobs.submit(project_id, request_id_context.get(),
             prompt=prompt, history=history, reservation=reservation,
             verification_retry=verification_retry,
