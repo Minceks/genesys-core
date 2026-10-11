@@ -954,6 +954,8 @@ def _validate_change_plan(
 def _validate_execution(
     change_plan: dict[str, Any],
     modified_files: list[str],
+    *,
+    allow_no_changes: bool = False,
 ) -> dict[str, Any]:
     """
     Validate that the agent's actual file changes stayed within
@@ -1004,7 +1006,7 @@ def _validate_execution(
             )
         )
 
-    if not modified:
+    if not modified and not allow_no_changes:
         issues.append(
             "No project files were modified."
         )
@@ -2497,6 +2499,7 @@ def run_agent(
             execution_validation = _validate_execution(
                 change_plan,
                 modified_files,
+                allow_no_changes=bool(verification_retry or recovery_context),
             )
 
             print("🛡️ Execution validation:")
