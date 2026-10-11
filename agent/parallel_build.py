@@ -1,6 +1,7 @@
 """Parallel drafts for clean new projects; all writes remain coordinator-owned."""
 import json
 import logging
+import re
 import time
 from concurrent.futures import ThreadPoolExecutor
 from contextvars import copy_context
@@ -53,12 +54,25 @@ def draft_project(prompt, source, provider_for, deadline):
     with ThreadPoolExecutor(max_workers=2, thread_name_prefix='genesys-builder') as pool:
         ui = pool.submit(copy_context().run, worker, 'openai', ['src/App.jsx','src/styles.css'],
             'Build the responsive UI. Import logic from ./projectLogic and styles from ./styles.css. '
+            'Use a static named import of the shared hook and call it unconditionally at component top level. '
+            'Never duplicate logic with fallback hooks, stubs or no-op actions. Never dynamically swap hooks. '
+            'Render every requested action result, including quiz questions, answers and scores when applicable. '
+            'Use in-page status and confirmation UI; never window alert, confirm or prompt. '
             'Use the existing design guidance. For photography portfolios include real sample photo URLs '
             'with alt text, responsive dimensions and clear sample labeling.')
         logic = pool.submit(copy_context().run, worker, 'gemini', ['src/projectLogic.js'],
             'Implement the exact shared logic interface, state, validation and requested actions. '
             'Preserve reload persistence using the supplied usePersistentState hook. No JSX or CSS.')
         files = {**ui.result(), **logic.result()}
+    app = files['src/App.jsx']
+    if 'import(' in app and 'projectLogic' in app:
+        raise ValueError('UI must statically connect the shared logic module')
+    if any(name in app for name in ('stubUseProjectLogic', 'stubUse', 'window.alert(', 'window.confirm(', 'window.prompt(')):
+        raise ValueError('UI draft contains fallback logic or blocked browser dialogs')
+    if re.search(r'\b(?:alert|confirm|prompt)\s*\(', app):
+        raise ValueError('UI must use visible in-page feedback and confirmation')
+    if re.search(r'\bfunction\s+useProjectLogic\b|\b(?:const|let)\s+useProjectLogic\s*=', app):
+        raise ValueError('UI must use the shared hook rather than duplicate it')
     if time.monotonic() >= deadline:
         return None
     logger.info('parallel_drafts_ready duration_seconds=%.1f files=%d', time.monotonic()-started, len(files))
