@@ -4,6 +4,7 @@ from types import SimpleNamespace
 import pytest
 
 from agent.functional_verification import target, verify_functions
+from agent import functional_verification
 
 
 class Locator:
@@ -94,3 +95,57 @@ def test_duplicate_requirement_ids_cannot_claim_complete_coverage():
     result = verify_functions(page, 'Build a counter with reset', provider)
     assert result['unverifiedCore']
     assert page.mutations == 0
+
+
+def test_diagnosis_cannot_clear_an_unexecuted_check(monkeypatch):
+    class TestPage(Page):
+        def unroute(self, *args):
+            pass
+
+        def get_by_role(self, *args, **kwargs):
+            return SimpleNamespace(count=lambda: 0)
+
+    class CheckLocator:
+        first = None
+
+        def count(self):
+            return 1
+
+        def nth(self, index):
+            return self
+
+        def is_visible(self):
+            return True
+
+    def locate(page, spec):
+        if spec['name'] == 'Delete':
+            raise ValueError('Invalid verification plan: ambiguous target')
+        locator = CheckLocator()
+        locator.first = locator
+        return locator
+
+    plan = {'requirements': [{'id': 'games', 'name': 'Manage games'}],
+            'checks': [
+                {'name': 'Show games', 'covers': ['games'], 'steps': [
+                    {'action': 'visible', 'target': {'by': 'text', 'name': 'Games'}}]},
+                {'name': 'Delete game', 'covers': ['games'], 'steps': [
+                    {'action': 'click', 'target': {'by': 'role', 'role': 'button', 'name': 'Delete'}},
+                    {'action': 'absent', 'target': {'by': 'text', 'name': 'Game'}}]}]}
+
+    class DiagnosingProvider(Provider):
+        def generate(self, *args):
+            self.calls += 1
+            value = plan if self.calls == 1 else {
+                'kind': 'application_failure', 'evidence': 'Speculative source diagnosis',
+                'requiredUnverified': []}
+            return SimpleNamespace(text=json.dumps(value))
+
+    monkeypatch.setattr(functional_verification, 'target', locate)
+    monkeypatch.setattr('playwright.sync_api.expect', lambda locator:
+                        SimpleNamespace(to_be_attached=lambda **kwargs: None))
+    result = verify_functions(TestPage(), 'Show and delete games', DiagnosingProvider(plan), attempt=1)
+    assert result['testedInteractions'] == ['Show games']
+    assert result['unverifiedCore']
+    assert result['coverage']['passedIds'] == []
+    assert result['coverage']['unverified'] == ['Manage games']
+    assert not result['issues']  # Planner failure must not trigger app edits.

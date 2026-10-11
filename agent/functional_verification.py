@@ -305,6 +305,11 @@ def verify_functions(page, prompt, provider, attempt=0, feedback="", sources=Non
     if not checks:
         core.append('No executable requested-function checks were generated.')
     page.unroute('**/*', guard)
+    # A requirement shared by several checks is only verified when all its
+    # planned checks finished. A display assertion must not mask a failed
+    # delete/edit check using the same coverage ID.
+    for pending in checks[len(passed):]:
+        covered.difference_update(pending['covers'])
     missing = [name for key, name in requirement_names.items() if key not in covered]
     core.extend('Not verified: ' + name for name in missing)
     logging.getLogger(__name__).info('functional_verification_result %s', json.dumps({'passed':passed, 'issues':issues, 'unverifiedCore':core})[:6000])
@@ -338,11 +343,9 @@ def verify_functions(page, prompt, provider, attempt=0, feedback="", sources=Non
             verdict = json.loads(re.sub(r'^```(?:json)?\s*|\s*```$', '', diagnosis))
         except Exception:
             verdict = {}
-        required = verdict.get('requiredUnverified')
-        if isinstance(required, list) and all(isinstance(item, str) for item in required):
-            # Coverage and execution failures are enforced independently of a
-            # planner's speculative claims about external infrastructure.
-            core = [item for item in core if item.startswith(('Not verified:', 'Verification execution failed:')) or item in required]
+        # Diagnosis can classify a failure, but cannot erase executed failures
+        # or incomplete coverage. Speculative requirements were filtered before
+        # execution; remaining core entries are evidence of unfinished checks.
         if verdict.get('kind') != 'application_failure' or not verdict.get('evidence'):
             core.extend('Verification execution failed: ' + issue for issue in issues)
             issues = []
