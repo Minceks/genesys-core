@@ -367,16 +367,36 @@ function BuildPage({ projectId, projectName, onProjects }: { projectId: string; 
     try { sessionStorage.setItem(`genesys_preview_${projectId}`, previewUrl); } catch { /* Storage is optional. */ }
   }, [previewCode, previewUrl]);
 
+  const automaticReconnect = useRef(false);
+  useEffect(() => {
+    automaticReconnect.current = false;
+  }, [projectId, previewUrl]);
+  useEffect(() => {
+    if (!previewUrl || previewOnline || loading || previewRefreshing || automaticReconnect.current) return;
+    const timer = window.setTimeout(() => {
+      automaticReconnect.current = true;
+      void reloadPreview();
+    }, 20000);
+    return () => window.clearTimeout(timer);
+  }, [previewUrl, previewOnline, loading, previewRefreshing]);
+
   async function reloadPreview() {
     if (previewRefreshing || loading) return;
     if (!previewUrl) { setPreviewKey(value => value + 1); return; }
     setPreviewRefreshing(true);
     setPreviewError("");
     try {
-      const response = await fetch(`${CLOUD_AGENT_URL}/preview`, {
+      let response = await fetch(`${CLOUD_AGENT_URL}/preview`, {
         method: "POST", headers: buildCloudAgentHeaders(true), signal: AbortSignal.timeout(25000),
         body: JSON.stringify({ projectId }),
       });
+      if (response.status === 401 && supabase) {
+        const refreshed = await supabase.auth.refreshSession();
+        if (refreshed.data.session) response = await fetch(`${CLOUD_AGENT_URL}/preview`, {
+          method: "POST", headers: { ...buildCloudAgentHeaders(true), Authorization: `Bearer ${refreshed.data.session.access_token}` },
+          body: JSON.stringify({ projectId }), signal: AbortSignal.timeout(25000),
+        });
+      }
       const data = await response.json();
       if (response.status === 401) throw new Error("Your session expired. Sign in again to reconnect. Your project is saved.");
       if (!response.ok || data.status !== "success" || !data.url) throw new Error(data.message || "Preview could not reconnect.");
