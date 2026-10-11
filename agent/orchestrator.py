@@ -2901,7 +2901,7 @@ def run_agent(
                         "status": "error",
                         "message": (
                             "Build failed after maximum "
-                            "self-healing attempts."
+                            "repair attempts. Your files are preserved. Retry to continue, or report the problem."
                         ),
                         "text": (
                             last_answer
@@ -3080,7 +3080,7 @@ def run_agent(
                         "status": "error",
                         "message": (
                             "Application preview failed "
-                            "after maximum self-healing "
+                            "after automatic repair "
                             "attempts."
                         ),
                         "text": (
@@ -3404,7 +3404,7 @@ def run_agent(
                         "status": "error",
                         "message": (
                             "Browser verification failed "
-                            "after maximum self-healing "
+                            "after automatic repair "
                             "attempts."
                         ),
                         "text": (

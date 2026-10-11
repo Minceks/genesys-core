@@ -69,6 +69,25 @@ def create_app():
         host = request.host.split(':', 1)[0].lower()
         suffix = '.' + domain
         ticket = host[:-len(suffix)] if host.endswith(suffix) else ''
+        if re.fullmatch(r'app-[0-9a-f]{32}', ticket):
+            backend = os.getenv('GENESYS_PUBLISHED_BACKEND_URL', '').rstrip('/')
+            if not backend.startswith('https://'):
+                return web.Response(status=503, text='Published hosting is not configured.')
+            publication = ticket[4:]
+            prefix = '/apps/' + publication
+            path = request.rel_url.raw_path
+            if not path.startswith(prefix + '/'):
+                path = prefix + path
+            if request.method not in {'GET', 'HEAD'}:
+                return web.Response(status=405)
+            try:
+                async with app['client'].request(request.method, backend + path, allow_redirects=False) as upstream:
+                    result_headers = {k:v for k,v in upstream.headers.items() if k.lower() not in HOP | {'set-cookie','content-security-policy','access-control-allow-origin'}}
+                    result_headers['Content-Security-Policy'] = 'sandbox allow-scripts allow-same-origin allow-forms allow-popups allow-downloads'
+                    result_headers['Referrer-Policy'] = 'no-referrer'
+                    return web.Response(status=upstream.status, body=await upstream.read(), headers=result_headers)
+            except (aiohttp.ClientError, asyncio.TimeoutError):
+                return web.Response(status=503, text='Published app temporarily unavailable.')
         entry = entries.get(ticket)
         if not entry or entry['expires'] <= time.monotonic():
             return web.Response(status=410, content_type='text/html', text='<h1>Preview unavailable</h1><p>Return to GeneSys and choose Reconnect to request a fresh preview.</p>', headers={'Cache-Control': 'no-store'})

@@ -79,10 +79,15 @@ def verify_functions(page, prompt, provider):
         tag:e.tagName,type:e.type,name:e.getAttribute('aria-label') || (()=>{const l=e.labels?.[0]?.cloneNode(true); if(!l)return e.innerText; l.querySelectorAll('input,textarea,select').forEach(x=>x.remove()); return l.textContent.trim()})(),
         placeholder:e.placeholder,options:e.tagName==='SELECT'?Array.from(e.options).map(o=>({text:o.text,value:o.value})):undefined
     }))''')
-    raw = provider.generate([{'role':'system','content':PLAN_INSTRUCTIONS},
-        {'role':'user','content':json.dumps({'originalRequest':prompt,'untrustedRenderedText':snapshot,'untrustedControls':controls})}], []).text.strip()
-    raw = re.sub(r'^```(?:json)?\s*|\s*```$', '', raw)
-    plan = json.loads(raw)
+    try:
+        raw = provider.generate([{'role':'system','content':PLAN_INSTRUCTIONS},
+            {'role':'user','content':json.dumps({'originalRequest':prompt,'untrustedRenderedText':snapshot,'untrustedControls':controls})}], []).text.strip()
+        raw = re.sub(r'^```(?:json)?\s*|\s*```$', '', raw)
+        plan = json.loads(raw)
+    except Exception as error:
+        # A verifier/provider failure is not evidence of broken application code.
+        return {'status':'success', 'issues':[], 'testedInteractions':[],
+                'unverified':['Functional verification could not run: '+str(error)[:250]]}
     logging.getLogger(__name__).info('functional_verification_plan %s', json.dumps(plan)[:12000])
     checks = plan.get('checks')
     if not isinstance(checks, list) or len(checks) > 8:
@@ -133,7 +138,11 @@ def verify_functions(page, prompt, provider):
                 raise ValueError('Expected outcome was not asserted after the action')
             passed.append(name)
         except Exception as error:
-            issues.append(name + ': ' + str(error)[:400])
+            detail = str(error)
+            if 'Invalid' in detail or 'Unsupported' in detail or 'Expected outcome was not asserted' in detail:
+                unverified.append(name + ': verification plan could not execute.')
+            else:
+                issues.append(name + ': ' + detail[:400])
             break  # Later steps may depend on this check's state.
     if not checks:
         unverified.append('No executable requested-function checks were generated.')

@@ -685,7 +685,9 @@ def publish_project():
         return jsonify(status='error', message='Wait for the current build to finish.'), 409
     try:
         publication = publish(get_workspace(project_id), project_id, checkpoint, commit)
-        return jsonify(status='success', url=request.url_root.rstrip('/') + '/apps/' + publication + '/')
+        domain = os.getenv('GENESYS_PREVIEW_DOMAIN', '').strip()
+        url = 'https://app-' + publication + '.' + domain + '/' if domain else request.url_root.rstrip('/') + '/apps/' + publication + '/'
+        return jsonify(status='success', url=url, publicationId=publication)
     except ValueError as error:
         return jsonify(status='error', message=str(error)), 400
     except Exception:
@@ -702,12 +704,29 @@ def published_app(publication, filename='index.html'):
     if not re.fullmatch(r'[0-9a-f]{32}', publication) or any(part.startswith('.') for part in Path(filename).parts):
         return '', 404
     directory = root() / publication
-    if not (directory / 'index.html').is_file():
+    if (directory / '.unpublished').exists() or not (directory / 'index.html').is_file():
         return '', 404
     response = send_from_directory(directory, filename)
     response.headers['X-Content-Type-Options'] = 'nosniff'
     response.headers['Content-Security-Policy'] = "sandbox allow-scripts allow-forms allow-popups allow-downloads"
     return response
+
+
+@app.delete('/publish')
+def unpublish_project():
+    import json
+    import re
+    from agent.publishing import root
+    data = request.get_json(silent=True) or {}
+    publication = str(data.get('publicationId') or '')
+    if not re.fullmatch(r'[0-9a-f]{32}', publication):
+        return jsonify(status='error', message='Invalid publication.'), 400
+    directory = root() / publication
+    proof = directory / '.publication.json'
+    if not proof.is_file() or json.loads(proof.read_text())['projectId'] != get_project_id():
+        return jsonify(status='error', message='Publication not found.'), 404
+    (directory / '.unpublished').touch()
+    return jsonify(status='success')
 
 
 @app.route(
