@@ -1,6 +1,6 @@
 from __future__ import annotations
 from .progress import report_progress
-from .model_context import text_safe
+from .model_context import text_safe, ModelBudgetExceeded
 
 import json
 import os
@@ -3282,6 +3282,9 @@ def run_agent(
                     )
                     report_progress('Checking requested content and interactions')
                     content_result = get_browser(project_id).content_checks(prompt)
+                    interaction_console = get_browser(project_id).get_console()
+                    if interaction_console.get('hasRuntimeErrors'):
+                        raise RuntimeError('Runtime errors occurred during interaction checks: ' + _tool_result_text(interaction_console))
                     if quality['status'] != 'success' or content_result['status'] != 'success':
                         raise RuntimeError('Application verification failed. Keep the requested behavior and theme and repair all reported layout, content and interaction issues in one pass:\n' + json.dumps({'visualQuality': quality, 'contentInteractions': content_result}, ensure_ascii=False))
 
@@ -3598,6 +3601,12 @@ def run_agent(
         except Exception as exc:
 
             error_text = str(exc)
+            if isinstance(exc, ModelBudgetExceeded):
+                return {'status': 'error', 'message': error_text, 'errorType': 'model_budget',
+                        'agent': 'genesys', 'modifiedFiles': modified_files,
+                        'buildAttempted': build_attempted, 'buildPassed': build_passed,
+                        'browserVerified': False}
+
 
             print(
                 "❌ AI REQUEST FAILED:"

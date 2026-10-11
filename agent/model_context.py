@@ -2,6 +2,8 @@
 import json
 import os
 import re
+import time
+from .beta_storage import connection
 from functools import lru_cache
 
 _BINARY = re.compile(r"data:image/[^;\s]+;base64,[A-Za-z0-9+/=]+|(?<![A-Za-z0-9])[0-9a-fA-F]{2048,}(?![A-Za-z0-9])")
@@ -25,6 +27,24 @@ def encoding():
     return tiktoken.get_encoding('o200k_base')
 
 
+class ModelBudgetExceeded(RuntimeError):
+    pass
+
+
+def reserve_model_budget(tokens):
+    limit = max(10000, int(os.getenv('GENESYS_DAILY_MODEL_TOKEN_BUDGET', '2000000')))
+    day = int(time.time() // 86400)
+    with connection() as db:
+        db.execute('BEGIN IMMEDIATE')
+        db.execute('CREATE TABLE IF NOT EXISTS model_allowance(day INTEGER PRIMARY KEY, reserved INTEGER NOT NULL)')
+        db.execute('DELETE FROM model_allowance WHERE day < ?', (day-7,))
+        row = db.execute('SELECT reserved FROM model_allowance WHERE day=?', (day,)).fetchone()
+        used = row[0] if row else 0
+        if used + tokens > limit:
+            raise ModelBudgetExceeded('Daily model allowance reached. Saved project files are preserved; please return after the UTC daily reset.')
+        db.execute('INSERT INTO model_allowance VALUES(?,?) ON CONFLICT(day) DO UPDATE SET reserved=excluded.reserved', (day, used+tokens))
+
+
 def bounded_messages(messages, tools, limit=None):
     # Token estimates include schemas and envelope overhead. Provider tokenizers
     # differ; retain a conservative margin rather than claiming billing accuracy.
@@ -39,6 +59,7 @@ def bounded_messages(messages, tools, limit=None):
     if allowance < 512:
         raise ValueError('Tool schemas exceed the configured model input budget.')
     if count(safe) <= allowance:
+        reserve_model_budget(2 * (count(safe) + count(tools) + 512 + 24000))
         return safe
     # Convert executed tool history to text to avoid orphaned function-call IDs.
     flat = []
@@ -71,4 +92,5 @@ def bounded_messages(messages, tools, limit=None):
     result = [kept[index] for index in sorted(kept)]
     if count(result) > allowance:
         raise ValueError('Unable to fit context into the configured input budget.')
+    reserve_model_budget(2 * (count(result) + count(tools) + 512 + 24000))
     return result

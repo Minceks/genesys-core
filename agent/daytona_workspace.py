@@ -1383,14 +1383,21 @@ for name, contents in files.items():
             result.result or ""
         )
 
+        # Compiler warnings that predict a runtime throw must enter repair,
+        # even when Vite exits zero. Ordinary optimization warnings remain warnings.
+        fatal_warning = "This assignment will throw because" in output
+        passed = result.exit_code == 0 and not fatal_warning
+        if fatal_warning:
+            output += "\nVerification blocked: repair the assignment to a constant before publishing.\n"
+
         return {
             "status": (
                 "success"
-                if result.exit_code == 0
+                if passed
                 else "error"
             ),
             "success": (
-                result.exit_code == 0
+                passed
             ),
             "exitCode": result.exit_code,
             "output": output[-30000:],

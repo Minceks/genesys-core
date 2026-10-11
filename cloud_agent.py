@@ -643,6 +643,12 @@ def beta_feedback():
     message = str(data.get("message") or "").strip()
     if not message or len(message) > 2000:
         return jsonify(status="error", message="Describe the problem in 1-2000 characters."), 400
+    from agent.beta_storage import connection
+    with connection() as db:
+        db.execute('CREATE TABLE IF NOT EXISTS beta_feedback(id TEXT PRIMARY KEY, user_id TEXT, project_id TEXT, request_id TEXT, stage TEXT, message TEXT, created REAL)')
+        db.execute('INSERT INTO beta_feedback VALUES(?,?,?,?,?,?,?)',
+            (request_id_context.get(), getattr(g, 'user', {}).get('id'), get_project_id(),
+             str(data.get('requestId') or '')[:64], str(data.get('stage') or '')[:100], message, time.time()))
     logger.warning("beta_feedback project_id=%s related_request_id=%s stage=%s message=%s",
         str(data.get("projectId") or "")[:128], str(data.get("requestId") or "")[:64],
         str(data.get("stage") or "")[:100], message.replace("\n", " ").replace("\r", " "))

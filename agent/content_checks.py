@@ -65,4 +65,20 @@ def verify_content(page, prompt):
             # Remove any synthetic data from this isolated browser, not users' browsers.
             page.evaluate("Object.keys(localStorage).filter(key => key.startsWith('user-app:')).forEach(key => localStorage.removeItem(key))")
             page.reload(wait_until='networkidle')
+    if re.search(r'\b(game|zombie|shooter|platformer)\b', prompt, re.I):
+        start = page.get_by_role('button', name=re.compile(r'^(play|start|start game|play game|start / restart)$', re.I))
+        if start.count() == 1 and start.is_visible():
+            start.click(timeout=3000)
+            page.wait_for_timeout(250)
+            tested.append('game start')
+        canvas = page.locator('canvas:visible')
+        if canvas.count() == 1:
+            canvas.click(timeout=3000)
+            page.wait_for_timeout(250)
+            tested.append('game canvas input')
+        restart = page.get_by_role('button', name=re.compile(r'^(restart|restart game|start / restart)$', re.I))
+        if restart.count() == 1 and restart.is_visible():
+            restart.click(timeout=3000)
+            page.wait_for_timeout(250)
+            tested.append('game restart')
     return {'status': 'error' if issues else 'success', 'issues': issues, 'testedInteractions': tested}
