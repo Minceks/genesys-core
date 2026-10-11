@@ -87,6 +87,12 @@ split large new applications into components instead of emitting the entire proj
 Never leave placeholder code to fit a response budget.
 Build the requested interactions with meaningful loading, empty, error and success states.
 Do not use dead buttons, unrelated platform navigation or fake completed integrations.
+Never implement Save as a no-op; render an editable form and persist its actual values.
+Keep visible filter inputs synchronized with applied/reset state. Undo must remain
+reachable after the deleted item and its detail view disappear. Give confirmation
+actions distinct accessible names and use labeled dialogs/alertdialogs. Keep cards
+as semantic articles/list items with real action buttons, not buttons containing buttons.
+Use useEffect for timers and state side effects; useMemo only computes derived values.
 For ordinary user-created app data, persist changes across reloads. Import the provided
 usePersistentState hook from src/usePersistentState.js when present, use a stable descriptive
 storage key, validate loaded data shape when needed and show storageError to the user.
