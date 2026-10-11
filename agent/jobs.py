@@ -15,6 +15,18 @@ from .logging_config import request_id_context
 
 logger = logging.getLogger(__name__)
 
+
+def saved_build_retry(previous, prompt):
+    """Resume a failed identical request; new requests retain implementation flow."""
+    if not previous or previous.get('state') != 'failed' or previous.get('prompt') != prompt:
+        return None
+    result = previous.get('result') or {}
+    if (result.get('buildPassed') or previous.get('verificationRetry')
+            or (result.get('errorType') == 'ai_request' and result.get('modifiedFiles'))):
+        return result.get('buildFingerprint') or 'rebuild-saved-project'
+    return None
+
+
 class JobManager:
     def __init__(self, workers=2, execute=None):
         self.workers = workers

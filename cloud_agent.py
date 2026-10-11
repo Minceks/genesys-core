@@ -17,7 +17,7 @@ from flask_cors import CORS
 from agent.logging_config import configure_logging, request_id_context
 from agent.config import load_settings
 from agent.orchestrator import run_agent, classify_request_type
-from agent.jobs import JobManager
+from agent.jobs import JobManager, saved_build_retry
 from agent import user_auth
 from agent.preview_proxy import publish_preview
 from agent.verified_preview import verified_preview, restore_verified
@@ -581,14 +581,7 @@ def start_agent_job():
         return limit_response(error)
     try:
         previous = jobs.latest(project_id)
-        previous_result = (previous or {}).get('result') or {}
-        verification_retry = None
-        if (previous and previous.get('state') == 'failed' and previous.get('prompt') == prompt
-            and (previous_result.get('buildPassed')
-                 or previous.get('verificationRetry')
-                 or (previous_result.get('errorType') == 'ai_request'
-                     and previous_result.get('modifiedFiles')))):
-            verification_retry = previous_result.get('buildFingerprint') or 'rebuild-saved-project'
+        verification_retry = saved_build_retry(previous, prompt)
         job_id = jobs.submit(project_id, request_id_context.get(),
             prompt=prompt, history=history, reservation=reservation,
             verification_retry=verification_retry,
