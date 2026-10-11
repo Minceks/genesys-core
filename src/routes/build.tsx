@@ -1029,7 +1029,12 @@ function BuildPage({ projectId, projectName, onProjects }: { projectId: string; 
                           Build passed and browser verification completed.
                         </div>
                         {message.publishedUrl ? (
-                          <a href={message.publishedUrl} target="_blank" rel="noopener noreferrer" className="mb-3 inline-flex rounded-lg bg-blue-600 px-3 py-2 text-xs font-semibold text-white">Open published app</a>
+                          <div role="status" className="mb-3 rounded-lg border border-green-200 bg-white p-3">
+                            <p className="mb-2 text-sm font-semibold text-green-800">Your app is published.</p>
+                            <a href={message.publishedUrl} target="_blank" rel="noopener noreferrer" className="inline-flex rounded-lg bg-blue-600 px-3 py-2 text-xs font-semibold text-white">Open published app <ExternalLink size={13} className="ml-2" /></a>
+                            <p className="mt-2 text-xs text-slate-600">Share this link:</p>
+                            <input aria-label="Published app link" readOnly value={message.publishedUrl} onFocus={(event) => event.target.select()} className="mt-1 w-full rounded border border-slate-200 bg-slate-50 p-2 text-xs text-slate-700" />
+                          </div>
                         ) : (
                           <button type="button" disabled={Boolean(promotingCheckpoint) || loading} onClick={() => void handlePromote(index, message.checkpointId!, message.promotionToken!, true)} className="mb-3 mr-3 rounded-lg bg-blue-600 px-3 py-2 text-xs font-semibold text-white disabled:opacity-60">{promotingCheckpoint === message.checkpointId ? "Working..." : "Publish app"}</button>
                         )}
