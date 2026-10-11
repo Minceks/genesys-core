@@ -2005,7 +2005,7 @@ def run_agent(
                 "Remove old createRoute/Route/rootRoute wrappers, platform navigation and @/ platform imports. "
                 "Reimplement needed components using this project's actual dependencies. "
                 "Do not merely create an unreachable route."
-                + project_design_guidance(project_id)
+                + project_design_guidance(project_id, (product_brief or {}).get('productType'))
                 if project_id != PROJECT_ID_DEFAULT else ""
             ),
         },

@@ -71,6 +71,14 @@ def prepare_design(workspace, prompt):
         if previous:
             brief['purposeChangedFrom'] = previous['productType']
             brief['designPolicy'] += ' The product purpose changed; replace unsuitable inherited theme and layout.'
+    brief['qualityStandard'] = {
+        'composition': 'Distinctive focal point, purposeful section rhythm and product-appropriate density.',
+        'typography': 'Coherent type hierarchy, readable body copy and deliberate line lengths.',
+        'consistency': 'Shared spacing, color, border and control tokens; aligned visual edges.',
+        'presentation': 'Show the user-facing product first; keep management tools out of visitor-facing hero content.',
+        'responsive': 'Intentional phone layout, reachable actions, no hover-only functionality.',
+        'finish': 'Real relevant imagery, concise copy, polished interaction states and preserved working behavior.',
+    }
     saved = workspace.write_file(BRIEF_PATH, json.dumps(brief, ensure_ascii=False, indent=2))
     if not isinstance(saved, dict) or saved.get('status') != 'success':
         raise RuntimeError('Could not save project design brief')

@@ -58,6 +58,9 @@ def draft_project(prompt, source, provider_for, deadline):
             'Never duplicate logic with fallback hooks, stubs or no-op actions. Never dynamically swap hooks. '
             'Render every requested action result, including quiz questions, answers and scores when applicable. '
             'Use in-page status and confirmation UI; never window alert, confirm or prompt. '
+            'Complete a visual polish pass: purposeful composition, clear typography scale, consistent '
+            'spacing, relevant imagery, finished control states and intentional mobile layouts. '
+            'A visitor-facing portfolio must lead with photography, not editing forms or CRUD panels. '
             'Use the existing design guidance. For photography portfolios include real sample photo URLs '
             'with alt text, responsive dimensions and clear sample labeling.')
         logic = pool.submit(copy_context().run, worker, 'gemini', ['src/projectLogic.js'],

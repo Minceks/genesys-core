@@ -12,9 +12,18 @@ DESIGN_DIRECTIONS = (
 )
 
 
-def project_design_guidance(project_id: str) -> str:
+PURPOSE_DIRECTIONS = {
+    'portfolio': 'Art direction first: an oversized photographic hero, restrained editorial type, warm neutral canvas and carefully cropped image sequences. Let the work carry the visual identity.',
+    'store': 'Modern commerce: generous product imagery, clear prices and readable categories, with a restrained purchase accent and a coherent browsing rhythm.',
+    'dashboard': 'Modern workspace: neutral surfaces, precise alignment, strong metric typography, useful data density and one purposeful action accent.',
+    'app': 'Modern product UI: a clear primary workflow, focused navigation, balanced spacing and consistent controls with visible state feedback.',
+    'game': 'Genre-specific art direction: an immersive scene, deliberate atmosphere and a compact readable HUD; avoid marketing page layouts.',
+}
+
+
+def project_design_guidance(project_id: str, product_type: str | None = None) -> str:
     index = int.from_bytes(hashlib.sha256(project_id.encode()).digest()[:4], "big")
-    direction = DESIGN_DIRECTIONS[index % len(DESIGN_DIRECTIONS)]
+    direction = PURPOSE_DIRECTIONS.get(product_type, DESIGN_DIRECTIONS[index % len(DESIGN_DIRECTIONS)])
     return f"""
 VISUAL DESIGN FOR THIS USER APPLICATION
 Treat visual design as part of completing the requested application.
@@ -30,6 +39,34 @@ same stylesheet edit, so subsequent requests can retain the design without an ex
 On an existing app, inspect and reuse its visual tokens; change its theme only when requested.
 Create a composed page with a clear focal point, useful information hierarchy, balanced density,
 purposeful whitespace, polished typography and details appropriate to the requested product.
+POLISH REQUIREMENTS FOR EVERY BUILD
+Choose one visual concept suited to the product; modern does not mean adding gradients
+or rounding every surface. Identify a distinctive focal point and compose around it.
+Use a consistent type scale: large intentional page titles, clear section headings,
+readable body copy with comfortable line length and quieter supporting labels.
+Use an intentional spacing scale and shared container widths. Align controls, captions,
+images and section edges; avoid arbitrary padding, competing shadows and uneven gaps.
+Create hierarchy through composition, scale and contrast rather than a stack of
+identical bordered cards. Use depth only where it clarifies structure.
+Use concise, audience-appropriate copy in the user's language; no implementation
+explanations, generic welcome paragraphs or developer controls in the main experience.
+For a photographer portfolio the first screen should present photography and identity,
+not a project-management sidebar, URL-entry forms or a CRUD dashboard. Put editing
+tools in a separate accessible management view when needed, preserving their functions.
+Give the portfolio a composed image hero, curated gallery rhythm, thoughtful image
+crops, project captions, an about section and a clear contact action. Let photos occupy
+substantial space. Choose images relevant to the stated photography genre; landscape
+samples are unsuitable as the default for portraits, fashion, weddings or architecture.
+Image order and aspect ratios should create a deliberate sequence, not repeated tiny
+thumbnails. Preserve image proportions and legible caption placement on mobile.
+For dashboards and tools, prioritize useful data and tasks; for games, prioritize the
+playable scene. Do not decorate a tool with an oversized marketing hero.
+Finish control styling, focus states, loading/empty/error states and mobile navigation.
+Check the design at both desktop and phone widths; stack content intentionally and
+keep important actions reachable without hover. Respect reduced motion.
+Before ending implementation, perform a short polish pass within the same edit:
+check visual hierarchy, spacing consistency, real imagery, copy, responsive composition
+and whether the primary interaction is obvious. Do not sacrifice working functions.
 For photographers' portfolios and other image-led sites, include actual photographic images
 in the hero and gallery, not blank cards, gradients or icon substitutes. Use the user's provided
 photos first. Without uploaded photos, use representative stock sample images, label the collection
