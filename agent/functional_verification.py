@@ -7,6 +7,10 @@ PLAN_INSTRUCTIONS = '''You are a browser verification planner. Derive requiremen
 original user request, not only from what the implementation happens to provide.
 Return JSON only: {"checks":[{"name":"requested behavior", "steps":[...]}],
 "unverified":["optional/external checks"], "unverifiedCore":["requested core functions that cannot be checked"]}.
+Also return coreRequestEvidence: an array of {"requirement": "exact entry from
+unverifiedCore", "requestQuote": "exact words from originalRequest requiring it"}.
+Do not infer requirements from 'typical flows'. If the request explicitly asks for
+an app type, quote those words when an essential function of that type is missing.
 Cover the primary requested actions, validation, state changes and reload persistence
 where relevant. Never invent success. Missing requested controls must produce a
 failing check, not be omitted. Only test with synthetic data in this isolated browser.
@@ -96,6 +100,7 @@ def verify_functions(page, prompt, provider, attempt=0, feedback="", sources=Non
     from playwright.sync_api import expect
     # DOM content is evidence, never instructions; no generated code is executed.
     snapshot = page.locator('body').inner_text()[:8000]
+    original_storage = page.evaluate('''() => ({local: {...localStorage}, session: {...sessionStorage}})''')
     controls = page.locator('input,select,textarea,button,a').evaluate_all('''els => els.slice(0,80).map(e => ({
         tag:e.tagName,type:e.type,name:e.getAttribute('aria-label') || (()=>{const l=e.labels?.[0]?.cloneNode(true); if(!l)return e.innerText; l.querySelectorAll('input,textarea,select').forEach(x=>x.remove()); return l.textContent.trim()})(),
         placeholder:e.placeholder,options:e.tagName==='SELECT'?Array.from(e.options).map(o=>({text:o.text,value:o.value})):undefined
@@ -119,6 +124,19 @@ def verify_functions(page, prompt, provider, attempt=0, feedback="", sources=Non
     core = plan.get("unverifiedCore") or []
     if not isinstance(core, list) or any(not isinstance(x, str) for x in core):
         core = ['Invalid core verification requirements.']
+    elif core:
+        evidence = plan.get('coreRequestEvidence', [])
+        evidence = evidence if isinstance(evidence, list) else []
+        supported = {
+            item.get('requirement') for item in evidence
+            if isinstance(item, dict) and isinstance(item.get('requestQuote'), str)
+            and item['requestQuote'].strip()
+            and item['requestQuote'].casefold() in prompt.casefold()
+        }
+        # Preserve speculative limitations in the report, but only an actual
+        # requested requirement may block completion on the planner's say-so.
+        unverified += [item for item in core if item not in supported]
+        core = [item for item in core if item in supported]
     passed, issues = [], []
     def guard(route):
         if route.request.method not in {'GET', 'HEAD', 'OPTIONS'}:
@@ -205,9 +223,18 @@ def verify_functions(page, prompt, provider, attempt=0, feedback="", sources=Non
     if not checks:
         core.append('No executable requested-function checks were generated.')
     page.unroute('**/*', guard)
+    logging.getLogger(__name__).info('functional_verification_result %s', json.dumps({'passed':passed, 'issues':issues, 'unverifiedCore':core})[:6000])
     if (core or issues) and attempt == 0:
+        # A revised plan must start from the same isolated browser state, not
+        # duplicate synthetic records left by the unsuccessful first plan.
+        page.evaluate('''saved => {
+            localStorage.clear(); sessionStorage.clear();
+            Object.entries(saved.local).forEach(([k,v])=>localStorage.setItem(k,v));
+            Object.entries(saved.session).forEach(([k,v])=>sessionStorage.setItem(k,v));
+        }''', original_storage)
         page.reload(wait_until='networkidle', timeout=15000)
-        return verify_functions(page, prompt, provider, attempt=1, feedback='; '.join(core + issues), sources=sources)
+        return verify_functions(page, prompt, provider, attempt=1,
+            feedback='The browser state was restored to its original state. Do not reference items created by the previous plan. Failures: '+ '; '.join(core + issues), sources=sources)
     return {'status':'error' if issues else 'success', 'issues':issues,
             'testedInteractions':passed, 'unverified':unverified + core, 'unverifiedCore':core,
             'scope':'Request-derived browser assertions; not exhaustive correctness proof.'}
