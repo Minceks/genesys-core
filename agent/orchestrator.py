@@ -3298,10 +3298,11 @@ def run_agent(
                         "passed": (["Desktop and mobile layout"] if quality['status'] == 'success' else []) + content_result.get('testedInteractions', []),
                         "unverified": content_result.get("unverified", []) + ["Functions outside the listed checks and real multi-user behavior."]
                     }
-                    if content_result.get('unverifiedCore'):
+                    if content_result.get('unverifiedCore') and not content_result.get('issues'):
                         return {"status":"error", "message":"The build is saved, but core function checks could not finish. Retry verification or report the problem.",
                             "buildPassed":True, "browserVerified":False, "errorType":"verification_incomplete",
-                            "verification":verification, "modifiedFiles":list(modified_files), "requestType":"build"}
+                            "verification":verification, "modifiedFiles":list(modified_files), "requestType":"build",
+                            "previewStarted":preview_started, "previewUrl":preview_url}
                     interaction_console = get_browser(project_id).get_console()
                     if interaction_console.get('hasRuntimeErrors'):
                         raise RuntimeError('Runtime errors occurred during interaction checks: ' + _tool_result_text(interaction_console))
