@@ -144,7 +144,7 @@ def verify_functions(page, prompt, provider, attempt=0, feedback="", sources=Non
         evidence = evidence if isinstance(evidence, list) else []
         supported = {
             item.get('requirement') for item in evidence
-            if isinstance(item, dict) and isinstance(item.get('requestQuote'), str)
+            if isinstance(item, dict) and isinstance(item.get('requirement'), str) and isinstance(item.get('requestQuote'), str)
             and item['requestQuote'].strip()
             and item['requestQuote'].casefold() in prompt.casefold()
         }
@@ -172,7 +172,7 @@ def verify_functions(page, prompt, provider, attempt=0, feedback="", sources=Non
             if not isinstance(check, dict) or not isinstance(check.get('steps'), list):
                 raise ValueError('Invalid verification plan structure')
             if not isinstance(check.get('covers'), list) or not check['covers'] or any(
-                item not in requirement_names for item in check['covers']
+                not isinstance(item, str) or item not in requirement_names for item in check['covers']
             ):
                 raise ValueError('Invalid verification plan: missing requirement coverage')
             steps = check['steps']

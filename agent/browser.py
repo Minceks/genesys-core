@@ -2,6 +2,7 @@ from typing import Any
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from functools import wraps
+from contextvars import copy_context
 
 from playwright.sync_api import (
     Browser,
@@ -37,7 +38,8 @@ def browser_thread(method):
             self._worker_thread_id = threading.get_ident()
             return method(self, *args, **kwargs)
 
-        return self._executor.submit(run).result()
+        context = copy_context()
+        return self._executor.submit(context.run, run).result()
     return dispatch
 
 
