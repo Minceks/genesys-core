@@ -130,7 +130,13 @@ def verify_functions(page, prompt, provider):
                         raise ValueError('Control is missing or ambiguous')
                     if action == 'fill': locator.fill(str(step.get('value', ''))[:500], timeout=3000)
                     if action == 'select': locator.select_option(str(step.get('value', ''))[:200], timeout=3000)
-                    if action == 'click': locator.click(timeout=3000)
+                    if action == 'click':
+                        locator.click(timeout=3000)
+                        invalid = page.locator('input:invalid,textarea:invalid,select:invalid').evaluate_all('''els => els.map(e=>({
+                            name:e.getAttribute('aria-label')||e.name,pattern:e.getAttribute('pattern'),reason:e.validationMessage
+                        }))''')
+                        if invalid:
+                            raise ValueError('Submitted test data was blocked by field validation: '+json.dumps(invalid))
                     asserted = False
                 else:
                     raise ValueError('Unsupported browser action')
