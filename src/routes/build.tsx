@@ -67,6 +67,7 @@ type ChatMessage = {
   buildAttempted?: boolean;
   buildPassed?: boolean;
   browserVerified?: boolean;
+  verification?: { passed: string[]; unverified: string[] };
   checkpointStatus?: string;
   checkpointId?: string;
   promotionToken?: string;
@@ -610,7 +611,7 @@ function BuildPage({ projectId, projectName, onProjects }: { projectId: string; 
 
           text: isBuildRequest
             ? response.buildPassed && response.browserVerified
-              ? 'Your project is ready. Open the preview to try it.'
+              ? 'The build and browser checks passed. Review the tested functions below and try the preview.'
               : response.buildPassed
                 ? 'The build passed. Browser verification is still incomplete.'
                 : 'Your project was updated. Check the build status below.'
@@ -635,6 +636,7 @@ function BuildPage({ projectId, projectName, onProjects }: { projectId: string; 
           buildPassed:
             response.buildPassed,
 
+          verification: response.verification,
           browserVerified:
             response.browserVerified,
 
@@ -1019,6 +1021,11 @@ function BuildPage({ projectId, projectName, onProjects }: { projectId: string; 
                         </div>
                       )}
 
+                    {message.role === "bot" && message.verification && <div className="mt-3 rounded-xl border border-slate-200 bg-white p-3 text-xs">
+                      <p className="font-semibold text-slate-800">Verification results</p>
+                      <p className="mt-2 text-green-700">Passed: {message.verification.passed.length ? message.verification.passed.join(", ") : "No function checks recorded."}</p>
+                      <p className="mt-2 text-amber-800">Unverified: {message.verification.unverified.join(" ")}</p>
+                    </div>}
                     {message.role === "bot" &&
                       message.buildPassed === true &&
                       message.browserVerified === true &&

@@ -87,6 +87,7 @@ export type GenesysAgentResponse = {
   buildAttempted: boolean;
   buildPassed: boolean;
   browserVerified: boolean;
+  verification: { passed: string[]; unverified: string[] };
   checkpointId: string | null;
   checkpointStatus: string | null;
   promotionToken: string | null;
@@ -267,6 +268,10 @@ export async function askGenesys(
       browserVerified:
         data.browserVerified === true,
 
+      verification: {
+        passed: Array.isArray(data.verification?.passed) ? data.verification.passed.filter((item: unknown) => typeof item === "string") : [],
+        unverified: Array.isArray(data.verification?.unverified) ? data.verification.unverified.filter((item: unknown) => typeof item === "string") : ["App functions have not been verified."],
+      },
       checkpointId:
         typeof data.checkpoint?.checkpointId === "string"
           ? data.checkpoint.checkpointId
