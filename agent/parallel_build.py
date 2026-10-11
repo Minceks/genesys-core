@@ -12,7 +12,12 @@ def parsed(text):
     text = text.strip()
     if text.startswith('```'):
         text = text.split('\n', 1)[1].rsplit('```', 1)[0]
-    value = json.loads(text)
+    # Accept a complete JSON draft followed by explanatory prose. File ownership
+    # validation below remains mandatory; never accept a second JSON payload.
+    value, end = json.JSONDecoder().raw_decode(text)
+    trailing = text[end:].strip()
+    if trailing.startswith(('{', '[')):
+        raise ValueError('Worker returned multiple JSON payloads')
     if not isinstance(value, dict):
         raise ValueError('Worker response must be an object')
     return value
