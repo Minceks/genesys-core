@@ -1,3 +1,4 @@
+import { MoreHorizontal, Trash2 } from "lucide-react";
 import "@/components/genesys/polish.css";
 import { useEffect, useRef, useState } from 'react'
 import { createRoute, Navigate } from '@tanstack/react-router'
@@ -20,6 +21,39 @@ function AccountDashboard() {
   const [projectError, setProjectError] = useState('')
   const [usage, setUsage] = useState<{ hourlyRemaining: number; hourlyLimit: number; dailyRemaining: number; dailyLimit: number } | null>(null)
   const projectDialog = useRef<HTMLDialogElement>(null)
+  const [projectMenu, setProjectMenu] = useState<{ project: Project; x: number; y: number } | null>(null)
+  const [deletingProject, setDeletingProject] = useState<Project | null>(null)
+  const deleteDialog = useRef<HTMLDialogElement>(null)
+  const menuRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (!projectMenu) return
+    menuRef.current?.querySelector('button')?.focus()
+    const close = () => setProjectMenu(null)
+    const escape = (event: KeyboardEvent) => { if (event.key === 'Escape') close() }
+    window.addEventListener('click', close)
+    window.addEventListener('keydown', escape)
+    window.addEventListener('resize', close)
+    window.addEventListener('scroll', close, true)
+    return () => { window.removeEventListener('click', close); window.removeEventListener('keydown', escape); window.removeEventListener('resize', close); window.removeEventListener('scroll', close, true) }
+  }, [projectMenu])
+  function openProjectMenu(project: Project, x: number, y: number) {
+    if (busy) return
+    setProjectMenu({ project, x: Math.max(8, Math.min(x, window.innerWidth - 200)), y: Math.max(8, Math.min(y, window.innerHeight - 65)) })
+  }
+  async function deleteProject() {
+    if (!deletingProject || busy || !supabase || !userId) return
+    setBusy(true); setMessage('')
+    try {
+      const { data, error } = await supabase.from('projects').delete().eq('id', deletingProject.id).eq('owner_id', userId).select('id')
+      if (error) throw error
+      if (!data?.length) throw new Error('The project could not be deleted. Refresh and try again.')
+      setProjects(previous => previous.filter(project => project.id !== deletingProject.id))
+      setMessage('Project deleted from your workspace.')
+      deleteDialog.current?.close()
+      setDeletingProject(null)
+    } catch (error) { setMessage(error instanceof Error ? error.message : 'Unable to delete the project. Please try again.') }
+    finally { setBusy(false) }
+  }
   const userId = session?.user.id
   useEffect(() => {
     let active = true
@@ -95,12 +129,23 @@ function AccountDashboard() {
       {message && <p role="status" className="mt-6 rounded-xl border border-blue-100 bg-blue-50 p-4 text-blue-900">{message}</p>}
       <div className="mt-8 grid gap-8 lg:grid-cols-[1fr_320px]">
         <section id="projects"><div className="flex items-center justify-between"><h2 className="text-xl font-semibold">My projects</h2><button disabled={busy} onClick={() => { setProjectName(''); setProjectError(''); projectDialog.current?.showModal() }} className="rounded-xl bg-blue-600 px-4 py-3 text-sm font-semibold text-white disabled:opacity-50">{busy ? 'Please wait…' : 'New project'}</button></div>
-          <div className="mt-5 grid gap-4 sm:grid-cols-2">{projects.map(project => <a key={project.id} href={`/build?projectId=${encodeURIComponent(project.id)}`} className="group rounded-2xl border border-slate-200 bg-white p-6 shadow-sm hover:border-blue-300 hover:shadow-md"><div aria-hidden="true" className="mb-5 flex h-11 w-11 items-center justify-center rounded-xl bg-blue-50 text-lg font-semibold text-blue-600">{project.name.charAt(0).toUpperCase()}</div><h3 className="truncate text-base font-semibold tracking-tight">{project.name}</h3><p className="mt-2 text-xs text-slate-500">Created {new Date(project.created_at).toLocaleDateString()}</p><span className="mt-6 inline-block text-sm font-semibold text-blue-600">Open project →</span></a>)}</div>
+          <div className="mt-5 grid gap-4 sm:grid-cols-2">{projects.map(project => <article key={project.id} onContextMenu={event => { event.preventDefault(); openProjectMenu(project, event.clientX, event.clientY) }} className="relative rounded-2xl border border-slate-200 bg-white shadow-sm transition hover:border-blue-300 hover:shadow-md">
+            <a href={`/build?projectId=${encodeURIComponent(project.id)}`} className="block p-6 pr-12"><div aria-hidden="true" className="mb-5 flex h-11 w-11 items-center justify-center rounded-xl bg-blue-50 text-lg font-semibold text-blue-600">{project.name.charAt(0).toUpperCase()}</div><h3 className="truncate text-base font-semibold tracking-tight">{project.name}</h3><p className="mt-2 text-xs text-slate-500">Created {new Date(project.created_at).toLocaleDateString()}</p><span className="mt-6 inline-block text-sm font-semibold text-blue-600">Open project &rarr;</span></a>
+            <button type="button" aria-label={`Actions for ${project.name}`} aria-haspopup="menu" aria-expanded={projectMenu?.project.id === project.id} disabled={busy} onClick={event => { event.stopPropagation(); const rect = event.currentTarget.getBoundingClientRect(); openProjectMenu(project, rect.right - 190, rect.bottom + 4) }} className="absolute right-3 top-3 rounded-lg p-2 text-slate-500 hover:bg-slate-100 disabled:opacity-50"><MoreHorizontal size={20} /></button>
+          </article>)}</div>
           {!busy && projects.length === 0 && <p className="mt-5 rounded-2xl border border-dashed p-8 text-slate-500">Your workspace is a blank canvas. Choose New project, give it a name, and tell GeneSys what you want to create.</p>}
         </section>
         <ProfileSettings user={session.user} busy={busy} onReset={() => void action('reset')} onSignOut={() => void action('signout')} />
       </div>
     </div>
+    {projectMenu && <div ref={menuRef} role="menu" aria-label="Project actions" style={{ left: projectMenu.x, top: projectMenu.y }} className="fixed z-50 w-48 rounded-xl border border-slate-200 bg-white p-1.5 shadow-xl">
+      <button type="button" role="menuitem" onClick={() => { setDeletingProject(projectMenu.project); setProjectMenu(null); deleteDialog.current?.showModal() }} className="flex w-full items-center gap-2 rounded-lg px-3 py-2.5 text-sm font-medium text-red-600 hover:bg-red-50"><Trash2 size={16} /> Delete project</button>
+    </div>}
+    <dialog ref={deleteDialog} aria-labelledby="delete-project-title" onCancel={event => { if (busy) event.preventDefault() }} className="m-auto w-[calc(100%-2rem)] max-w-md rounded-3xl border border-slate-200 bg-white p-7 text-slate-900 shadow-xl backdrop:bg-slate-900/40">
+      <h2 id="delete-project-title" className="text-xl font-semibold">Delete project?</h2>
+      <p className="mt-3 break-words text-sm leading-6 text-slate-600">Remove <strong>{deletingProject?.name}</strong> from your workspace? This cannot be undone. Existing published links are not removed by this action.</p>
+      <div className="mt-6 flex justify-end gap-3"><button type="button" disabled={busy} onClick={() => deleteDialog.current?.close()} className="rounded-xl px-4 py-3 text-sm font-semibold text-slate-600">Cancel</button><button type="button" disabled={busy} onClick={() => void deleteProject()} className="rounded-xl bg-red-600 px-4 py-3 text-sm font-semibold text-white disabled:opacity-50">{busy ? 'Deleting...' : 'Delete project'}</button></div>
+    </dialog>
     <dialog ref={projectDialog} aria-labelledby="new-project-title" onCancel={event => { if (busy) event.preventDefault() }} className="m-auto w-[calc(100%-2rem)] max-w-md rounded-3xl border border-slate-200 bg-white p-7 text-slate-900 shadow-xl backdrop:bg-slate-900/40">
       <h2 id="new-project-title" className="text-xl font-semibold">New project</h2>
       <p className="mt-2 text-sm text-slate-500">Give your project a name. You can open it in the builder after creating it.</p>
