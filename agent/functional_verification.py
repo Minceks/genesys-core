@@ -58,8 +58,11 @@ Maximum 8 checks, 12 steps per check. Supported steps:
 {"action":"invalid","target":{"by":"label","name":"field"}}
 {"action":"attribute","target":{"by":"role","role":"button","name":"Favorite"},"attribute":"aria-pressed","value":"true"}
 Targets use exact accessible names: by=role,label,text,placeholder. Optional
-withinText scopes to a row/listitem containing unique synthetic text. Never use
-CSS, JavaScript, coordinates or tool calls. Each check needs an outcome assertion
+withinText scopes to a row/listitem containing unique synthetic text.
+withinText also supports article/group cards and visible confirmation dialogs.
+On confirmation, use the dialog's actual text and button name. Never invent an
+item name in a confirmation dialog that does not display that name.
+Never use CSS, JavaScript, coordinates or tool calls. Each check needs an outcome assertion
 after its last mutation; meaningful expected outcomes, not merely visible buttons.
 Each check must leave temporary dialogs and lightboxes closed before the next
 check. Include a click on their Close button and an absent assertion when testing
@@ -75,11 +78,34 @@ def target(page, spec):
     scope = page
     if spec.get('withinText'):
         text = str(spec['withinText'])[:200]
-        scope = page.get_by_role('row').filter(has_text=text)
-        if scope.count() != 1:
-            scope = page.get_by_role('listitem').filter(has_text=text)
-        if scope.count() != 1:
-            raise ValueError('Synthetic item could not be uniquely identified')
+        inner_spec = {key: value for key, value in spec.items() if key != 'withinText'}
+        # A visible confirmation dialog takes precedence over the underlying
+        # card. Both may contain the same title and Delete button.
+        for role in ('dialog', 'alertdialog', 'row', 'listitem', 'article', 'group'):
+            candidates = page.get_by_role(role).filter(has_text=text)
+            visible = [candidates.nth(i) for i in range(candidates.count()) if candidates.nth(i).is_visible()]
+            if len(visible) == 1:
+                controls = target(visible[0], inner_spec)
+                if controls.count() == 1 and controls.is_visible():
+                    return controls
+            elif len(visible) > 1 and role in ('dialog', 'alertdialog'):
+                raise ValueError('Invalid verification plan: confirmation target is ambiguous')
+        # Many generated cards are plain divs. Start at an exact, unique title
+        # and walk up to the smallest bounded container holding its control.
+        anchors = page.get_by_text(text, exact=True)
+        visible = [anchors.nth(i) for i in range(anchors.count()) if anchors.nth(i).is_visible()]
+        if len(visible) == 1:
+            ancestor = visible[0]
+            for _ in range(6):
+                ancestor = ancestor.locator('..')
+                if ancestor.count() != 1 or ancestor.evaluate("e => ['BODY','HTML','MAIN'].includes(e.tagName)"):
+                    break
+                controls = target(ancestor, inner_spec)
+                if controls.count() == 1 and controls.is_visible():
+                    return controls
+                if controls.count() > 1:
+                    break
+        raise ValueError('Invalid verification plan: synthetic item control could not be uniquely identified')
     name = re.sub(r'\s+', ' ', str(spec.get('name', ''))).strip()[:200]
     if not name:
         raise ValueError('Invalid verification plan: empty target name')
