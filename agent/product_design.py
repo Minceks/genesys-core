@@ -45,6 +45,28 @@ DIRECTIONS = {
 }
 
 
+def presentation_contract(product):
+    if product in {'website', 'portfolio', 'store'}:
+        return {
+            'mode': 'public-website',
+            'primaryExperience': 'A composed public website for visitors, with a distinct identity and content-led browsing.',
+            'layoutRequirements': ['Meaningful header and navigation',
+                'Designed hero with a clear headline, relevant visual and primary destination',
+                'At least two purpose-specific content sections with varied composition',
+                'Detail views or sections for the showcased content', 'Useful footer',
+                'Intentional stacked phone layout'],
+            'interactionPolicy': 'Navigation and calls to action must reach real sections, views or destinations. '
+                'Add/edit/delete controls belong in a separate labeled management view only if requested '
+                'or already implemented; preserve existing behavior while moving it.',
+            'avoid': 'Do not turn a website into a spreadsheet, CRUD panel, generic metrics dashboard '
+                'or a single repeated card grid. Do not invent administrative features. '
+                'Tables are appropriate only for requested comparison/data sections, never the default page composition.',
+        }
+    return {'mode': 'workflow-app',
+            'primaryExperience': 'Organize the interface around the requested workflow. '
+                'Use tables/forms where they help; a playable game needs a scene, not a marketing hero.'}
+
+
 def prepare_design(workspace, prompt):
     previous = None
     try:
@@ -55,6 +77,9 @@ def prepare_design(workspace, prompt):
     except (FileNotFoundError, ValueError, TypeError, AttributeError):
         previous = None
     selected = next((name for name, pattern in PRODUCTS.items() if re.search(pattern, prompt, re.I)), None)
+    if (selected == 'game' and re.search(r'\b(website|site|blog|reviews|news|showcase)\b', prompt, re.I)
+            and not re.search(r'\b(playable|movement|shooting|platformer|survival game)\b', prompt, re.I)):
+        selected = 'website'
     replacement = bool(re.search(r'\b(build|create|make|replace|convert|turn|transform|redesign)\b', prompt, re.I))
     retain = previous and (not selected or selected == previous['productType'] or not replacement)
     if retain:
@@ -82,6 +107,7 @@ def prepare_design(workspace, prompt):
             'neutral palette and restrained bright accent unless the user specifies another style. '
             'Keep administration separate from the public showcase; avoid generic beige CRUD cards.')
         brief['layout'] = 'Featured game hero, curated ranked discoveries, genre/platform browsing and focused game detail.'
+    brief['presentationContract'] = presentation_contract(brief['productType'])
     brief['qualityStandard'] = {
         'composition': 'Distinctive focal point, purposeful section rhythm and product-appropriate density.',
         'typography': 'Coherent type hierarchy, readable body copy and deliberate line lengths.',

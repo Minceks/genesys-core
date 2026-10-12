@@ -30,13 +30,20 @@ def draft_project(prompt, source, provider_for, deadline):
         return None
     planner = provider_for('openai')
     plan = parsed(planner.generate([{'role':'system', 'content':
-        'Plan a React user application. Return JSON only: {"interface": "...", "requirements": [...]}. '
+        'Plan a React user application. Return JSON only: {"interface": "...", "requirements": [...], "pageComposition": [...]}. '
+        'Follow presentationContract in the supplied design brief. For public websites plan a visitor-first '
+        'hero, navigation, varied content sections, detail destinations and footer. Do not invent CRUD features '
+        'or make a spreadsheet the public experience. Describe the purpose and visual composition of each section. '
         'Define exact exports, arguments, returned state fields and action names for src/projectLogic.js. '
         'That module owns data and behavior; App.jsx owns JSX. Use only React and existing dependencies. '
         'Persistence must reuse src/usePersistentState.js. Keep the plan under 800 words.'},
         {'role':'user','content':prompt + '\nExisting starter:\n' + source}], []).text)
     if not isinstance(plan.get('interface'), str) or not isinstance(plan.get('requirements'), list):
         raise ValueError('Parallel plan is missing its interface')
+    if '"mode": "public-website"' in source:
+        composition = plan.get('pageComposition')
+        if not isinstance(composition, list) or len(composition) < 3:
+            raise ValueError('Public website plan is missing its page composition')
     shared = prompt + '\nSHARED PLAN:\n' + json.dumps(plan) + '\nSTARTER:\n' + source
     def worker(name, paths, role):
         result = parsed(provider_for(name).generate([{'role':'system','content':
@@ -62,6 +69,9 @@ def draft_project(prompt, source, provider_for, deadline):
             'spacing, relevant imagery, finished control states and intentional mobile layouts. '
             'A visitor-facing portfolio must lead with photography, not editing forms or CRUD panels. '
             'Use the existing design guidance. For photography portfolios include real sample photo URLs '
+            'Follow the presentationContract and pageComposition: public websites need a composed hero, '
+            'navigation, varied purposeful sections, content details and footer. Keep management tools '
+            'in a separate view when requested; do not lead with tables, data-entry forms or admin buttons. '
             'with alt text, responsive dimensions and clear sample labeling.')
         logic = pool.submit(copy_context().run, worker, 'gemini', ['src/projectLogic.js'],
             'Implement the exact shared logic interface, state, validation and requested actions. '

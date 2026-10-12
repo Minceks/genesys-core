@@ -13,6 +13,7 @@ DESIGN_DIRECTIONS = (
 
 
 PURPOSE_DIRECTIONS = {
+    'website': 'Public-facing website: expressive editorial hierarchy, a strong visual hero, meaningful navigation, varied content sections and a useful footer. Compose for visitors; avoid an admin dashboard or spreadsheet as the main experience.',
     'portfolio': 'Art direction first: an oversized photographic hero, restrained editorial type, warm neutral canvas and carefully cropped image sequences. Let the work carry the visual identity.',
     'store': 'Modern commerce: generous product imagery, clear prices and readable categories, with a restrained purchase accent and a coherent browsing rhythm.',
     'dashboard': 'Modern workspace: neutral surfaces, precise alignment, strong metric typography, useful data density and one purposeful action accent.',
