@@ -155,11 +155,14 @@ def verify_functions(page, prompt, provider, attempt=0, feedback="", sources=Non
     original_storage = page.evaluate('''() => ({local: {...localStorage}, session: {...sessionStorage}})''')
     controls = page.locator('input,select,textarea,button,a').evaluate_all('''els => els.slice(0,80).map(e => ({
         tag:e.tagName,type:e.type,name:e.getAttribute('aria-label') || (()=>{const l=e.labels?.[0]?.cloneNode(true); if(!l)return e.innerText; l.querySelectorAll('input,textarea,select').forEach(x=>x.remove()); return l.textContent.trim()})(),
-        placeholder:e.placeholder,options:e.tagName==='SELECT'?Array.from(e.options).map(o=>({text:o.text,value:o.value})):undefined
+        placeholder:e.placeholder,min:e.min,max:e.max,value:e.value,
+        options:e.tagName==='SELECT'?Array.from(e.options).map(o=>({text:o.text,value:o.value})):undefined
     }))''')
     try:
         raw = provider.generate([{'role':'system','content':PLAN_INSTRUCTIONS + ('\nRepair the previous verification plan, not app code: '+feedback if feedback else '')},
-            {'role':'user','content':json.dumps({'originalRequest':prompt,'untrustedRenderedText':snapshot,'untrustedControls':controls, 'untrustedImplementation':sources or {}})}], []).text.strip()
+            {'role':'user','content':json.dumps({'originalRequest':prompt,
+                'browserCurrentDate':page.evaluate('new Date().toLocaleDateString("en-CA")'),
+                'untrustedRenderedText':snapshot,'untrustedControls':controls, 'untrustedImplementation':sources or {}})}], []).text.strip()
         raw = re.sub(r'^```(?:json)?\s*|\s*```$', '', raw)
         plan = json.loads(raw)
     except Exception as error:
