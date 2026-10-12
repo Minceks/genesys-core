@@ -1,5 +1,5 @@
 from __future__ import annotations
-from .progress import report_progress
+from .progress import report_progress, progress_callback, execution_timeout
 from .model_context import text_safe, ModelBudgetExceeded
 
 import json
@@ -1910,10 +1910,8 @@ def run_agent(
             }
 
     report_progress("Preparing workspace")
-    agent_deadline = time.monotonic() + min(
-        settings.agent_timeout_seconds,
-        240,
-    )
+    agent_deadline = time.monotonic() + execution_timeout(
+        settings.agent_timeout_seconds, background=progress_callback.get() is not None)
 
     print()
     print("=" * 40)
@@ -2456,7 +2454,8 @@ def run_agent(
                     if path not in modified_files:
                         modified_files.append(path)
                 messages.append({'role': 'system', 'content': str(draft_error) +
-                    ' Inspect these saved drafts and repair the listed interface defects. Preserve the visual direction. Do not recreate the project.'})
+                    ' Repair the listed defects using the complete saved drafts below. These are current files already written by the coordinator; avoid redundant reads. Preserve the visual direction. Do not recreate the project.\n'
+                    + json.dumps(draft_error.drafts, ensure_ascii=False)})
             # Successfully written files are tracked even if a later write fails.
             changed_since_build = bool(modified_files)
             implementation_ready = False

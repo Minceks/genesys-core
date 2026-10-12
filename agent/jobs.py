@@ -22,7 +22,7 @@ def saved_build_retry(previous, prompt):
         return None
     result = previous.get('result') or {}
     if (result.get('buildPassed') or previous.get('verificationRetry')
-            or (result.get('errorType') == 'ai_request' and result.get('modifiedFiles'))):
+            or (result.get('errorType') in {'ai_request', 'agent_timeout'} and result.get('modifiedFiles'))):
         return result.get('buildFingerprint') or 'rebuild-saved-project'
     return None
 
