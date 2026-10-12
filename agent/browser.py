@@ -340,7 +340,7 @@ class BrowserSession:
         return verify_functions(page, prompt, provider, sources=sources)
 
     @browser_thread
-    def visual_quality(self, *, allow_unstyled=False, require_images=False) -> dict[str, Any]:
+    def visual_quality(self, *, allow_unstyled=False, require_images=False, public_website=False) -> dict[str, Any]:
         page = self.start()
         original = page.viewport_size
         snapshots = []
@@ -354,7 +354,7 @@ class BrowserSession:
         finally:
             if original:
                 page.set_viewport_size(original)
-        return assess_visual_quality(snapshots, allow_unstyled=allow_unstyled, require_images=require_images)
+        return assess_visual_quality(snapshots, allow_unstyled=allow_unstyled, require_images=require_images, public_website=public_website)
 
     @browser_thread
     def get_console(

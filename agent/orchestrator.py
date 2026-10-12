@@ -3306,6 +3306,7 @@ def run_agent(
                 if project_id != PROJECT_ID_DEFAULT:
                     report_progress("Checking visual layout")
                     quality = get_browser(project_id).visual_quality(
+                        public_website=(product_brief or {}).get('presentationContract', {}).get('mode') == 'public-website',
                         allow_unstyled=bool(re.search(r"\b(unstyled|browser[- ]default|no css|plain html)\b", prompt, re.I)),
                         require_images=bool(re.search(r"\b(photographer|photography|photographic)\b", prompt, re.I) and re.search(r"\b(portfolio|gallery|website|site)\b", prompt, re.I))
                     )

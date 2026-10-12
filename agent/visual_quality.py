@@ -13,20 +13,31 @@ SNAPSHOT_SCRIPT = """() => {
   const color = bodyStyle.backgroundColor;
   const customBackground = !['rgb(255, 255, 255)','rgba(0, 0, 0, 0)'].includes(color);
   const text = document.body.innerText.trim();
+  const viewportArea = innerWidth * innerHeight;
+  const visibleArea = el => { const r=el.getBoundingClientRect(); return Math.max(0,Math.min(r.right,innerWidth)-Math.max(r.left,0))*Math.max(0,Math.min(r.bottom,innerHeight)-Math.max(r.top,0)); };
+  const mainTitle = [...document.querySelectorAll('h1')].find(visible);
+  const dataSurfaces = [...document.querySelectorAll('table,[role=grid],form')].filter(visible);
   return { width: innerWidth, overflow: document.documentElement.scrollWidth > innerWidth + 2,
     loadedImages: [...document.images].filter(el => visible(el) && el.complete && el.naturalWidth > 0).length,
     brokenImages: [...document.images].filter(el => visible(el) && el.complete && el.naturalWidth === 0).length,
     controls: controls.length, styledControls, composedLayout, customBackground,
     textLength: text.length, hasGraphics: !!document.querySelector('canvas,svg,img,video'),
     starterVisible: text.includes('Your project is ready') && text.includes('Describe what you want to build'),
+    titleSize: mainTitle ? parseFloat(getComputedStyle(mainTitle).fontSize) : 0,
+    dataSurfaceRatio: Math.max(0,...dataSurfaces.map(el=>visibleArea(el)/viewportArea)),
     headings: [...document.querySelectorAll('h1,h2,h3')].filter(visible).map(el => el.innerText.slice(0,120)).slice(0,12) };
 }"""
 
 
-def assess_visual_quality(snapshots, *, allow_unstyled=False, require_images=False):
+def assess_visual_quality(snapshots, *, allow_unstyled=False, require_images=False, public_website=False):
     issues = []
     for snapshot in snapshots:
         width = snapshot['width']
+        if public_website and not allow_unstyled:
+            if snapshot.get('titleSize', 0) < (32 if width >= 900 else 28):
+                issues.append(f'At {width}px, the public homepage lacks a clear visual headline hierarchy. Compose a visitor-facing hero with readable, prominent typography.')
+            if snapshot.get('dataSurfaceRatio', 0) > 0.45:
+                issues.append(f'At {width}px, a form/table dominates the public homepage. Put detailed booking or management workflows in a dedicated view and lead with the visitor-facing website.')
         if require_images and snapshot.get('loadedImages', 0) < 2:
             issues.append(f'At {width}px, the photography portfolio needs at least two visible, successfully loaded photos; include actual hero and gallery images.')
         if require_images and snapshot.get('brokenImages', 0):
