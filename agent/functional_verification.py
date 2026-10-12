@@ -71,6 +71,11 @@ omit explanatory prose and repeated long descriptions. Return one complete JSON 
 Targets use exact accessible names: by=role,label,text,placeholder. Optional
 withinText scopes to a row/listitem containing unique synthetic text.
 withinText also supports article/group cards and visible confirmation dialogs.
+For repeated navigation names use withinRole on the target, for example
+{"by":"role","role":"button","name":"Book","withinRole":{"role":"navigation","name":"Primary"}}.
+Use the actual landmark name; omit name only when that role has one visible container.
+Fill a date input before asserting its value. An action=value only checks state;
+it never sets a value. Derive future dates from browserCurrentDate.
 On confirmation, use the dialog's actual text and button name. Never invent an
 item name in a confirmation dialog that does not display that name.
 Never use CSS, JavaScript, coordinates or tool calls. Each check needs an outcome assertion
@@ -87,6 +92,16 @@ def target(page, spec):
     if not isinstance(spec, dict):
         raise ValueError('Invalid browser target')
     scope = page
+    if spec.get('withinRole'):
+        outer = spec['withinRole']
+        if not isinstance(outer, dict) or outer.get('role') not in {'navigation', 'banner', 'region', 'form', 'dialog', 'alertdialog'}:
+            raise ValueError('Invalid verification plan: unsupported role scope')
+        options = {'name': outer['name'], 'exact': True} if outer.get('name') else {}
+        candidates = page.get_by_role(outer['role'], **options)
+        visible = [candidates.nth(i) for i in range(candidates.count()) if candidates.nth(i).is_visible()]
+        if len(visible) != 1:
+            raise ValueError('Invalid verification plan: role scope is ambiguous or missing')
+        return target(visible[0], {key: value for key, value in spec.items() if key != 'withinRole'})
     if spec.get('withinText'):
         text = str(spec['withinText'])[:200]
         inner_spec = {key: value for key, value in spec.items() if key != 'withinText'}
@@ -162,6 +177,7 @@ def verify_functions(page, prompt, provider, attempt=0, feedback="", sources=Non
         raw = provider.generate([{'role':'system','content':PLAN_INSTRUCTIONS + ('\nRepair the previous verification plan, not app code: '+feedback if feedback else '')},
             {'role':'user','content':json.dumps({'originalRequest':prompt,
                 'browserCurrentDate':page.evaluate('new Date().toLocaleDateString("en-CA")'),
+                'landmarks':page.evaluate("""() => [...document.querySelectorAll('nav,header,[role=navigation],[role=region],form')].map(e => ({role:e.getAttribute('role') || ({NAV:'navigation',HEADER:'banner',FORM:'form'}[e.tagName]),name:e.getAttribute('aria-label') || ''}))"""),
                 'untrustedRenderedText':snapshot,'untrustedControls':controls, 'untrustedImplementation':sources or {}})}], []).text.strip()
         raw = re.sub(r'^```(?:json)?\s*|\s*```$', '', raw)
         plan = json.loads(raw)
@@ -256,7 +272,15 @@ def verify_functions(page, prompt, provider, attempt=0, feedback="", sources=Non
                     page.reload(wait_until='networkidle', timeout=15000)
                     asserted = False
                     continue
-                locator = target(page, step.get('target'))
+                specification = step.get('target')
+                if isinstance(specification, dict):
+                    specification = dict(specification)
+                    # Accept scope fields beside target as well as inside it;
+                    # never silently ignore a planner's requested container.
+                    for key in ('withinText', 'withinRole'):
+                        if key in step and key not in specification:
+                            specification[key] = step[key]
+                locator = target(page, specification)
                 if action == 'visible':
                     # Visibility means at least one matching element is visible,
                     # not that the same label occurs only once on the page.

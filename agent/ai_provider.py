@@ -1469,12 +1469,16 @@ class OpenAIProvider(AIProvider):
             options['max_completion_tokens'] = min(ceiling, options['max_completion_tokens'] * 2)
             if tools:
                 options['parallel_tool_calls'] = False
-            options['messages'] = bounded_messages(prepared + [{'role': 'user', 'content':
+            retry_instruction = (
+                'Your previous response was too long and discarded. Return the complete JSON object requested '
+                'by the original system instruction. Keep it compact, omit commentary, and preserve every '
+                'required field. No tool-call format or partial JSON.' if not tools else
                 'Your previous response exceeded the output allowance and was discarded. '
                 'No edits from that response were executed. Make only one small, complete '
                 'tool call now. Prefer a targeted edit_file patch over rewriting a large file. '
                 'Split larger implementations into independent components and subsequent calls. '
-                'Keep explanations short. Never omit required code or insert placeholders.'}], tools)
+                'Keep explanations short. Never omit required code or insert placeholders.')
+            options['messages'] = bounded_messages(prepared + [{'role': 'user', 'content': retry_instruction}], tools)
         if choice.finish_reason == 'content_filter':
             raise RuntimeError('OpenAI completion was blocked; no partial tool call was executed.')
         message = choice.message
