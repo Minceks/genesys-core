@@ -24,6 +24,8 @@ SNAPSHOT_SCRIPT = """() => {
     textLength: text.length, hasGraphics: !!document.querySelector('canvas,svg,img,video'),
     starterVisible: text.includes('Your project is ready') && text.includes('Describe what you want to build'),
     titleSize: mainTitle ? parseFloat(getComputedStyle(mainTitle).fontSize) : 0,
+    brandVisual: !!document.querySelector('header svg,header img,nav svg,nav img'),
+    favicon: !!document.querySelector('link[rel*=icon][href]'),
     dataSurfaceRatio: Math.max(0,...dataSurfaces.map(el=>visibleArea(el)/viewportArea)),
     headings: [...document.querySelectorAll('h1,h2,h3')].filter(visible).map(el => el.innerText.slice(0,120)).slice(0,12) };
 }"""
@@ -34,6 +36,8 @@ def assess_visual_quality(snapshots, *, allow_unstyled=False, require_images=Fal
     for snapshot in snapshots:
         width = snapshot['width']
         if public_website and not allow_unstyled:
+            if not snapshot.get('brandVisual') or not snapshot.get('favicon'):
+                issues.append('The public website needs a visible original logo and a configured favicon. Add appropriate SVG branding without imitating another company.')
             if snapshot.get('titleSize', 0) < (32 if width >= 900 else 28):
                 issues.append(f'At {width}px, the public homepage lacks a clear visual headline hierarchy. Compose a visitor-facing hero with readable, prominent typography.')
             if snapshot.get('dataSurfaceRatio', 0) > 0.45:
