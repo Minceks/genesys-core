@@ -386,26 +386,40 @@ function BuildPage({ projectId, projectName, onProjects }: { projectId: string; 
     setPreviewRefreshing(true);
     setPreviewError("");
     try {
+      const { data: { session }, error: sessionError } = supabase
+        ? await supabase.auth.getSession()
+        : { data: { session: null }, error: null };
+      if (supabase && (sessionError || !session)) {
+        throw new Error("Your session expired. Sign in again to reconnect. Your project is saved.");
+      }
+      const headers = { ...buildCloudAgentHeaders(true),
+        ...(session ? { Authorization: `Bearer ${session.access_token}` } : {}) };
       let response = await fetch(`${CLOUD_AGENT_URL}/preview`, {
-        method: "POST", headers: buildCloudAgentHeaders(true), signal: AbortSignal.timeout(25000),
+        method: "POST", headers, signal: AbortSignal.timeout(90000),
         body: JSON.stringify({ projectId }),
       });
       if (response.status === 401 && supabase) {
         const refreshed = await supabase.auth.refreshSession();
         if (refreshed.data.session) response = await fetch(`${CLOUD_AGENT_URL}/preview`, {
           method: "POST", headers: { ...buildCloudAgentHeaders(true), Authorization: `Bearer ${refreshed.data.session.access_token}` },
-          body: JSON.stringify({ projectId }), signal: AbortSignal.timeout(25000),
+          body: JSON.stringify({ projectId }), signal: AbortSignal.timeout(90000),
         });
       }
       const data = await response.json();
       if (response.status === 401) throw new Error("Your session expired. Sign in again to reconnect. Your project is saved.");
+      if (response.status === 404) {
+        try { sessionStorage.removeItem(`genesys_preview_${projectId}`); } catch { /* Storage is optional. */ }
+        throw new Error("This project is unavailable for the signed-in account. Open Projects and select a project you own, or sign in with the account that created it.");
+      }
       if (!response.ok || data.status !== "success" || !data.url) throw new Error(data.message || "Preview could not reconnect.");
       setPreviewOnline(false);
       setPreviewUrl(data.url);
       setPreviewKey(value => value + 1);
     } catch (error) {
       setPreviewOnline(false);
-      setPreviewError(error instanceof Error ? error.message : "Preview could not reconnect.");
+      setPreviewError(error instanceof Error && (error.name === "TimeoutError" || error.name === "AbortError")
+        ? "The saved workspace is taking longer to wake up. Wait a moment, then reconnect. Your project is saved."
+        : error instanceof Error ? error.message : "Preview could not reconnect.");
     } finally { setPreviewRefreshing(false); }
   }
 
@@ -1221,6 +1235,7 @@ function BuildPage({ projectId, projectName, onProjects }: { projectId: string; 
               <div className="border-b border-slate-200 bg-white px-4 py-2 text-xs text-slate-600">
                 <span role="status">{previewError || (previewRefreshing ? "Reconnecting preview..." : "Preview not visible? Reconnect the link or open it in a new tab. Network filters may block preview domains.")}</span>
                 <button type="button" disabled={previewRefreshing || loading} onClick={() => void reloadPreview()} className="ml-2 font-semibold text-blue-700 disabled:opacity-50">Reconnect</button>
+                {previewError && <button type="button" onClick={onProjects} className="ml-3 font-semibold text-blue-700">Open Projects</button>}
                 <button type="button" onClick={openPreview} className="ml-2 font-semibold text-blue-700">Open preview</button>
               </div>
             )}
