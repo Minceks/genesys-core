@@ -15,9 +15,13 @@ SNAPSHOT_SCRIPT = """() => {
   const text = document.body.innerText.trim();
   const viewportArea = innerWidth * innerHeight;
   const visibleArea = el => { const r=el.getBoundingClientRect(); return Math.max(0,Math.min(r.right,innerWidth)-Math.max(r.left,0))*Math.max(0,Math.min(r.bottom,innerHeight)-Math.max(r.top,0)); };
-  const mainTitle = [...document.querySelectorAll('h1')].find(visible);
+  const mainTitle = [...document.querySelectorAll('main h1,main h2,main h3,h1')]
+    .filter(el => visible(el) && !el.closest('header,nav'))
+    .sort((a,b) => parseFloat(getComputedStyle(b).fontSize)-parseFloat(getComputedStyle(a).fontSize))[0];
   const dataSurfaces = [...document.querySelectorAll('table,[role=grid],form')].filter(visible);
   return { width: innerWidth, overflow: document.documentElement.scrollWidth > innerWidth + 2,
+    overflowElements: [...document.querySelectorAll('body *')].filter(el => visible(el) && el.getBoundingClientRect().right > innerWidth + 2)
+      .slice(0,10).map(el => ({tag:el.tagName,class:typeof el.className==='string'?el.className.slice(0,120):'',width:Math.round(el.getBoundingClientRect().width),display:getComputedStyle(el).display})),
     loadedImages: [...document.images].filter(el => visible(el) && el.complete && el.naturalWidth > 0).length,
     brokenImages: [...document.images].filter(el => visible(el) && el.complete && el.naturalWidth === 0).length,
     controls: controls.length, styledControls, composedLayout, customBackground,

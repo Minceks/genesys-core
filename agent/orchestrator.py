@@ -3310,6 +3310,8 @@ def run_agent(
                         allow_unstyled=bool(re.search(r"\b(unstyled|browser[- ]default|no css|plain html)\b", prompt, re.I)),
                         require_images=bool(re.search(r"\b(photographer|photography|photographic)\b", prompt, re.I) and re.search(r"\b(portfolio|gallery|website|site)\b", prompt, re.I))
                     )
+                    if quality['status'] != 'success':
+                        raise RuntimeError('Rendered layout checks failed. Repair the reported elements and preserve working application logic. Fix sizing and wrapping; do not hide overflow, remove content or disable controls to mask the problem:\n' + json.dumps(quality, ensure_ascii=False))
                     report_progress('Checking requested content and interactions')
                     visual_checks = []
                     if quality['status'] == 'success':

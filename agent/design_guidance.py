@@ -92,6 +92,9 @@ as a favicon, and set a meaningful browser title. Avoid emoji as the finished br
 Inspect both UI and handlers: exact payload keys, return shapes and dependent options
 must agree. Scheduling selectors must populate available slots. Keep confirmations
 visible after undo/toast timers expire; verify whole workflows rather than button visibility.
+Give every form control a stable accessible name matching its visible label, using
+explicit aria-label or label/htmlFor. Keep validation messages outside the label
+and associate them with aria-describedby, so errors never change the input's name.
 Do not use dead buttons, unrelated platform navigation or fake completed integrations.
 Never implement Save as a no-op; render an editable form and persist its actual values.
 Keep visible filter inputs synchronized with applied/reset state. Undo must remain
