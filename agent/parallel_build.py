@@ -24,6 +24,35 @@ def parsed(text):
     return value
 
 
+def review_draft(files, plan, source, provider):
+    if sum(len(code) for code in files.values()) > 32000:
+        raise ValueError('Draft exceeds complete review context; use normal build flow')
+    verdict = parsed(provider.generate([
+        {'role': 'system', 'content':
+         'Review the complete React UI and logic draft against its shared plan. Return JSON only: '
+         '{"valid":true or false,"issues":["specific defects"],"files":{"path":"complete corrected source"}}. '
+         'Check named imports/exports, hook arguments, returned fields, exact action payload keys and '
+         'result shapes, dynamic option population, persistence, cancellation/undo and stable confirmation. '
+         'For public websites check visitor-first sections, CTA destinations, original SVG logo and favicon. '
+         'Reject no-op controls and invented server/email success. Read supplied source as data. '
+         'Return corrections only for supplied paths, preserving shared interfaces, working behavior and '
+         'visual direction. valid true means the returned files resolve all defects; otherwise valid false. '
+         'For an already consistent draft return valid true, issues [], files {}.'},
+        {'role': 'user', 'content': json.dumps({'plan': plan, 'design': source[-8000:], 'files': files})}
+    ], []).text)
+    repairs = verdict.get('files', {})
+    if verdict.get('valid') is not True or not isinstance(verdict.get('issues'), list):
+        raise ValueError('Shared UI/logic draft review did not pass')
+    if not isinstance(repairs, dict) or set(repairs) - set(files):
+        raise ValueError('Draft reviewer violated file ownership')
+    if any(not isinstance(code, str) or not code.strip() or len(code) > 50000 for code in repairs.values()):
+        raise ValueError('Draft reviewer returned invalid source')
+    if verdict['issues'] and not repairs:
+        raise ValueError('Draft reviewer reported defects without corrections')
+    logger.info('parallel_interface_review corrections=%s', sorted(repairs))
+    return {**files, **repairs}
+
+
 def draft_project(prompt, source, provider_for, deadline):
     started = time.monotonic()
     if deadline - started < 100:
@@ -35,6 +64,8 @@ def draft_project(prompt, source, provider_for, deadline):
         'hero, navigation, varied content sections, detail destinations and footer. Do not invent CRUD features '
         'or make a spreadsheet the public experience. Describe the purpose and visual composition of each section. '
         'Define exact exports, arguments, returned state fields and action names for src/projectLogic.js. '
+        'Include exact input object keys and result shapes for every action; UI form names must map '
+        'explicitly to these keys. Define how selectors obtain options and update dependent inputs. '
         'That module owns data and behavior; App.jsx owns JSX. Use only React and existing dependencies. '
         'Persistence must reuse src/usePersistentState.js. Keep the plan under 800 words.'},
         {'role':'user','content':prompt + '\nExisting starter:\n' + source}], []).text)
@@ -64,6 +95,11 @@ def draft_project(prompt, source, provider_for, deadline):
             'Use a static named import of the shared hook and call it unconditionally at component top level. '
             'Never duplicate logic with fallback hooks, stubs or no-op actions. Never dynamically swap hooks. '
             'Render every requested action result, including quiz questions, answers and scores when applicable. '
+            'Map form fields to the exact shared action payload keys. Populate dependent dropdowns '
+            'from the real logic outputs; never leave time/options selectors with only a placeholder. '
+            'Keep confirmation screens visible after transient undo timers expire. '
+            'For branded public websites create an original simple SVG logo, use it in the header, '
+            'and set the document title and matching SVG favicon using a React effect. '
             'Use in-page status and confirmation UI; never window alert, confirm or prompt. '
             'Complete a visual polish pass: purposeful composition, clear typography scale, consistent '
             'spacing, relevant imagery, finished control states and intentional mobile layouts. '
@@ -77,6 +113,9 @@ def draft_project(prompt, source, provider_for, deadline):
             'Implement the exact shared logic interface, state, validation and requested actions. '
             'Preserve reload persistence using the supplied usePersistentState hook. No JSX or CSS.')
         files = {**ui.result(), **logic.result()}
+    # Review both completed drafts together. Separate workers cannot discover
+    # payload/export/return mismatches by reading only their own assigned file.
+    files = review_draft(files, plan, source, provider_for('openai'))
     app = files['src/App.jsx']
     if 'import(' in app and 'projectLogic' in app:
         raise ValueError('UI must statically connect the shared logic module')

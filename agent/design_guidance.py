@@ -87,6 +87,11 @@ Keep each implementation tool call small and complete. Use focused patches for e
 split large new applications into components instead of emitting the entire project in one response.
 Never leave placeholder code to fit a response budget.
 Build the requested interactions with meaningful loading, empty, error and success states.
+For branded websites create an original simple SVG logo, use it in the header and
+as a favicon, and set a meaningful browser title. Avoid emoji as the finished brand.
+Inspect both UI and handlers: exact payload keys, return shapes and dependent options
+must agree. Scheduling selectors must populate available slots. Keep confirmations
+visible after undo/toast timers expire; verify whole workflows rather than button visibility.
 Do not use dead buttons, unrelated platform navigation or fake completed integrations.
 Never implement Save as a no-op; render an editable form and persist its actual values.
 Keep visible filter inputs synchronized with applied/reset state. Undo must remain
