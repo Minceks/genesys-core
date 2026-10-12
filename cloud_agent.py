@@ -118,6 +118,9 @@ def require_api_key():
                 if g.user['id'] not in admins:
                     raise user_auth.AccessError('Production promotion requires administrator access.', 403)
         except user_auth.AccessError as error:
+            if request.path == '/preview':
+                logger.warning('preview_access_denied status=%s project_id=%s reason=%s',
+                               error.status, get_project_id(), str(error))
             return jsonify(status='error', message=str(error), requestId=request_id_context.get()), error.status
         return None
 
