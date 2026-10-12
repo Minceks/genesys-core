@@ -49,6 +49,21 @@ def test_empty_selector_is_a_plan_error():
         target(Page(), {'by': 'text', 'name': '   '})
 
 
+def test_invalid_planning_json_is_retried_without_app_mutation():
+    class MalformedProvider:
+        calls = 0
+        def generate(self, *args):
+            self.calls += 1
+            return SimpleNamespace(text='{"checks": [' if self.calls == 1 else
+                                   '{"checks":[],"requirements":[]}')
+    page = Page()
+    provider = MalformedProvider()
+    result = verify_functions(page, 'Build a counter', provider)
+    assert provider.calls == 2
+    assert page.mutations == 0
+    assert result['unverifiedCore']
+
+
 def test_accessible_name_whitespace_is_normalized():
     page = Page()
     target(page, {'by': 'role', 'role': 'button', 'name': 'Sample\n  content'})

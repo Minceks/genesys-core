@@ -76,14 +76,16 @@ def draft_project(prompt, source, provider_for, deadline):
         if not isinstance(composition, list) or len(composition) < 3:
             raise ValueError('Public website plan is missing its page composition')
     shared = prompt + '\nSHARED PLAN:\n' + json.dumps(plan) + '\nSTARTER:\n' + source
-    def worker(name, paths, role):
+    def worker(name, paths, role, optional_paths=()):
         result = parsed(provider_for(name).generate([{'role':'system','content':
             role + ' Follow the exact shared interface. Return JSON only: {"files": {"path": "complete source"}}. '
-            'Write only these assigned files: ' + ', '.join(paths) + '. No placeholders or dependencies. '
+            'Required files: ' + ', '.join(paths) + '. Optional assigned branding files: '
+            + ', '.join(optional_paths) + '. Write no other files. No placeholders or dependencies. '
             'Use JavaScript, plain CSS and React. Keep each file compact. No build or deployment tools.'},
             {'role':'user','content': shared}], []).text)
         files = result.get('files')
-        if not isinstance(files, dict) or set(files) != set(paths):
+        if (not isinstance(files, dict) or set(paths) - set(files)
+                or set(files) - (set(paths) | set(optional_paths))):
             raise ValueError('Worker violated file ownership')
         if any(not isinstance(code, str) or not code.strip() or len(code) > 50000 for code in files.values()):
             raise ValueError('Worker returned invalid source')
@@ -108,7 +110,8 @@ def draft_project(prompt, source, provider_for, deadline):
             'Follow the presentationContract and pageComposition: public websites need a composed hero, '
             'navigation, varied purposeful sections, content details and footer. Keep management tools '
             'in a separate view when requested; do not lead with tables, data-entry forms or admin buttons. '
-            'with alt text, responsive dimensions and clear sample labeling.')
+            'with alt text, responsive dimensions and clear sample labeling.',
+            ('public/logo.svg', 'index.html'))
         logic = pool.submit(copy_context().run, worker, 'gemini', ['src/projectLogic.js'],
             'Implement the exact shared logic interface, state, validation and requested actions. '
             'Preserve reload persistence using the supplied usePersistentState hook. No JSX or CSS.')

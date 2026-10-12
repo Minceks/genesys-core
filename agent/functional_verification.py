@@ -58,6 +58,8 @@ For invalid-input checks use the invalid assertion; a rejected submission is the
 expected outcome, not an application error. Never use example.com as an image
 fixture; reuse a real image URL from the implementation with unique synthetic text.
 Maximum 8 checks, 12 steps per check. Supported steps:
+Keep the entire plan under 3000 tokens. Prefer 4-6 compact workflow checks;
+omit explanatory prose and repeated long descriptions. Return one complete JSON object.
 {"action":"fill","target":{"by":"label","name":"field"},"value":"sample"}
 {"action":"click","target":{"by":"role","role":"button","name":"Add"}}
 {"action":"select","target":{"by":"label","name":"Category"},"value":"option value"}
@@ -161,6 +163,10 @@ def verify_functions(page, prompt, provider, attempt=0, feedback="", sources=Non
         raw = re.sub(r'^```(?:json)?\s*|\s*```$', '', raw)
         plan = json.loads(raw)
     except Exception as error:
+        logging.getLogger(__name__).warning('functional_verification_planning_failed type=%s detail=%s', type(error).__name__, str(error)[:250])
+        if attempt == 0:
+            return verify_functions(page, prompt, provider, attempt=1,
+                feedback='Previous planning response was unavailable or invalid JSON. Return one compact complete JSON object under 3000 tokens with executable primary workflows.', sources=sources)
         # A verifier/provider failure is not evidence of broken application code.
         return {'status':'success', 'issues':[], 'testedInteractions':[],
                 'unverified':['Functional verification could not run.'], 'unverifiedCore':['Verification service unavailable: '+str(error)[:250]]}
