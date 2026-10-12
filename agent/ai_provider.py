@@ -1,6 +1,7 @@
 from .user_allowance import record as record_model_usage
 import json
 import os
+import re
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -14,6 +15,13 @@ from .model_context import bounded_messages
 # ============================================================
 
 settings = load_settings()
+
+
+def json_response_requested(messages, tools):
+    return not tools and any(
+        message.get('role') == 'system' and isinstance(message.get('content'), str)
+        and re.search(r'\breturn\s+(?:only\s+)?json\b|\bjson\s+only\b', message['content'], re.I)
+        for message in messages)
 
 
 # ============================================================
@@ -1448,6 +1456,8 @@ class OpenAIProvider(AIProvider):
             prepared.append(item)
         options = dict(model=self.model, messages=prepared,
                        max_completion_tokens=min(12000, max(2000, int(os.getenv('GENESYS_OUTPUT_TOKEN_LIMIT', '6000')))))
+        if json_response_requested(prepared, tools):
+            options['response_format'] = {'type': 'json_object'}
         if self.model.startswith(('gpt-5', 'gpt-6', 'o3', 'o4')):
             options['reasoning_effort'] = 'low'
         if tools:
