@@ -70,6 +70,27 @@ def test_accessible_name_whitespace_is_normalized():
     assert page.names == ['Sample content']
 
 
+def test_repeated_buttons_can_be_scoped_to_navigation():
+    result = object()
+    class Navigation:
+        def is_visible(self):
+            return True
+        def get_by_role(self, role, **kwargs):
+            assert role == 'button' and kwargs['name'] == 'Book'
+            return result
+    class Candidates:
+        def count(self):
+            return 1
+        def nth(self, index):
+            return Navigation()
+    class ScopedPage:
+        def get_by_role(self, role, **kwargs):
+            assert role == 'navigation' and kwargs['name'] == 'Primary'
+            return Candidates()
+    assert target(ScopedPage(), {'by': 'role', 'role': 'button', 'name': 'Book',
+        'withinRole': {'role': 'navigation', 'name': 'Primary'}}) is result
+
+
 def test_missing_requirement_coverage_never_mutates_app():
     page = Page()
     provider = Provider({'checks': [], 'unverified': [], 'unverifiedCore': []})
