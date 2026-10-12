@@ -3311,7 +3311,12 @@ def run_agent(
                         require_images=bool(re.search(r"\b(photographer|photography|photographic)\b", prompt, re.I) and re.search(r"\b(portfolio|gallery|website|site)\b", prompt, re.I))
                     )
                     report_progress('Checking requested content and interactions')
-                    content_result = get_browser(project_id).content_checks(prompt, provider)
+                    visual_checks = []
+                    if quality['status'] == 'success':
+                        visual_checks.append('Desktop and phone: rendered content, headline hierarchy and no horizontal overflow (not subjective aesthetic quality).')
+                        if all(item.get('brandVisual') and item.get('favicon') for item in quality.get('snapshots', [])):
+                            visual_checks.append('Visible header logo and configured favicon.')
+                    content_result = get_browser(project_id).content_checks(prompt, provider, preverified=visual_checks)
                     verification = {
                         "passed": (["Desktop and mobile layout"] if quality['status'] == 'success' else []) + content_result.get('testedInteractions', []),
                         "unverified": content_result.get("unverified", []) + ["Functions outside the listed checks and real multi-user behavior."],

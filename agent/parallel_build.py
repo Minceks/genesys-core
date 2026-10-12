@@ -24,8 +24,25 @@ def parsed(text):
     return value
 
 
+def normalize_owned_files(files, paths):
+    if not isinstance(files, dict):
+        raise ValueError('Worker returned no files')
+    allowed = set(paths)
+    basenames = {path.rsplit('/', 1)[-1]: path for path in allowed}
+    normalized = {}
+    for path, code in files.items():
+        if not isinstance(path, str) or '..' in path.split('/'):
+            raise ValueError('Worker returned an unsafe file path')
+        clean = path.removeprefix('./').removeprefix('/')
+        clean = clean if clean in allowed else basenames.get(clean, clean)
+        if clean not in allowed or clean in normalized:
+            raise ValueError('Worker violated file ownership')
+        normalized[clean] = code
+    return normalized
+
+
 def review_draft(files, plan, source, provider):
-    if sum(len(code) for code in files.values()) > 32000:
+    if sum(len(code) for code in files.values()) > 48000:
         raise ValueError('Draft exceeds complete review context; use normal build flow')
     verdict = parsed(provider.generate([
         {'role': 'system', 'content':
@@ -83,7 +100,7 @@ def draft_project(prompt, source, provider_for, deadline):
             + ', '.join(optional_paths) + '. Write no other files. No placeholders or dependencies. '
             'Use JavaScript, plain CSS and React. Keep each file compact. No build or deployment tools.'},
             {'role':'user','content': shared}], []).text)
-        files = result.get('files')
+        files = normalize_owned_files(result.get('files'), set(paths) | set(optional_paths))
         if (not isinstance(files, dict) or set(paths) - set(files)
                 or set(files) - (set(paths) | set(optional_paths))):
             raise ValueError('Worker violated file ownership')

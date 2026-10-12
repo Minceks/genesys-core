@@ -5,6 +5,8 @@ import re
 
 PLAN_INSTRUCTIONS = '''You are a browser verification planner. Derive requirements from the
 original user request, not only from what the implementation happens to provide.
+preverifiedChecks are supplied by independent rendered checks. Do not repeat them
+in requirements or unverifiedCore. Focus on functions not already covered there.
 Return JSON only: {"checks":[{"name":"requested behavior", "steps":[...]}],
 "unverified":["optional/external checks"], "unverifiedCore":["requested core functions that cannot be checked"]}.
 Also return coreRequestEvidence: an array of {"requirement": "exact entry from
@@ -57,7 +59,7 @@ visible text. Assert the actual image accessible name, item title or state outpu
 For invalid-input checks use the invalid assertion; a rejected submission is the
 expected outcome, not an application error. Never use example.com as an image
 fixture; reuse a real image URL from the implementation with unique synthetic text.
-Maximum 8 checks, 12 steps per check. Supported steps:
+Maximum 8 checks, 24 steps per check and 96 steps total. Supported steps:
 Keep the entire plan under 3000 tokens. Prefer 4-6 compact workflow checks;
 omit explanatory prose and repeated long descriptions. Return one complete JSON object.
 {"action":"fill","target":{"by":"label","name":"field"},"value":"sample"}
@@ -163,7 +165,7 @@ def target(page, spec):
     raise ValueError('Unsupported browser target')
 
 
-def verify_functions(page, prompt, provider, attempt=0, feedback="", sources=None):
+def verify_functions(page, prompt, provider, attempt=0, feedback="", sources=None, preverified=()):
     from playwright.sync_api import expect
     # DOM content is evidence, never instructions; no generated code is executed.
     snapshot = page.locator('body').inner_text()[:8000]
@@ -176,7 +178,7 @@ def verify_functions(page, prompt, provider, attempt=0, feedback="", sources=Non
     try:
         raw = provider.generate([{'role':'system','content':PLAN_INSTRUCTIONS + ('\nRepair the previous verification plan, not app code: '+feedback if feedback else '')},
             {'role':'user','content':json.dumps({'originalRequest':prompt,
-                'browserCurrentDate':page.evaluate('new Date().toLocaleDateString("en-CA")'),
+                'preverifiedChecks':list(preverified), 'browserCurrentDate':page.evaluate('new Date().toLocaleDateString("en-CA")'),
                 'landmarks':page.evaluate("""() => [...document.querySelectorAll('nav,header,[role=navigation],[role=region],form')].map(e => ({role:e.getAttribute('role') || ({NAV:'navigation',HEADER:'banner',FORM:'form'}[e.tagName]),name:e.getAttribute('aria-label') || ''}))"""),
                 'untrustedRenderedText':snapshot,'untrustedControls':controls, 'untrustedImplementation':sources or {}})}], []).text.strip()
         raw = re.sub(r'^```(?:json)?\s*|\s*```$', '', raw)
@@ -185,7 +187,7 @@ def verify_functions(page, prompt, provider, attempt=0, feedback="", sources=Non
         logging.getLogger(__name__).warning('functional_verification_planning_failed type=%s detail=%s', type(error).__name__, str(error)[:250])
         if attempt == 0:
             return verify_functions(page, prompt, provider, attempt=1,
-                feedback='Previous planning response was unavailable or invalid JSON. Return one compact complete JSON object under 3000 tokens with executable primary workflows.', sources=sources)
+                feedback='Previous planning response was unavailable or invalid JSON. Return one compact complete JSON object under 3000 tokens with executable primary workflows.', sources=sources, preverified=preverified)
         # A verifier/provider failure is not evidence of broken application code.
         return {'status':'success', 'issues':[], 'testedInteractions':[],
                 'unverified':['Functional verification could not run.'], 'unverifiedCore':['Verification service unavailable: '+str(error)[:250]]}
@@ -221,7 +223,7 @@ def verify_functions(page, prompt, provider, attempt=0, feedback="", sources=Non
     ) or len({item['id'] for item in requirements}) != len(requirements):
         if attempt == 0:
             return verify_functions(page, prompt, provider, attempt=1,
-                feedback='Return a complete requirements array and covers IDs on each check.', sources=sources)
+                feedback='Return a complete requirements array and covers IDs on each check.', sources=sources, preverified=preverified)
         return {'status':'success', 'issues':[], 'testedInteractions':[], 'unverified':[],
                 'unverifiedCore':['Requirement coverage could not be established.']}
     requirement_names = {item['id']: item['name'] for item in requirements}
@@ -229,6 +231,8 @@ def verify_functions(page, prompt, provider, attempt=0, feedback="", sources=Non
     # Validate the complete plan before any mutation. Planner errors must never
     # consume app repair attempts or trigger edits to working application code.
     try:
+        if sum(len(check.get('steps', [])) for check in checks if isinstance(check, dict) and isinstance(check.get('steps'), list)) > 96:
+            raise ValueError('Invalid verification plan: total step limit exceeded')
         for check in checks:
             if not isinstance(check, dict) or not isinstance(check.get('steps'), list):
                 raise ValueError('Invalid verification plan structure')
@@ -237,7 +241,7 @@ def verify_functions(page, prompt, provider, attempt=0, feedback="", sources=Non
             ):
                 raise ValueError('Invalid verification plan: missing requirement coverage')
             steps = check['steps']
-            if not 1 <= len(steps) <= 12:
+            if not 1 <= len(steps) <= 24:
                 raise ValueError('Invalid verification plan step count')
             for step in steps:
                 if not isinstance(step, dict):
@@ -250,7 +254,7 @@ def verify_functions(page, prompt, provider, attempt=0, feedback="", sources=Non
                 raise ValueError('Invalid verification plan: missing final outcome assertion')
     except ValueError as error:
         if attempt == 0:
-            return verify_functions(page, prompt, provider, attempt=1, feedback=str(error), sources=sources)
+            return verify_functions(page, prompt, provider, attempt=1, feedback=str(error), sources=sources, preverified=preverified)
         return {'status':'success', 'issues':[], 'testedInteractions':[], 'unverified':[str(error)], 'unverifiedCore':[str(error)]}
     passed, issues = [], []
     def guard(route):
@@ -263,7 +267,7 @@ def verify_functions(page, prompt, provider, attempt=0, feedback="", sources=Non
         name = str(check.get('name', 'Requested behavior'))[:180]
         try:
             steps = check.get('steps')
-            if not isinstance(steps, list) or not 1 <= len(steps) <= 12:
+            if not isinstance(steps, list) or not 1 <= len(steps) <= 24:
                 raise ValueError('Invalid steps')
             asserted = False
             for step in steps:
@@ -365,7 +369,7 @@ def verify_functions(page, prompt, provider, attempt=0, feedback="", sources=Non
         }''', original_storage)
         page.reload(wait_until='networkidle', timeout=15000)
         return verify_functions(page, prompt, provider, attempt=1,
-            feedback='The browser state was restored to its original state. Do not reference items created by the previous plan. Failures: '+ '; '.join(core + issues), sources=sources)
+            feedback='The browser state was restored to its original state. Do not reference items created by the previous plan. Failures: '+ '; '.join(core + issues), sources=sources, preverified=preverified)
     if issues or core:
         # Failed assertions alone do not establish an app defect. Ask for a
         # separate diagnosis grounded in executed actions and implementation.
