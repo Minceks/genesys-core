@@ -70,6 +70,8 @@ omit explanatory prose and repeated long descriptions. Return one complete JSON 
 {"action":"value","target":{"by":"label","name":"field"},"value":"expected"}
 {"action":"invalid","target":{"by":"label","name":"field"}}
 {"action":"attribute","target":{"by":"role","role":"button","name":"Favorite"},"attribute":"aria-pressed","value":"true"}
+Allowed read-only attributes: aria-pressed, aria-selected, aria-expanded, src,
+href, min, max, type, required, disabled. Do not invent other assertion attributes.
 Targets use exact accessible names: by=role,label,text,placeholder. Optional
 withinText scopes to a row/listitem containing unique synthetic text.
 withinText also supports article/group cards and visible confirmation dialogs.
@@ -306,7 +308,7 @@ def verify_functions(page, prompt, provider, attempt=0, feedback="", sources=Non
                     asserted = True
                 elif action == 'attribute':
                     attribute = step.get('attribute')
-                    if attribute not in {'aria-pressed', 'aria-selected', 'aria-expanded', 'src', 'href'}:
+                    if attribute not in {'aria-pressed', 'aria-selected', 'aria-expanded', 'src', 'href', 'min', 'max', 'type', 'required', 'disabled'}:
                         raise ValueError('Unsupported assertion attribute')
                     expect(locator).to_have_attribute(attribute, str(step.get('value', '')), timeout=3000)
                     asserted = True
@@ -342,7 +344,7 @@ def verify_functions(page, prompt, provider, attempt=0, feedback="", sources=Non
         except Exception as error:
             detail = str(error)
             if 'Invalid' in detail or 'Unsupported' in detail or 'Expected outcome was not asserted' in detail or 'strict mode violation' in detail:
-                core.append(name + ': verification plan could not execute.')
+                core.append(name + ': verification plan could not execute: ' + detail[:250])
             elif 'intercepts pointer events' in detail:
                 core.append(name + ': an overlay blocked the verification sequence.')
             else:
