@@ -59,7 +59,7 @@ def test_invalid_planning_json_is_retried_without_app_mutation():
     page = Page()
     provider = MalformedProvider()
     result = verify_functions(page, 'Build a counter', provider)
-    assert provider.calls == 2
+    assert provider.calls == 3
     assert page.mutations == 0
     assert result['unverifiedCore']
 
@@ -68,6 +68,15 @@ def test_accessible_name_whitespace_is_normalized():
     page = Page()
     target(page, {'by': 'role', 'role': 'button', 'name': 'Sample\n  content'})
     assert page.names == ['Sample content']
+
+
+def test_visual_evidence_never_substitutes_for_function_checks():
+    evidence = ['Visible header logo and configured favicon.',
+                'Desktop and phone: measured layout.']
+    assert functional_verification.independently_checked('Provide a favicon', evidence)
+    assert functional_verification.independently_checked('Responsive phone layout', evidence)
+    assert not functional_verification.independently_checked('Save an uploaded logo', evidence)
+    assert not functional_verification.independently_checked('Mobile booking validation', evidence)
 
 
 def test_repeated_buttons_can_be_scoped_to_navigation():

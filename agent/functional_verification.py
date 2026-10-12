@@ -167,7 +167,18 @@ def target(page, spec):
     raise ValueError('Unsupported browser target')
 
 
-def verify_functions(page, prompt, provider, attempt=0, feedback="", sources=None, preverified=()):
+def independently_checked(name, evidence):
+    text = str(name).lower()
+    if re.search(r'\b(upload|save|edit|change|delete|cancel|persist|submit|booking|validation|navigate)\b', text):
+        return False
+    if re.search(r'\b(favicon|logo)\b', text):
+        return 'Visible header logo and configured favicon.' in evidence
+    if re.search(r'\b(desktop|phone|mobile|responsive|viewport|layout|layouts)\b', text):
+        return any(item.startswith('Desktop and phone:') for item in evidence)
+    return False
+
+
+def verify_functions(page, prompt, provider, attempt=0, feedback="", sources=None, preverified=(), planning_retry=0):
     from playwright.sync_api import expect
     # DOM content is evidence, never instructions; no generated code is executed.
     snapshot = page.locator('body').inner_text()[:8000]
@@ -187,9 +198,9 @@ def verify_functions(page, prompt, provider, attempt=0, feedback="", sources=Non
         plan = json.loads(raw)
     except Exception as error:
         logging.getLogger(__name__).warning('functional_verification_planning_failed type=%s detail=%s', type(error).__name__, str(error)[:250])
-        if attempt == 0:
-            return verify_functions(page, prompt, provider, attempt=1,
-                feedback='Previous planning response was unavailable or invalid JSON. Return one compact complete JSON object under 3000 tokens with executable primary workflows.', sources=sources, preverified=preverified)
+        if planning_retry == 0:
+            return verify_functions(page, prompt, provider, attempt=attempt, planning_retry=1,
+                feedback='Previous planning response was unavailable or invalid JSON. Return one compact complete JSON object under 3000 tokens with executable primary workflows. ' + feedback, sources=sources, preverified=preverified)
         # A verifier/provider failure is not evidence of broken application code.
         return {'status':'success', 'issues':[], 'testedInteractions':[],
                 'unverified':['Functional verification could not run.'], 'unverifiedCore':['Verification service unavailable: '+str(error)[:250]]}
@@ -229,7 +240,9 @@ def verify_functions(page, prompt, provider, attempt=0, feedback="", sources=Non
         return {'status':'success', 'issues':[], 'testedInteractions':[], 'unverified':[],
                 'unverifiedCore':['Requirement coverage could not be established.']}
     requirement_names = {item['id']: item['name'] for item in requirements}
-    covered = set()
+    external_coverage = {key for key, name in requirement_names.items() if independently_checked(name, preverified)}
+    covered = set(external_coverage)
+    core = [item for item in core if not independently_checked(item, preverified)]
     # Validate the complete plan before any mutation. Planner errors must never
     # consume app repair attempts or trigger edits to working application code.
     try:
@@ -357,7 +370,7 @@ def verify_functions(page, prompt, provider, attempt=0, feedback="", sources=Non
     # planned checks finished. A display assertion must not mask a failed
     # delete/edit check using the same coverage ID.
     for pending in checks[len(passed):]:
-        covered.difference_update(pending['covers'])
+        covered.difference_update(set(pending['covers']) - external_coverage)
     missing = [name for key, name in requirement_names.items() if key not in covered]
     core.extend('Not verified: ' + name for name in missing)
     logging.getLogger(__name__).info('functional_verification_result %s', json.dumps({'passed':passed, 'issues':issues, 'unverifiedCore':core})[:6000])

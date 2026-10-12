@@ -3322,7 +3322,7 @@ def run_agent(
                         "unverified": content_result.get("unverified", []) + ["Functions outside the listed checks and real multi-user behavior."],
                         "coverage": content_result.get('coverage', {})
                     }
-                    if content_result.get('unverifiedCore') and not content_result.get('issues'):
+                    if quality['status'] == 'success' and content_result.get('unverifiedCore') and not content_result.get('issues'):
                         return {"status":"error", "message":"The build is saved, but core function checks could not finish. Retry verification or report the problem.",
                             "buildPassed":True, "browserVerified":False, "errorType":"verification_incomplete",
                             "verification":verification, "modifiedFiles":list(modified_files), "requestType":"build",
