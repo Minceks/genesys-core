@@ -2442,9 +2442,21 @@ def run_agent(
                     messages.append({'role':'system','content':
                         'Parallel workers implemented the shared application interface. Files: ' + ', '.join(drafts) +
                         '. Preserve their changes; repair only verification failures.'})
-        except Exception:
+        except Exception as draft_error:
             import logging
             logging.getLogger(__name__).exception('parallel_build_fell_back')
+            # Keep complete owned drafts and exact review findings. Restarting
+            # from the placeholder wastes completed work and the repair budget.
+            from .parallel_build import DraftReviewFailed
+            if isinstance(draft_error, DraftReviewFailed):
+                for path, content in draft_error.drafts.items():
+                    result = workspace.write_file(path, content)
+                    if result.get('status') != 'success':
+                        raise RuntimeError('Could not preserve parallel draft: ' + path)
+                    if path not in modified_files:
+                        modified_files.append(path)
+                messages.append({'role': 'system', 'content': str(draft_error) +
+                    ' Inspect these saved drafts and repair the listed interface defects. Preserve the visual direction. Do not recreate the project.'})
             # Successfully written files are tracked even if a later write fails.
             changed_since_build = bool(modified_files)
             implementation_ready = False

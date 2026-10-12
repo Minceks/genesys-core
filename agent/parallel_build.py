@@ -1,12 +1,19 @@
 """Parallel drafts for clean new projects; all writes remain coordinator-owned."""
 import json
 import logging
+import os
 import re
 import time
 from concurrent.futures import ThreadPoolExecutor
 from contextvars import copy_context
 
 logger = logging.getLogger(__name__)
+
+
+class DraftReviewFailed(ValueError):
+    def __init__(self, files, issues):
+        super().__init__('Draft requires targeted repair: ' + '; '.join(str(item) for item in issues)[:2000])
+        self.drafts = files
 
 
 def parsed(text):
@@ -58,6 +65,8 @@ def review_draft(files, plan, source, provider):
         {'role': 'user', 'content': json.dumps({'plan': plan, 'design': source[-8000:], 'files': files})}
     ], []).text)
     repairs = verdict.get('files', {})
+    if verdict.get('valid') is False and isinstance(verdict.get('issues'), list):
+        raise DraftReviewFailed(files, verdict['issues'])
     if verdict.get('valid') is not True or not isinstance(verdict.get('issues'), list):
         raise ValueError('Shared UI/logic draft review did not pass')
     if not isinstance(repairs, dict) or set(repairs) - set(files):
@@ -129,7 +138,7 @@ def draft_project(prompt, source, provider_for, deadline):
             'in a separate view when requested; do not lead with tables, data-entry forms or admin buttons. '
             'with alt text, responsive dimensions and clear sample labeling.',
             ('public/logo.svg', 'index.html'))
-        logic = pool.submit(copy_context().run, worker, 'gemini', ['src/projectLogic.js'],
+        logic = pool.submit(copy_context().run, worker, os.getenv('GENESYS_PARALLEL_LOGIC_PROVIDER', 'openai'), ['src/projectLogic.js'],
             'Implement the exact shared logic interface, state, validation and requested actions. '
             'Preserve reload persistence using the supplied usePersistentState hook. No JSX or CSS.')
         files = {**ui.result(), **logic.result()}
