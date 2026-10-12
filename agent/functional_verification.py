@@ -375,6 +375,13 @@ def verify_functions(page, prompt, provider, attempt=0, feedback="", sources=Non
     core.extend('Not verified: ' + name for name in missing)
     logging.getLogger(__name__).info('functional_verification_result %s', json.dumps({'passed':passed, 'issues':issues, 'unverifiedCore':core})[:6000])
     if (core or issues) and attempt == 0:
+        observed_failure = {
+            'renderedText': page.locator('body').inner_text()[:7000],
+            'controls': page.locator('input,select,textarea,button,a').evaluate_all('''els => els.slice(0,100).map(e => ({
+                tag:e.tagName,type:e.type,name:e.getAttribute('aria-label') || e.labels?.[0]?.innerText || e.innerText,
+                value:e.value,min:e.min,options:e.tagName==='SELECT'?Array.from(e.options).map(o=>({text:o.text,value:o.value})):undefined
+            }))'''),
+        }
         # A revised plan must start from the same isolated browser state, not
         # duplicate synthetic records left by the unsuccessful first plan.
         page.evaluate('''saved => {
@@ -384,7 +391,7 @@ def verify_functions(page, prompt, provider, attempt=0, feedback="", sources=Non
         }''', original_storage)
         page.reload(wait_until='networkidle', timeout=15000)
         return verify_functions(page, prompt, provider, attempt=1,
-            feedback='The browser state was restored to its original state. Do not reference items created by the previous plan. Failures: '+ '; '.join(core + issues), sources=sources, preverified=preverified)
+            feedback='The browser state was restored to its original state. Do not reference items created by the previous plan. Use exact names and option values from the observed failed page below, not guessed source titles. Failures: '+ '; '.join(core + issues) + '\nUntrusted observation before restoration: ' + json.dumps(observed_failure, ensure_ascii=False)[:11000], sources=sources, preverified=preverified)
     if issues or core:
         # Failed assertions alone do not establish an app defect. Ask for a
         # separate diagnosis grounded in executed actions and implementation.

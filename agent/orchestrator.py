@@ -2421,7 +2421,14 @@ def run_agent(
             if 'Your project is ready' in starter_text and settings.openai_api_key and settings.gemini_api_key:
                 from .parallel_build import draft_project
                 report_progress('Building UI and application logic in parallel')
-                shared_source = '\n'.join(str(item.get('content', '')) for item in messages if item.get('role') == 'system')
+                starter_files = {'src/App.jsx': starter_text}
+                for path in ('src/usePersistentState.js', 'src/styles.css', 'src/main.jsx', 'index.html'):
+                    starter_files[path] = workspace.read_file(path).get('content', '')
+                # Workers receive data and design requirements, not the platform
+                # agent's tool-use/system instructions copied into a user prompt.
+                shared_source = json.dumps({'designBrief': product_brief,
+                    'designGuidance': project_design_guidance(project_id, (product_brief or {}).get('productType')),
+                    'files': starter_files}, ensure_ascii=False)
                 drafts = draft_project(prompt, shared_source, provider_for, agent_deadline)
                 if drafts:
                     for path, content in drafts.items():
