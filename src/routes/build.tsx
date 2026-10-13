@@ -213,7 +213,7 @@ function BuildPage({ projectId, projectName, onProjects }: { projectId: string; 
 
       try {
         const saved =
-          sessionStorage.getItem(chatStorageKey);
+          localStorage.getItem(chatStorageKey) || sessionStorage.getItem(chatStorageKey);
 
         const restored = saved ? JSON.parse(saved) : [];
         return Array.isArray(restored)
@@ -313,6 +313,45 @@ function BuildPage({ projectId, projectName, onProjects }: { projectId: string; 
 
   useEffect(() => {
     let mounted = true;
+    void fetch(`${CLOUD_AGENT_URL}/agent/jobs?projectId=${encodeURIComponent(projectId)}&history=1`, {
+      headers: buildCloudAgentHeaders(),
+      signal: AbortSignal.timeout(15000),
+    }).then(async response => {
+      if (!response.ok) throw new Error('Chat history unavailable');
+      const data = await response.json();
+      const restored: ChatMessage[] = (data.jobs || []).flatMap((job: any) => {
+        const turns: ChatMessage[] = [{ role: 'user', text: job.prompt }];
+        if (job.result) {
+          const result = job.result;
+          turns.push({ role: 'bot', agent: 'GeneSys',
+            text: cleanAgentText(result.message || result.text || (result.browserVerified
+              ? 'The build and browser checks passed.' : 'Your saved request completed. Review verification below.')),
+            buildPassed: result.buildPassed, browserVerified: result.browserVerified,
+            verification: result.verification, modifiedFiles: result.modifiedFiles,
+            checkpointId: result.checkpoint?.checkpointId,
+          });
+        }
+        return turns;
+      });
+      if (mounted && restored.length) setMessages(previous => {
+        if (!previous.length) return restored;
+        // The local tail may already include the job restored by background recovery.
+        for (let overlap = Math.min(restored.length, previous.length); overlap > 0; overlap--) {
+          if (restored.slice(-overlap).every((turn, index) =>
+            turn.role === previous[index].role && turn.text === previous[index].text)) {
+            return [...restored.slice(0, -overlap), ...previous];
+          }
+        }
+        // Preserve local metadata when its conversation already starts with the saved history.
+        if (previous[0]?.text === restored[0]?.text) return previous;
+        return [...restored, ...previous];
+      });
+    }).catch(error => console.warn('Could not restore saved project chat:', error));
+    return () => { mounted = false; };
+  }, [projectId]);
+
+  useEffect(() => {
+    let mounted = true;
     async function recover() {
       if (requestInFlight.current || document.hidden) return;
       const build = await recoverBackgroundBuild(projectId);
@@ -344,7 +383,7 @@ function BuildPage({ projectId, projectName, onProjects }: { projectId: string; 
 
   useEffect(() => {
     try {
-      sessionStorage.setItem(
+      localStorage.setItem(
         chatStorageKey,
         JSON.stringify(messages)
       );
