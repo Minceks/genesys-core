@@ -337,6 +337,16 @@ class BrowserSession:
         except Exception:
             # Missing source evidence must not be interpreted as server storage.
             pass
+        from .design_strategy import requests_redesign
+        if requests_redesign(prompt):
+            try:
+                brief = json.loads(workspace.read_file('.genesys-design.json').get('content', '{}'))
+                purpose = brief.get('originalRequest', '')
+                if purpose and purpose != prompt:
+                    prompt = ('Original product request (preserve and regression-test its workflows): '
+                              + purpose + '\nCurrent visual redesign request: ' + prompt)
+            except (ValueError, TypeError, AttributeError, FileNotFoundError):
+                pass
         return verify_functions(page, prompt, provider, sources=sources, preverified=preverified)
 
     @browser_thread

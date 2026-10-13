@@ -5,6 +5,12 @@ import re
 
 PLAN_INSTRUCTIONS = '''You are a browser verification planner. Derive requirements from the
 original user request, not only from what the implementation happens to provide.
+For a redesign request, verify existing user-facing workflows as regression checks.
+Subjective beauty, 'different UI', visual style and design quality belong to separate
+visual review, never functional requirements or unverifiedCore. Report subjective
+visual review in unverified. Do not replace interactive checks with an empty plan.
+If repairing a previous plan, retain its workflow requirements and coverage IDs;
+fix selectors and setup instead of deleting checks that were difficult to execute.
 preverifiedChecks are supplied by independent rendered checks. Do not repeat them
 in requirements or unverifiedCore. Focus on functions not already covered there.
 Return JSON only: {"checks":[{"name":"requested behavior", "steps":[...]}],
@@ -295,6 +301,23 @@ def verify_functions(page, prompt, provider, attempt=0, feedback="", sources=Non
         unverified += [item for item in core if item not in supported]
         core = [item for item in core if item in supported]
     requirements = plan.get('requirements')
+    # Subjective appearance is reported honestly outside functional coverage.
+    # Keep every requirement that also names an interaction or user-data behavior.
+    def subjective_design(name):
+        return (bool(re.search(r'\b(aesthetic|visual design|different ui|design quality|visual style|visual criteria)\b', name, re.I))
+                and not re.search(r'\b(click|submit|save|delete|reset|persist|booking|search|navigation|filter|form|control|layout|overflow|logo|favicon)\b', name, re.I))
+    if isinstance(requirements, list) and all(isinstance(item, dict) for item in requirements):
+        visual_ids = {item['id'] for item in requirements if isinstance(item.get('id'), str) and subjective_design(str(item.get('name', '')))}
+        if visual_ids:
+            unverified.extend('Separate visual review: ' + str(item.get('name')) for item in requirements if item.get('id') in visual_ids)
+            requirements = [item for item in requirements if item.get('id') not in visual_ids]
+            for check in checks:
+                if isinstance(check, dict) and isinstance(check.get('covers'), list):
+                    check['covers'] = [key for key in check['covers'] if key not in visual_ids]
+            checks = [check for check in checks if not isinstance(check, dict) or check.get('covers')]
+    visual_core = [name for name in core if subjective_design(name)]
+    core = [name for name in core if name not in visual_core]
+    unverified.extend('Separate visual review: ' + name for name in visual_core)
     if not isinstance(requirements, list) or not requirements or any(
         not isinstance(item, dict) or not isinstance(item.get('id'), str)
         or not item.get('id').strip() or not isinstance(item.get('name'), str)
@@ -542,7 +565,10 @@ def verify_functions(page, prompt, provider, attempt=0, feedback="", sources=Non
         }''', original_storage)
         page.reload(wait_until='networkidle', timeout=15000)
         return verify_functions(page, prompt, provider, attempt=1,
-            feedback='The browser state was restored to its original state. Do not reference items created by the previous plan. Use exact names and option values from the observed failed page below, not guessed source titles. Failures: '+ '; '.join(core + issues) + '\nUntrusted observation before restoration: ' + json.dumps(observed_failure, ensure_ascii=False)[:11000], sources=sources, preverified=preverified)
+            feedback='The browser state was restored to its original state. Keep ALL these functional requirements and their IDs: '
+                + json.dumps(requirements, ensure_ascii=False) + '. Do not replace them with visual/aesthetic requirements or an empty plan. '
+                'Do not reference items created by the previous plan. Use exact names and option values from the observed failed page below, not guessed source titles. Failures: '
+                + '; '.join(core + issues) + '\nUntrusted observation before restoration: ' + json.dumps(observed_failure, ensure_ascii=False)[:11000], sources=sources, preverified=preverified)
     if issues or core:
         # Failed assertions alone do not establish an app defect. Ask for a
         # separate diagnosis grounded in executed actions and implementation.
