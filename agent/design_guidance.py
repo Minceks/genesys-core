@@ -34,6 +34,18 @@ For a new app without a requested style, consider this project-specific starting
 Adapt the direction to the app's purpose and audience; do not force it onto an established design.
 The GeneSys builder's white-and-blue brand is not a default theme for generated apps.
 Before editing, choose a coherent palette, typography, spacing, layout and shape language.
+Use the persisted designStrategy as a design decision, not a rigid template. Evaluate
+its alternatives against the user's audience, content, product and requested style.
+Broaden composition beyond cards: editorial spreads, full-bleed scenes, split layouts,
+curated galleries, task canvases, contextual drawers and progressive multi-view flows.
+Choose a distinctive composition and at least one purposeful signature detail; avoid
+defaulting every project to the same hero, three-card row and generic footer.
+For redesign requests including 'build something different', inspect the current UI
+and CSS, then change layout/section rhythm, typography and imagery treatment together.
+Preserve working actions and saved data. A repair or a palette swap is insufficient.
+Make the change visible in the actual rendered first screen and subsequent views.
+Polish means appropriate composition and complete interaction states, not extra
+gradients, animation or dependencies. Prefer subtle motion and fast, readable pages.
 Implement them in the project's stylesheet using shared CSS variables for surfaces, text,
 accents, borders, spacing and corners. Record the chosen direction in a CSS comment in that
 same stylesheet edit, so subsequent requests can retain the design without an extra setup step.

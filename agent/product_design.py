@@ -1,6 +1,7 @@
 """Fast product classification and a persisted brief, without an extra model call."""
 import json
 import re
+from .design_strategy import design_strategy, requests_redesign
 
 BRIEF_PATH = '.genesys-design.json'
 PRODUCTS = {
@@ -68,6 +69,7 @@ def presentation_contract(product):
 
 
 def prepare_design(workspace, prompt):
+    redesign = requests_redesign(prompt)
     previous = None
     try:
         result = workspace.read_file(BRIEF_PATH)
@@ -86,7 +88,7 @@ def prepare_design(workspace, prompt):
         brief = dict(previous)
         brief['latestRequest'] = prompt
         brief['designPolicy'] = 'Preserve the existing direction; apply explicit user changes only.'
-        if re.search(r'\b(redesign|modernize|restyle)\b', prompt, re.I):
+        if redesign:
             brief['designPolicy'] = 'Refresh the visual direction as requested while preserving working behavior.'
     else:
         selected = selected or 'website'
@@ -98,7 +100,7 @@ def prepare_design(workspace, prompt):
         if previous:
             brief['purposeChangedFrom'] = previous['productType']
             brief['designPolicy'] += ' The product purpose changed; replace unsuitable inherited theme and layout.'
-    if not brief.get('designResearch') or re.search(r'\b(redesign|modernize|restyle)\b', prompt, re.I):
+    if not brief.get('designResearch') or redesign:
         from .design_research import research_design
         brief['designResearch'] = research_design(prompt, brief['productType'])
     if brief['designResearch']['family'] == 'gaming-editorial':
@@ -108,6 +110,18 @@ def prepare_design(workspace, prompt):
             'Keep administration separate from the public showcase; avoid generic beige CRUD cards.')
         brief['layout'] = 'Featured game hero, curated ranked discoveries, genre/platform browsing and focused game detail.'
     brief['presentationContract'] = presentation_contract(brief['productType'])
+    if redesign or not brief.get('designStrategy') or not retain:
+        brief['designStrategy'] = design_strategy(
+            workspace.project_id, brief['productType'], prompt, previous, redesign,
+        )
+    elif brief.get('designStrategy'):
+        brief['designStrategy'] = {**brief['designStrategy'], 'redesign': False,
+                                   'redesignRequirements': []}
+    if redesign:
+        brief['designPolicy'] = ('Perform a visibly distinct redesign using designStrategy alternatives. '
+            'Inspect the current UI and stylesheet; preserve working functionality and saved data. '
+            'Repairing defects alone does not satisfy this request. Change the composition, hierarchy '
+            'and visual treatment while honoring explicit user preferences.')
     brief['qualityStandard'] = {
         'composition': 'Distinctive focal point, purposeful section rhythm and product-appropriate density.',
         'typography': 'Coherent type hierarchy, readable body copy and deliberate line lengths.',

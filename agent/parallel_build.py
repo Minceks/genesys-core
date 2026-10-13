@@ -58,6 +58,10 @@ def review_draft(files, plan, source, provider):
          'Check named imports/exports, hook arguments, returned fields, exact action payload keys and '
          'result shapes, dynamic option population, persistence, cancellation/undo and stable confirmation. '
          'For public websites check visitor-first sections, CTA destinations, original SVG logo and favicon. '
+         'Evaluate the chosen designStrategy: composition must suit the audience and content, '
+         'with varied section rhythm, coherent visual tokens, finished mobile layout and real interactions. '
+         'A requested redesign must change composition and hierarchy; fixing logic or swapping accents alone '
+         'does not satisfy it. Prefer focused improvements over gratuitous features or dependencies. '
          'Check image subject evidence against adjacent titles: landscapes are not vehicles, and sedan photos '
          'must not represent SUVs. Reject unsupported photo subject claims; use accurate original SVG '
          'illustrations when a matching photograph cannot be established. Alt text is not image evidence. '
@@ -89,6 +93,11 @@ def draft_project(prompt, source, provider_for, deadline):
     planner = provider_for('openai')
     plan = parsed(planner.generate([{'role':'system', 'content':
         'Plan a React user application. Return JSON only: {"interface": "...", "requirements": [...], "pageComposition": [...]}. '
+        'Also include designDecision: {"direction":"chosen composition", "reason":"audience and task fit", '
+        '"signature":"one distinctive visual detail", "mobile":"intentional phone composition"}. '
+        'Evaluate designStrategy alternatives; choose an original purpose-appropriate design rather than '
+        'automatically repeating a hero and equal-card grid. Make the shared plan describe the actual '
+        'typography, palette, image treatment, section rhythm and interaction states. '
         'Follow presentationContract in the supplied design brief. For public websites plan a visitor-first '
         'hero, navigation, varied content sections, detail destinations and footer. Do not invent CRUD features '
         'or make a spreadsheet the public experience. Describe the purpose and visual composition of each section. '
