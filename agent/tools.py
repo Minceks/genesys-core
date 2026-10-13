@@ -116,8 +116,31 @@ def edit_file(filename: str, old_text: str, new_text: str,
     workspace = get_workspace(project_id)
     from .daytona_workspace import safe_remote_path
     content = workspace.sandbox.fs.download_file(safe_remote_path(filename)).decode("utf-8")
+    # Model text uses LF; remote files may retain CRLF. Normalize only when the
+    # exact match fails, and retain the remote newline convention on replacement.
+    if old_text and content.count(old_text) == 0 and '\r\n' in content:
+        normalized = content.replace('\r\n', '\n')
+        old_normalized = old_text.replace('\r\n', '\n')
+        if normalized.count(old_normalized) == 1:
+            updated = normalized.replace(old_normalized, new_text.replace('\r\n', '\n'), 1)
+            return workspace.write_file(filename, updated.replace('\n', '\r\n'))
     if not old_text or content.count(old_text) != 1:
-        raise ValueError("old_text must match exactly once. Supply a unique exact match from the file.")
+        from difflib import SequenceMatcher
+        from .ai_provider import READ_FILE_MAX_CHARS
+        lines = content.splitlines(keepends=True)
+        anchor = next((line.strip() for line in old_text.splitlines() if line.strip()), '')
+        closest = max(range(len(lines)), key=lambda i: SequenceMatcher(None, anchor, lines[i].strip()).ratio()) if lines and anchor else 0
+        start = max(0, closest - 5)
+        excerpt = content if len(content) <= READ_FILE_MAX_CHARS else ''.join(lines[start:])[:6000]
+        return {'status': 'error', 'tool': 'edit_file', 'path': filename,
+                'error': 'old_text must match exactly once. No edit was applied.',
+                'matchCount': content.count(old_text) if old_text else 0,
+                'currentContent': excerpt, 'startLine': 1 if len(content) <= READ_FILE_MAX_CHARS else start + 1,
+                'truncated': len(content) > READ_FILE_MAX_CHARS,
+                'repairInstruction': 'This is freshly read source. Do not repeat the failed patch. '
+                    'Use a unique exact substring from currentContent including its closing JSX/braces. '
+                    'For a truncated excerpt read the needed line range before editing. '
+                    'Preserve surrounding JSX structure and existing working handlers.'}
     return workspace.write_file(filename, content.replace(old_text, new_text, 1))
 
 

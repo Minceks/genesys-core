@@ -42,6 +42,9 @@ Choose a distinctive composition and at least one purposeful signature detail; a
 defaulting every project to the same hero, three-card row and generic footer.
 For redesign requests including 'build something different', inspect the current UI
 and CSS, then change layout/section rhythm, typography and imagery treatment together.
+Read both the current JSX structure and stylesheet before redesign edits. When edit_file
+returns fresh currentContent after a mismatch, rebuild the patch from that source;
+never repeat a stale old_text or guess closing JSX braces. Keep edits structurally complete.
 Preserve working actions and saved data. A repair or a palette swap is insufficient.
 Make the change visible in the actual rendered first screen and subsequent views.
 Polish means appropriate composition and complete interaction states, not extra

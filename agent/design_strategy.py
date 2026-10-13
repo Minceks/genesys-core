@@ -41,8 +41,9 @@ COMPOSITIONS = {
 def requests_redesign(prompt):
     return bool(re.search(
         r'\b(redesign|restyle|modernize|reimagine|new look|fresh look)\b|'
-        r'\b(?:different|difrent|diffrent)\s+(?:design|style|layout|look|website|site|app)\b|'
-        r'\b(?:build|make|create)\s+(?:something\s+)?(?:different|difrent|diffrent)\b',
+        r'\b(?:different|diferent|difrent|diffrent)\s+(?:ui|design|style|layout|look|website|site|app)\b|'
+        r'\b(?:build|make|create)\s+(?:something\s+)?(?:different|diferent|difrent|diffrent)\b|'
+        r'\b(?:ui|design|style|layout|look|website|site|app)\b.{0,30}\b(?:different|diferent|difrent|diffrent)\b',
         prompt, re.I,
     ))
 
