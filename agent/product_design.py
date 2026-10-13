@@ -3,6 +3,7 @@ import json
 import re
 from .design_strategy import design_strategy, requests_redesign
 from .layout_library import layout_reference_library
+from .content_direction import content_direction
 
 BRIEF_PATH = '.genesys-design.json'
 PRODUCTS = {
@@ -111,6 +112,9 @@ def prepare_design(workspace, prompt):
             'Keep administration separate from the public showcase; avoid generic beige CRUD cards.')
         brief['layout'] = 'Featured game hero, curated ranked discoveries, genre/platform browsing and focused game detail.'
     brief['presentationContract'] = presentation_contract(brief['productType'])
+    brief['contentDirection'] = content_direction(
+        prompt, (previous or {}).get('contentDirection') or content_direction(brief['originalRequest']),
+    )
     if redesign or not brief.get('designStrategy') or not retain:
         brief['designStrategy'] = design_strategy(
             workspace.project_id, brief['productType'], prompt, previous, redesign,

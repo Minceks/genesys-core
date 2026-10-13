@@ -339,9 +339,17 @@ class BrowserSession:
             # Missing source evidence must not be interpreted as server storage.
             pass
         from .design_strategy import requests_redesign
+        try:
+            brief = json.loads(workspace.read_file('.genesys-design.json').get('content', '{}'))
+        except (ValueError, TypeError, AttributeError, FileNotFoundError):
+            brief = {}
+        from .content_direction import domain_asset_issues
+        asset_issues = domain_asset_issues(sources, brief.get('contentDirection', {}))
+        if asset_issues:
+            return {'status': 'error', 'issues': asset_issues, 'testedInteractions': [],
+                    'unverified': asset_issues, 'unverifiedCore': [], 'coverage': {}}
         if requests_redesign(prompt):
             try:
-                brief = json.loads(workspace.read_file('.genesys-design.json').get('content', '{}'))
                 purpose = brief.get('originalRequest', '')
                 if purpose and purpose != prompt:
                     prompt = ('Original product request (preserve and regression-test its workflows): '

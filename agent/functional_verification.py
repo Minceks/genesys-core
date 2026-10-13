@@ -11,6 +11,10 @@ visual review, never functional requirements or unverifiedCore. Report subjectiv
 visual review in unverified. Do not replace interactive checks with an empty plan.
 If repairing a previous plan, retain its workflow requirements and coverage IDs;
 fix selectors and setup instead of deleting checks that were difficult to execute.
+Each check that acts on search results must generate its own results first. A reload,
+Reset action or prefill can hide the previous list; never assume it remains rendered.
+Test result selection before reload, then test persistence in a separate complete flow.
+Do not assert that a successful prefill leaves fields invalid; assert its actual values.
 preverifiedChecks are supplied by independent rendered checks. Do not repeat them
 in requirements or unverifiedCore. Focus on functions not already covered there.
 Return JSON only: {"checks":[{"name":"requested behavior", "steps":[...]}],
