@@ -75,6 +75,9 @@ href, min, max, type, required, disabled. Do not invent other assertion attribut
 Targets use exact accessible names: by=role,label,text,placeholder. Optional
 withinText scopes to a row/listitem containing unique synthetic text.
 withinText also supports article/group cards and visible confirmation dialogs.
+withinText and withinRole are target properties, never actions. For example:
+{"action":"click","target":{"by":"role","role":"button","name":"Select","withinText":"City Compact"}}.
+Only use the actions listed above; do not create a separate scope step.
 For repeated navigation names use withinRole on the target, for example
 {"by":"role","role":"button","name":"Book","withinRole":{"role":"navigation","name":"Primary"}}.
 Use the actual landmark name; omit name only when that role has one visible container.
@@ -261,6 +264,12 @@ def verify_functions(page, prompt, provider, attempt=0, feedback="", sources=Non
             for step in steps:
                 if not isinstance(step, dict):
                     raise ValueError('Invalid verification plan step')
+                if step.get('action') not in {'fill', 'click', 'select', 'reload', 'visible', 'absent', 'value', 'invalid', 'attribute'}:
+                    raise ValueError(
+                        f"Invalid verification plan: unsupported action {str(step.get('action'))[:80]}. "
+                        "Use fill, click, select, reload, visible, absent, value, invalid or attribute. "
+                        "withinText and withinRole belong inside target, never in action."
+                    )
                 if step.get('action') != 'reload':
                     spec = step.get('target')
                     if not isinstance(spec, dict) or not str(spec.get('name', '')).strip():
