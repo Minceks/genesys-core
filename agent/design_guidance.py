@@ -119,6 +119,11 @@ visible after undo/toast timers expire; verify whole workflows rather than butto
 Give every form control a stable accessible name matching its visible label, using
 explicit aria-label or label/htmlFor. Keep validation messages outside the label
 and associate them with aria-describedby, so errors never change the input's name.
+Give repeated action buttons descriptive stable accessible names that include their
+item name (for example Select City Compact), and label real sections with aria-labelledby
+pointing to their headings. Keep those names stable across styling changes. Use semantic
+articles for cards and labeled dialogs for overlays; make the visible label and accessible
+name agree. This provides a real interaction contract for users and browser verification.
 Do not use dead buttons, unrelated platform navigation or fake completed integrations.
 Never implement Save as a no-op; render an editable form and persist its actual values.
 Keep visible filter inputs synchronized with applied/reset state. Undo must remain

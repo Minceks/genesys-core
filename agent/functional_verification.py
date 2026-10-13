@@ -249,6 +249,36 @@ def placeholder_control_issues(sources):
     return issues
 
 
+def observed_control_target(page, spec):
+    """Resolve a button by observed name/text and context, never by guessed position."""
+    if not isinstance(spec, dict) or spec.get('by') != 'role' or spec.get('role') != 'button':
+        return None
+    observed = page.locator('button,[role="button"]').evaluate_all('''els => els.map((e,i) => {
+        const rect=e.getBoundingClientRect(), style=getComputedStyle(e);
+        const labelled=(e.getAttribute('aria-labelledby')||'').split(/\\s+/).map(id=>document.getElementById(id)?.textContent||'').join(' ').trim();
+        const contexts=[]; let parent=e.parentElement;
+        for(let depth=0;parent && depth<6;depth++,parent=parent.parentElement){
+            const headings=[...parent.querySelectorAll('h1,h2,h3,h4')].map(h=>h.textContent.trim());
+            if(headings.length<=3)contexts.push(...headings);
+            if(parent.getAttribute('aria-label'))contexts.push(parent.getAttribute('aria-label'));
+        }
+        return {index:i,name:e.getAttribute('aria-label')||labelled||e.innerText,
+            text:e.innerText,contexts,visible:rect.width>0 && rect.height>0 && style.visibility!=='hidden'};
+    })''')
+    clean = lambda text: re.sub(r'\s+', ' ', str(text)).strip().casefold()
+    wanted = clean(spec.get('name', ''))
+    outer = spec.get('withinRole')
+    scope = clean(spec.get('withinText') or (outer.get('name', '') if isinstance(outer, dict) else ''))
+    if not wanted:
+        return None
+    matches = [item for item in observed if item['visible']
+               and wanted in {clean(item['name']), clean(item['text'])}
+               and (not scope or any(scope == clean(context) for context in item['contexts']))]
+    if len(matches) != 1:
+        return None
+    return page.locator('button,[role="button"]').nth(matches[0]['index'])
+
+
 def verify_functions(page, prompt, provider, attempt=0, feedback="", sources=None, preverified=(), planning_retry=0):
     placeholders = placeholder_control_issues(sources)
     if placeholders:
@@ -450,7 +480,16 @@ def verify_functions(page, prompt, provider, attempt=0, feedback="", sources=Non
                     for key in ('withinText', 'withinRole'):
                         if key in step and key not in specification:
                             specification[key] = step[key]
-                locator = target(page, specification)
+                try:
+                    locator = target(page, specification)
+                except ValueError:
+                    locator = observed_control_target(page, specification) if action == 'click' else None
+                    if locator is None:
+                        raise
+                if action == 'click' and locator.count() != 1:
+                    resolved = observed_control_target(page, specification)
+                    if resolved is not None:
+                        locator = resolved
                 if action in {'rememberText', 'sameText'}:
                     key = step.get('key')
                     if not isinstance(key, str) or not key.strip() or locator.count() != 1:

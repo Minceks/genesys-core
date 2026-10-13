@@ -144,6 +144,8 @@ def draft_project(prompt, source, provider_for, deadline):
             'Map form fields to the exact shared action payload keys. Populate dependent dropdowns '
             'from the real logic outputs; never leave time/options selectors with only a placeholder. '
             'Keep confirmation screens visible after transient undo timers expire. '
+            'Use stable accessible labels for controls and item-qualified names for repeated buttons. '
+            'Label sections with aria-labelledby and overlays as dialogs so testing never needs guessed selectors. '
             'For branded public websites create an original simple SVG logo, use it in the header, '
             'and set the document title and matching SVG favicon using a React effect. '
             'Use in-page status and confirmation UI; never window alert, confirm or prompt. '
