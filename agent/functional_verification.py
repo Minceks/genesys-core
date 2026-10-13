@@ -73,6 +73,10 @@ create/confirm/persist/cancel workflow remains untested. A form's custom validat
 is checked via its real error text; invalid assertions only test native validity.
 Use selectors and expected values from source/DOM; an image URL is not necessarily
 visible text. Assert the actual image accessible name, item title or state output.
+value checks are ONLY for input/select/textarea values. Check a button label with
+visible or sameText, never value. For a created record assert fields its JSX actually
+renders; do not assume the customer's name appears if only dates and locations render.
+Scope filter assertions to the filtered list/cards, not dropdown options elsewhere.
 For invalid-input checks use the invalid assertion; a rejected submission is the
 expected outcome, not an application error. Never use example.com as an image
 fixture; reuse a real image URL from the implementation with unique synthetic text.
@@ -246,6 +250,10 @@ def placeholder_control_issues(sources):
                 f'({match.group(2)[:160]}). Implement its real local view/action with visible '
                 'state and functional controls; do not classify it as an external integration.'
             )
+        for match in re.finditer(r'^\s*(?:window\.)?alert\s*\(\s*([\'\"])(.*?)\1', content, re.M):
+            line = content.count('\n', 0, match.start()) + 1
+            issues.append(f'{path}:{line}: handler uses a blocking native alert ({match.group(2)[:160]}). '
+                          'Replace it with visible in-page confirmation while preserving the action and persisted state.')
     return issues
 
 
@@ -432,6 +440,8 @@ def verify_functions(page, prompt, provider, attempt=0, feedback="", sources=Non
                     spec = step.get('target')
                     if not isinstance(spec, dict) or not str(spec.get('name', '')).strip():
                         raise ValueError('Invalid verification plan: empty target name')
+                    if step.get('action') == 'value' and spec.get('by') == 'role' and spec.get('role') in {'button', 'link', 'heading', 'dialog', 'region', 'article'}:
+                        raise ValueError('Invalid verification plan: value only asserts form-control values. Use visible or sameText to assert button text.')
                 if step.get('action') in {'rememberText', 'sameText'}:
                     key = step.get('key')
                     if not isinstance(key, str) or not key.strip():

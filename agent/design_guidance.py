@@ -99,6 +99,11 @@ Images must depict their labeled subject and category: forest photos cannot repr
 sedans cannot represent SUVs. Landscape photos are never generic product placeholders.
 Follow contentDirection: a visual theme must not change the product's subject or business.
 Do not infer photo contents from invented alt text.
+Never invent image URLs, photo IDs or signed URL fingerprints. A vehicle photo must
+have subject evidence for its exact category, not merely contain a car. If a stock
+photo is a sports coupe, do not label it SUV, van or compact. Use accurate category-specific
+original illustrations when reliable subject-matched photos are unavailable; label them
+as illustrations, including in alt text. Do not call an illustration a photograph.
 If a matching photo's subject is unknown, use an accurate original SVG illustration, labeled
 as an illustration, rather than an unrelated stock photo.
 Avoid applying the same card grid, gradients, blue accents or generic hero to every request.
