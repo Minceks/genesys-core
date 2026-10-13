@@ -19,6 +19,8 @@ Do not infer requirements from 'typical flows'. If the request explicitly asks f
 an app type, quote those words when an essential function of that type is missing.
 An app type alone does NOT request server infrastructure, multi-device sync,
 external message delivery, or server undo. These require explicit request wording.
+A generic car rental website does not require named saved searches just because a
+source hook exports saveSearch. Only demand that feature if explicitly requested.
 All deletion checks must explicitly select the unique synthetic item created by
 this plan. Never delete sample content. After creating a project, it may become
 selected: do not assert another project's disappearance when deleting it.
@@ -69,6 +71,14 @@ omit explanatory prose and repeated long descriptions. Return one complete JSON 
 {"action":"visible" or "absent","target":{"by":"text","name":"sample"}}
 {"action":"value","target":{"by":"label","name":"field"},"value":"expected"}
 {"action":"invalid","target":{"by":"label","name":"field"}}
+{"action":"rememberText","target":{"by":"text","name":"Last search","exact":false},"key":"savedSummary"}
+{"action":"sameText","target":{"by":"text","name":"Last search","exact":false},"key":"savedSummary"}
+For reload persistence capture the real summary with rememberText, reload, then
+assert sameText. Never invent a timestamp or declare persistence untestable due
+to dynamic text. Capture only the stable persisted summary, not live clocks.
+Text targets may set exact:false for a distinctive substring, such as a location
+name inside a longer heading. Keep action targets unique and scope repeated buttons
+to their actual card heading using withinText; never invent synthetic card titles.
 {"action":"attribute","target":{"by":"role","role":"button","name":"Favorite"},"attribute":"aria-pressed","value":"true"}
 Allowed read-only attributes: aria-pressed, aria-selected, aria-expanded, src,
 href, min, max, type, required, disabled. Do not invent other assertion attributes.
@@ -114,7 +124,7 @@ def target(page, spec):
         inner_spec = {key: value for key, value in spec.items() if key != 'withinText'}
         # A visible confirmation dialog takes precedence over the underlying
         # card. Both may contain the same title and Delete button.
-        for role in ('dialog', 'alertdialog', 'row', 'listitem', 'article', 'group'):
+        for role in ('dialog', 'alertdialog', 'row', 'listitem', 'article', 'group', 'region'):
             candidates = page.get_by_role(role).filter(has_text=text)
             visible = [candidates.nth(i) for i in range(candidates.count()) if candidates.nth(i).is_visible()]
             if len(visible) == 1:
@@ -126,6 +136,8 @@ def target(page, spec):
         # Many generated cards are plain divs. Start at an exact, unique title
         # and walk up to the smallest bounded container holding its control.
         anchors = page.get_by_text(text, exact=True)
+        if anchors.count() == 0:
+            anchors = page.get_by_text(text, exact=False)
         visible = [anchors.nth(i) for i in range(anchors.count()) if anchors.nth(i).is_visible()]
         if len(visible) == 1:
             ancestor = visible[0]
@@ -164,7 +176,7 @@ def target(page, spec):
                 return controls
         return found
     if by == 'text':
-        return scope.get_by_text(name, exact=True)
+        return scope.get_by_text(name, exact=spec.get('exact') is not False)
     if by == 'placeholder':
         return scope.get_by_placeholder(name, exact=True)
     raise ValueError('Unsupported browser target')
@@ -249,6 +261,7 @@ def verify_functions(page, prompt, provider, attempt=0, feedback="", sources=Non
     # Validate the complete plan before any mutation. Planner errors must never
     # consume app repair attempts or trigger edits to working application code.
     try:
+        captured_keys = set()
         if sum(len(check.get('steps', [])) for check in checks if isinstance(check, dict) and isinstance(check.get('steps'), list)) > 96:
             raise ValueError('Invalid verification plan: total step limit exceeded')
         for check in checks:
@@ -264,17 +277,25 @@ def verify_functions(page, prompt, provider, attempt=0, feedback="", sources=Non
             for step in steps:
                 if not isinstance(step, dict):
                     raise ValueError('Invalid verification plan step')
-                if step.get('action') not in {'fill', 'click', 'select', 'reload', 'visible', 'absent', 'value', 'invalid', 'attribute'}:
+                if step.get('action') not in {'fill', 'click', 'select', 'reload', 'visible', 'absent', 'value', 'invalid', 'attribute', 'rememberText', 'sameText'}:
                     raise ValueError(
                         f"Invalid verification plan: unsupported action {str(step.get('action'))[:80]}. "
-                        "Use fill, click, select, reload, visible, absent, value, invalid or attribute. "
+                        "Use fill, click, select, reload, visible, absent, value, invalid, attribute, rememberText or sameText. "
                         "withinText and withinRole belong inside target, never in action."
                     )
                 if step.get('action') != 'reload':
                     spec = step.get('target')
                     if not isinstance(spec, dict) or not str(spec.get('name', '')).strip():
                         raise ValueError('Invalid verification plan: empty target name')
-            if steps[-1].get('action') not in {'visible', 'absent', 'value', 'attribute', 'invalid'}:
+                if step.get('action') in {'rememberText', 'sameText'}:
+                    key = step.get('key')
+                    if not isinstance(key, str) or not key.strip():
+                        raise ValueError('Invalid verification plan: missing text capture key')
+                    if step['action'] == 'rememberText':
+                        captured_keys.add(key)
+                    elif key not in captured_keys:
+                        raise ValueError('Invalid verification plan: compare text only after capturing it')
+            if steps[-1].get('action') not in {'visible', 'absent', 'value', 'attribute', 'invalid', 'sameText'}:
                 raise ValueError('Invalid verification plan: missing final outcome assertion')
     except ValueError as error:
         if attempt == 0:
@@ -287,6 +308,7 @@ def verify_functions(page, prompt, provider, attempt=0, feedback="", sources=Non
         else:
             route.continue_()
     page.route('**/*', guard)
+    remembered_text = {}
     for check in checks:
         name = str(check.get('name', 'Requested behavior'))[:180]
         try:
@@ -309,7 +331,22 @@ def verify_functions(page, prompt, provider, attempt=0, feedback="", sources=Non
                         if key in step and key not in specification:
                             specification[key] = step[key]
                 locator = target(page, specification)
-                if action == 'visible':
+                if action in {'rememberText', 'sameText'}:
+                    key = step.get('key')
+                    if not isinstance(key, str) or not key.strip() or locator.count() != 1:
+                        raise ValueError('Invalid verification plan: text capture requires a key and unique target')
+                    expect(locator).to_be_visible(timeout=3000)
+                    if action == 'rememberText':
+                        content = locator.inner_text().strip()
+                        if not content:
+                            raise ValueError('Invalid verification plan: cannot capture empty text')
+                        remembered_text[key] = content
+                    else:
+                        if key not in remembered_text:
+                            raise ValueError('Invalid verification plan: text was not captured before comparison')
+                        expect(locator).to_have_text(remembered_text[key], timeout=3000)
+                        asserted = True
+                elif action == 'visible':
                     # Visibility means at least one matching element is visible,
                     # not that the same label occurs only once on the page.
                     # Wait for a match, then examine all matches without choosing
