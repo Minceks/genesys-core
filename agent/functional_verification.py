@@ -91,6 +91,12 @@ Only use the actions listed above; do not create a separate scope step.
 For repeated navigation names use withinRole on the target, for example
 {"by":"role","role":"button","name":"Book","withinRole":{"role":"navigation","name":"Primary"}}.
 Use the actual landmark name; omit name only when that role has one visible container.
+Never treat a section heading as an accessible region name unless landmarks evidence
+lists that named region. Controls include nearby card headings: use those exact headings
+with withinText for repeated location buttons. Use the actual accessible button name,
+including its item suffix when present, rather than shortening it to Select or Book.
+Mark self-contained checks independent:true only when they establish all required
+state themselves. Persistence checks must fill and submit their own complete form.
 Fill a date input before asserting its value. An action=value only checks state;
 it never sets a value. Derive future dates from browserCurrentDate.
 On confirmation, use the dialog's actual text and button name. Never invent an
@@ -139,17 +145,26 @@ def target(page, spec):
         if anchors.count() == 0:
             anchors = page.get_by_text(text, exact=False)
         visible = [anchors.nth(i) for i in range(anchors.count()) if anchors.nth(i).is_visible()]
-        if len(visible) == 1:
-            ancestor = visible[0]
+        matches = {}
+        for anchor in visible:
+            ancestor = anchor
             for _ in range(6):
                 ancestor = ancestor.locator('..')
                 if ancestor.count() != 1 or ancestor.evaluate("e => ['BODY','HTML','MAIN'].includes(e.tagName)"):
                     break
                 controls = target(ancestor, inner_spec)
                 if controls.count() == 1 and controls.is_visible():
-                    return controls
+                    identity = controls.evaluate('''e => {
+                        const path=[];
+                        while(e.parentElement){path.push(Array.from(e.parentElement.children).indexOf(e)); e=e.parentElement;}
+                        return path.join('/');
+                    }''')
+                    matches[identity] = controls
+                    break
                 if controls.count() > 1:
                     break
+        if len(matches) == 1:
+            return next(iter(matches.values()))
         raise ValueError('Invalid verification plan: synthetic item control could not be uniquely identified')
     name = re.sub(r'\s+', ' ', str(spec.get('name', ''))).strip()[:200]
     if not name:
@@ -201,6 +216,7 @@ def verify_functions(page, prompt, provider, attempt=0, feedback="", sources=Non
     controls = page.locator('input,select,textarea,button,a').evaluate_all('''els => els.slice(0,80).map(e => ({
         tag:e.tagName,type:e.type,name:e.getAttribute('aria-label') || (()=>{const l=e.labels?.[0]?.cloneNode(true); if(!l)return e.innerText; l.querySelectorAll('input,textarea,select').forEach(x=>x.remove()); return l.textContent.trim()})(),
         placeholder:e.placeholder,min:e.min,max:e.max,value:e.value,
+        nearbyHeadings:(()=>{let p=e.parentElement; for(let i=0;p && i<5;i++,p=p.parentElement){const hs=Array.from(p.querySelectorAll('h2,h3,h4')).map(h=>h.innerText); if(hs.length && hs.length<=3)return hs;} return [];})(),
         options:e.tagName==='SELECT'?Array.from(e.options).map(o=>({text:o.text,value:o.value})):undefined
     }))''')
     try:
@@ -309,7 +325,12 @@ def verify_functions(page, prompt, provider, attempt=0, feedback="", sources=Non
             route.continue_()
     page.route('**/*', guard)
     remembered_text = {}
-    for check in checks:
+    failed_checks = set()
+    interrupted = False
+    for check_index, check in enumerate(checks):
+        if interrupted and check.get('independent') is not True:
+            failed_checks.update(check['covers'])
+            continue
         name = str(check.get('name', 'Requested behavior'))[:180]
         try:
             steps = check.get('steps')
@@ -399,8 +420,12 @@ def verify_functions(page, prompt, provider, attempt=0, feedback="", sources=Non
                     page.wait_for_timeout(100)
                 except Exception:
                     core.append('Remaining checks were skipped: temporary overlay cleanup failed.')
+                    for remaining in checks[check_index + 1:]:
+                        failed_checks.update(remaining['covers'])
                     break
         except Exception as error:
+            failed_checks.update(check['covers'])
+            interrupted = True
             detail = str(error)
             if 'Invalid' in detail or 'Unsupported' in detail or 'Expected outcome was not asserted' in detail or 'strict mode violation' in detail:
                 core.append(name + ': verification plan could not execute: ' + detail[:250])
@@ -408,15 +433,18 @@ def verify_functions(page, prompt, provider, attempt=0, feedback="", sources=Non
                 core.append(name + ': an overlay blocked the verification sequence.')
             else:
                 issues.append(name + ': ' + detail[:400])
-            break  # Later steps may depend on this check's state.
+            # Only explicitly self-contained checks may continue after failure.
     if not checks:
         core.append('No executable requested-function checks were generated.')
     page.unroute('**/*', guard)
     # A requirement shared by several checks is only verified when all its
     # planned checks finished. A display assertion must not mask a failed
     # delete/edit check using the same coverage ID.
-    for pending in checks[len(passed):]:
-        covered.difference_update(set(pending['covers']) - external_coverage)
+    if len(passed) < len(checks) and not failed_checks:
+        # Overlay cleanup can terminate the loop before remaining checks execute.
+        for pending in checks[len(passed):]:
+            failed_checks.update(pending['covers'])
+    covered.difference_update(failed_checks - external_coverage)
     missing = [name for key, name in requirement_names.items() if key not in covered]
     core.extend('Not verified: ' + name for name in missing)
     logging.getLogger(__name__).info('functional_verification_result %s', json.dumps({'passed':passed, 'issues':issues, 'unverifiedCore':core})[:6000])
@@ -425,6 +453,7 @@ def verify_functions(page, prompt, provider, attempt=0, feedback="", sources=Non
             'renderedText': page.locator('body').inner_text()[:7000],
             'controls': page.locator('input,select,textarea,button,a').evaluate_all('''els => els.slice(0,100).map(e => ({
                 tag:e.tagName,type:e.type,name:e.getAttribute('aria-label') || e.labels?.[0]?.innerText || e.innerText,
+                nearbyHeadings:(()=>{let p=e.parentElement; for(let i=0;p && i<5;i++,p=p.parentElement){const hs=Array.from(p.querySelectorAll('h2,h3,h4')).map(h=>h.innerText); if(hs.length && hs.length<=3)return hs;} return [];})(),
                 value:e.value,min:e.min,options:e.tagName==='SELECT'?Array.from(e.options).map(o=>({text:o.text,value:o.value})):undefined
             }))'''),
         }
