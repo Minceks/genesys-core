@@ -600,7 +600,10 @@ def start_agent_job():
 
 @app.route('/agent/jobs', methods=['GET'])
 def latest_agent_job():
-    return jsonify(job=jobs.latest(get_project_id()))
+    project_id = get_project_id()
+    if request.args.get('history') == '1':
+        return jsonify(jobs=jobs.conversation(project_id))
+    return jsonify(job=jobs.latest(project_id))
 
 
 @app.route("/agent/jobs/<job_id>", methods=["GET"])

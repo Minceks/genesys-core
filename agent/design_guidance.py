@@ -77,6 +77,11 @@ https://images.unsplash.com/photo-1470071459604-3b5ec3a7fe05?auto=format&fit=cro
 https://images.unsplash.com/photo-1441974231531-c6227db76b6e?auto=format&fit=crop&w=1200&q=80
 Use descriptive alt text, responsive widths, aspect ratios, object-fit, and lazy loading below the fold.
 Make image collections easy to replace with the user's real photos. Images must load in verification.
+Images must depict their labeled subject and category: forest photos cannot represent cars;
+sedans cannot represent SUVs. The landscape sample URLs above are for landscape photography,
+never generic product placeholders. Do not infer photo contents from invented alt text.
+If a matching photo's subject is unknown, use an accurate original SVG illustration, labeled
+as an illustration, rather than an unrelated stock photo.
 Avoid applying the same card grid, gradients, blue accents or generic hero to every request.
 Keep text legible: aim for WCAG AA contrast, visible keyboard focus, descriptive labels,
 usable touch targets and responsive layouts without horizontal overflow.

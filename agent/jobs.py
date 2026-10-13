@@ -175,6 +175,11 @@ class JobManager:
             row = db.execute("SELECT payload FROM jobs WHERE project=? ORDER BY rowid DESC LIMIT 1", (project_id,)).fetchone()
             return json.loads(row[0]) if row else None
 
+    def conversation(self, project_id):
+        with self.connection() as db:
+            rows = db.execute("SELECT payload FROM jobs WHERE project=? ORDER BY rowid DESC LIMIT 100", (project_id,)).fetchall()
+        return [json.loads(row[0]) for row in reversed(rows)]
+
     def is_running(self, project_id):
         with self.connection() as db:
             return bool(db.execute("SELECT 1 FROM jobs WHERE project=? AND state IN ('queued','running')", (project_id,)).fetchone())
