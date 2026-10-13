@@ -36,6 +36,11 @@ The GeneSys builder's white-and-blue brand is not a default theme for generated 
 Before editing, choose a coherent palette, typography, spacing, layout and shape language.
 Use the persisted designStrategy as a design decision, not a rigid template. Evaluate
 its alternatives against the user's audience, content, product and requested style.
+Study layoutReferences before writing JSX: choose an appropriate composition and
+translate its desktop geometry, phone adaptation and hierarchy into actual CSS.
+Explain that choice in the shared designDecision and preserve it across all views.
+Use fluid grids and min-width:0. A 1200px desktop panel clipped by overflow:hidden
+is not a mobile adaptation. Keep imagery proportional and the header/logo legible.
 Broaden composition beyond cards: editorial spreads, full-bleed scenes, split layouts,
 curated galleries, task canvases, contextual drawers and progressive multi-view flows.
 Choose a distinctive composition and at least one purposeful signature detail; avoid

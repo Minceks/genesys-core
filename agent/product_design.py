@@ -2,6 +2,7 @@
 import json
 import re
 from .design_strategy import design_strategy, requests_redesign
+from .layout_library import layout_reference_library
 
 BRIEF_PATH = '.genesys-design.json'
 PRODUCTS = {
@@ -122,6 +123,9 @@ def prepare_design(workspace, prompt):
             'Inspect the current UI and stylesheet; preserve working functionality and saved data. '
             'Repairing defects alone does not satisfy this request. Change the composition, hierarchy '
             'and visual treatment while honoring explicit user preferences.')
+    brief['layoutReferences'] = layout_reference_library(
+        brief['productType'], prompt, brief['designStrategy'],
+    )
     brief['qualityStandard'] = {
         'composition': 'Distinctive focal point, purposeful section rhythm and product-appropriate density.',
         'typography': 'Coherent type hierarchy, readable body copy and deliberate line lengths.',
