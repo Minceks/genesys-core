@@ -1957,6 +1957,15 @@ def run_agent(
         from .product_design import prepare_design
         report_progress('Identifying product type and design direction')
         product_brief = prepare_design(workspace, prompt)
+        from .build_spec import prepare_build_spec
+        report_progress('Defining shared build requirements')
+        try:
+            product_brief['buildSpecification'] = prepare_build_spec(workspace, prompt, product_brief, provider)
+        except Exception as exc:
+            print('Build specification unavailable:', type(exc).__name__)
+            return {'status': 'error', 'requestType': 'build', 'errorType': 'planning',
+                    'message': 'The build requirements could not be prepared. Your existing project is preserved; retry the request.',
+                    'buildPassed': False, 'browserVerified': False, 'modifiedFiles': []}
         print('Product design:', product_brief['productType'], product_brief['subtype'])
 
 
@@ -2135,7 +2144,7 @@ def run_agent(
     repeated_tool_count = 0
     pre_edit_read_count = 0
     repair_inspection_count = 0
-    PRE_EDIT_READ_LIMIT = 4
+    PRE_EDIT_READ_LIMIT = 8
 
     MAX_REPAIR_ATTEMPTS = 3
     repair_attempts = 0
@@ -3905,12 +3914,12 @@ def run_agent(
                 result = {'status': 'error', 'error': 'This tool is not available in the current phase. Use edit_file or write_file for the repair, then respond without tool calls for verification.'}
                 loop_warning = result['error']
             elif last_failure_type and tool_name in {'read_file', 'list_files'} and repair_inspection_count == 2:
-                loop_warning = 'The repair inspection budget is now used. Make the smallest repair with edit_file or write_file using the current source, then stop tool calls so verification can run.'
-            if not inspection_limit_hit and tool_name == "read_file" and not modified_files:
+                loop_warning = 'Prefer targeted line-range reads of affected files, then apply a complete repair. Fresh source remains available; do not repeat unchanged inspection calls.'
+            if not inspection_limit_hit and tool_name == "read_file" and not modified_files and not last_failure_type:
                 pre_edit_read_count += 1
-                if pre_edit_read_count == 4:
+                if pre_edit_read_count == PRE_EDIT_READ_LIMIT:
                     loop_warning = (
-                        "You have inspected four files. Stop exploring and "
+                        "The initial inspection budget is used. Stop exploring and "
                         "make the first implementation change now. You can "
                         "inspect another file later if the edit requires it."
                     )

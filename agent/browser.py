@@ -356,7 +356,11 @@ class BrowserSession:
                               + purpose + '\nCurrent visual redesign request: ' + prompt)
             except (ValueError, TypeError, AttributeError, FileNotFoundError):
                 pass
-        return verify_functions(page, prompt, provider, sources=sources, preverified=preverified)
+        try:
+            contract = json.loads(workspace.read_file('.genesys-build-spec.json').get('content', '{}'))
+        except (ValueError, TypeError, AttributeError, FileNotFoundError):
+            contract = None
+        return verify_functions(page, prompt, provider, sources=sources, preverified=preverified, contract=contract)
 
     @browser_thread
     def visual_quality(self, *, allow_unstyled=False, require_images=False, public_website=False) -> dict[str, Any]:
@@ -367,7 +371,7 @@ class BrowserSession:
             for width, height in ((1280, 800), (390, 844)):
                 page.set_viewport_size({'width': width, 'height': height})
                 page.wait_for_timeout(200)
-                if require_images:
+                if require_images or public_website:
                     page.evaluate("""async () => { await Promise.race([Promise.all([...document.images].filter(img => { const r=img.getBoundingClientRect(); return r.width>0 && r.height>0; }).map(img => { img.loading = 'eager'; return img.decode().catch(() => {}); })), new Promise(resolve => setTimeout(resolve, 5000))]); }""")
                 snapshots.append(page.evaluate(SNAPSHOT_SCRIPT))
         finally:

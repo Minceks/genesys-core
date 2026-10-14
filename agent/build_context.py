@@ -1,9 +1,9 @@
 """Bounded initial source context shared with the model and provider fallbacks."""
 
 def tools_for_repair(tools, inspections):
-    if inspections < 2:
-        return tools
-    return [tool for tool in tools if tool['function']['name'] not in {'read_file', 'list_files'}]
+    # Fresh targeted source is necessary after edits. Repetitive identical calls
+    # remain bounded by the orchestrator's loop guard and overall step budget.
+    return tools
 
 
 class InspectionCache:

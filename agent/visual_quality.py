@@ -48,8 +48,8 @@ def assess_visual_quality(snapshots, *, allow_unstyled=False, require_images=Fal
                 issues.append(f'At {width}px, a form/table dominates the public homepage. Put detailed booking or management workflows in a dedicated view and lead with the visitor-facing website.')
         if require_images and snapshot.get('loadedImages', 0) < 2:
             issues.append(f'At {width}px, the photography portfolio needs at least two visible, successfully loaded photos; include actual hero and gallery images.')
-        if require_images and snapshot.get('brokenImages', 0):
-            issues.append(f'At {width}px, portfolio photos failed to load. Replace broken image sources.')
+        if (require_images or public_website) and snapshot.get('brokenImages', 0):
+            issues.append(f'At {width}px, website images failed to load. Replace broken sources with subject-matched assets.')
         if snapshot['overflow']:
             issues.append(f"At {width}px, the page overflows horizontally; make the layout responsive.")
         if snapshot['starterVisible']:

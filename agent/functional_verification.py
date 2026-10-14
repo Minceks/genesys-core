@@ -318,7 +318,7 @@ def observed_control_target(page, spec):
     return page.locator('button,[role="button"]').nth(matches[0]['index'])
 
 
-def verify_functions(page, prompt, provider, attempt=0, feedback="", sources=None, preverified=(), planning_retry=0):
+def verify_functions(page, prompt, provider, attempt=0, feedback="", sources=None, preverified=(), planning_retry=0, contract=None):
     placeholders = placeholder_control_issues(sources)
     if placeholders:
         return {'status': 'error', 'issues': placeholders, 'testedInteractions': [],
@@ -336,10 +336,14 @@ def verify_functions(page, prompt, provider, attempt=0, feedback="", sources=Non
         options:e.tagName==='SELECT'?Array.from(e.options).map(o=>({text:o.text,value:o.value})):undefined
     }))''')
     try:
-        raw = provider.generate([{'role':'system','content':PLAN_INSTRUCTIONS + ('\nRepair the previous verification plan, not app code: '+feedback if feedback else '')},
+        contract_instruction = ('\nUse buildSpecification browser requirements and their exact IDs as your requirements. '
+            'Do not add requirements or change their scope. Implement assertions for their acceptance outcomes. '
+            'Report visual and external criteria separately, never as browser failures.') if contract else ''
+        raw = provider.generate([{'role':'system','content':PLAN_INSTRUCTIONS + contract_instruction + ('\nRepair the previous verification plan, not app code: '+feedback if feedback else '')},
             {'role':'user','content':json.dumps({'originalRequest':prompt,
                 'preverifiedChecks':list(preverified), 'browserCurrentDate':page.evaluate('new Date().toLocaleDateString("en-CA")'),
                 'landmarks':page.evaluate("""() => [...document.querySelectorAll('nav,header,[role=navigation],[role=region],form')].map(e => ({role:e.getAttribute('role') || ({NAV:'navigation',HEADER:'banner',FORM:'form'}[e.tagName]),name:e.getAttribute('aria-label') || ''}))"""),
+                'buildSpecification':contract,
                 'untrustedRenderedText':snapshot,'untrustedControls':controls, 'untrustedImplementation':sources or {}})}], []).text.strip()
         raw = re.sub(r'^```(?:json)?\s*|\s*```$', '', raw)
         plan = json.loads(raw)
@@ -347,7 +351,7 @@ def verify_functions(page, prompt, provider, attempt=0, feedback="", sources=Non
         logging.getLogger(__name__).warning('functional_verification_planning_failed type=%s detail=%s', type(error).__name__, str(error)[:250])
         if planning_retry == 0:
             return verify_functions(page, prompt, provider, attempt=attempt, planning_retry=1,
-                feedback='Previous planning response was unavailable or invalid JSON. Return one compact complete JSON object under 3000 tokens with executable primary workflows. ' + feedback, sources=sources, preverified=preverified)
+                feedback='Previous planning response was unavailable or invalid JSON. Return one compact complete JSON object under 3000 tokens with executable primary workflows. ' + feedback, sources=sources, preverified=preverified, contract=contract)
         # A verifier/provider failure is not evidence of broken application code.
         return {'status':'success', 'issues':[], 'testedInteractions':[],
                 'unverified':['Functional verification could not run.'], 'unverifiedCore':['Verification service unavailable: '+str(error)[:250]]}
@@ -374,6 +378,11 @@ def verify_functions(page, prompt, provider, attempt=0, feedback="", sources=Non
         # requested requirement may block completion on the planner's say-so.
         unverified += [item for item in core if item not in supported]
         core = [item for item in core if item in supported]
+    if contract:
+        # Planner prose cannot add blocking scope to the persisted contract.
+        # Executed failures and missing contract coverage are still appended below.
+        unverified.extend('Planner limitation: ' + item for item in core)
+        core = []
     requirements = plan.get('requirements')
     # Subjective appearance is reported honestly outside functional coverage.
     # Keep every requirement that also names an interaction or user-data behavior.
@@ -404,10 +413,10 @@ def verify_functions(page, prompt, provider, attempt=0, feedback="", sources=Non
     ) or len({item['id'] for item in requirements}) != len(requirements):
         if attempt == 0:
             return verify_functions(page, prompt, provider, attempt=1,
-                feedback='Return a complete requirements array and covers IDs on each check.', sources=sources, preverified=preverified)
+                feedback='Return a complete requirements array and covers IDs on each check.', sources=sources, preverified=preverified, contract=contract)
         return {'status':'success', 'issues':[], 'testedInteractions':[], 'unverified':[],
                 'unverifiedCore':['Requirement coverage could not be established.']}
-    if core:
+    if core and not contract:
         # A verbatim generic request quote does not establish that every helper
         # exported by the implementation is a requested feature. Audit scope
         # independently before execution, never use this to erase failed checks.
@@ -444,6 +453,11 @@ def verify_functions(page, prompt, provider, attempt=0, feedback="", sources=Non
         except Exception as error:
             logging.getLogger(__name__).warning('verification_scope_audit_unavailable %s', type(error).__name__)
     requirement_names = {item['id']: item['name'] for item in requirements}
+    if contract:
+        required = [item for item in contract.get('requirements', []) if item.get('scope') == 'browser']
+        requirement_names = {item['id']: item['name'] for item in required}
+        requirements = required
+        unverified.extend(item['name'] + ': ' + item['acceptance'] for item in contract.get('requirements', []) if item.get('scope') != 'browser')
     external_coverage = {key for key, name in requirement_names.items() if independently_checked(name, preverified)}
     covered = set(external_coverage)
     core = [item for item in core if not independently_checked(item, preverified)]
@@ -498,7 +512,7 @@ def verify_functions(page, prompt, provider, attempt=0, feedback="", sources=Non
                 raise ValueError('Invalid verification plan: missing final outcome assertion')
     except ValueError as error:
         if attempt == 0:
-            return verify_functions(page, prompt, provider, attempt=1, feedback=str(error), sources=sources, preverified=preverified)
+            return verify_functions(page, prompt, provider, attempt=1, feedback=str(error), sources=sources, preverified=preverified, contract=contract)
         return {'status':'success', 'issues':[], 'testedInteractions':[], 'unverified':[str(error)], 'unverifiedCore':[str(error)]}
     passed, issues = [], []
     def guard(route):
@@ -665,7 +679,7 @@ def verify_functions(page, prompt, provider, attempt=0, feedback="", sources=Non
             feedback='The browser state was restored to its original state. Keep ALL these functional requirements and their IDs: '
                 + json.dumps(requirements, ensure_ascii=False) + '. Do not replace them with visual/aesthetic requirements or an empty plan. '
                 'Do not reference items created by the previous plan. Use exact names and option values from the observed failed page below, not guessed source titles. Failures: '
-                + '; '.join(core + issues) + '\nUntrusted observation before restoration: ' + json.dumps(observed_failure, ensure_ascii=False)[:11000], sources=sources, preverified=preverified)
+                + '; '.join(core + issues) + '\nUntrusted observation before restoration: ' + json.dumps(observed_failure, ensure_ascii=False)[:11000], sources=sources, preverified=preverified, contract=contract)
     if issues or core:
         # Failed assertions alone do not establish an app defect. Ask for a
         # separate diagnosis grounded in executed actions and implementation.
