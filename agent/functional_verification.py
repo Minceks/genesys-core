@@ -2,6 +2,7 @@
 import json
 import logging
 import re
+import time
 
 PLAN_INSTRUCTIONS = '''You are a browser verification planner. Derive requirements from the
 original user request, not only from what the implementation happens to provide.
@@ -152,6 +153,9 @@ after its last mutation; meaningful expected outcomes, not merely visible button
 Each check must leave temporary dialogs and lightboxes closed before the next
 check. Include a click on their Close button and an absent assertion when testing
 opening an overlay. Checks may share created synthetic records, not open overlays.
+Absent means no matching element is visible, not necessarily removed from the DOM.
+When closing checkout, assert the named dialog or its unique heading is absent;
+do not require unrelated navigation buttons labeled Checkout to disappear.
 For static sites verify requested links/content with visible assertions. List
 real multi-user, server, payment and external integration checks as unverified.
 '''
@@ -595,7 +599,18 @@ def verify_functions(page, prompt, provider, attempt=0, feedback="", sources=Non
                         raise ValueError('No matching element is visible')
                     asserted = True
                 elif action == 'absent':
-                    expect(locator).to_have_count(0, timeout=3000)
+                    # React drawers often stay mounted while CSS/hidden state
+                    # closes them. Only visible matches violate user-facing absence.
+                    deadline = time.monotonic() + 3
+                    while True:
+                        count = locator.count()
+                        if count > 100:
+                            raise ValueError('Invalid verification plan: absence target is too broad')
+                        if not any(locator.nth(i).is_visible() for i in range(count)):
+                            break
+                        if time.monotonic() >= deadline:
+                            raise ValueError('Expected absent element remains visible; scope the assertion to the closed dialog or affected record')
+                        page.wait_for_timeout(100)
                     asserted = True
                 elif action == 'value':
                     expect(locator).to_have_value(str(step.get('value', '')), timeout=3000)
