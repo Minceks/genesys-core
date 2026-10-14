@@ -533,7 +533,11 @@ def verify_functions(page, prompt, provider, attempt=0, feedback="", sources=Non
                     condition = step['unlessVisible']
                     if step.get('action') != 'click' or not isinstance(condition, dict) or not str(condition.get('name', '')).strip():
                         raise ValueError('Invalid verification plan: unlessVisible requires a click and a named destination target')
-            if steps[-1].get('action') not in {'visible', 'absent', 'value', 'attribute', 'invalid', 'sameText'}:
+            final = steps[-1]
+            closing_cleanup = (final.get('action') == 'click'
+                               and re.match(r'^(close\b|cancel$)', str((final.get('target') or {}).get('name', '')), re.I)
+                               and any(item.get('action') in {'visible', 'absent', 'value', 'attribute', 'invalid', 'sameText'} for item in steps[:-1]))
+            if final.get('action') not in {'visible', 'absent', 'value', 'attribute', 'invalid', 'sameText'} and not closing_cleanup:
                 raise ValueError('Invalid verification plan: missing final outcome assertion')
     except ValueError as error:
         if attempt == 0:
@@ -651,10 +655,29 @@ def verify_functions(page, prompt, provider, attempt=0, feedback="", sources=Non
                     if action == 'fill': locator.fill(str(step.get('value', ''))[:500], timeout=3000)
                     if action == 'select': locator.select_option(str(step.get('value', ''))[:200], timeout=3000)
                     if action == 'click':
+                        cleanup = (step is steps[-1] and asserted
+                                   and re.match(r'^(close\b|cancel$)', str(specification.get('name', '')), re.I))
+                        container = None
+                        if cleanup:
+                            container = locator.locator('xpath=ancestor::*[@role="dialog" or @role="alertdialog" or @aria-modal="true" or self::dialog or self::aside][1]')
+                            if container.count() != 1:
+                                raise ValueError('Invalid verification plan: final cleanup needs a uniquely identified dialog/drawer, or add an explicit outcome assertion after the click')
                         locator.click(timeout=3000)
                         # Native validation can be the expected outcome of a
                         # negative check; the following assertion decides this.
                     asserted = False
+                    if action == 'click' and container is not None:
+                        deadline = time.monotonic() + 3
+                        while container.count() and not container.evaluate('''e => {
+                            const r=e.getBoundingClientRect(), s=getComputedStyle(e);
+                            return e.getAttribute('aria-hidden')==='true' || s.display==='none' ||
+                                s.visibility==='hidden' || r.width===0 || r.height===0 ||
+                                r.right<=0 || r.left>=innerWidth;
+                        }'''):
+                            if time.monotonic() >= deadline:
+                                raise ValueError('The dialog/drawer remained open after its closing control was clicked')
+                            page.wait_for_timeout(100)
+                        asserted = True
                 else:
                     raise ValueError('Unsupported browser action')
             if not asserted:
