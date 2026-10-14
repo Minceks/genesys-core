@@ -531,6 +531,8 @@ def verify_functions(page, prompt, provider, attempt=0, feedback="", sources=Non
                         raise ValueError('Invalid verification plan: compare text only after capturing it')
                 if 'unlessVisible' in step:
                     condition = step['unlessVisible']
+                    if re.match(r'^(close\b|cancel$)', str((step.get('target') or {}).get('name', '')), re.I):
+                        raise ValueError('Invalid verification plan: never skip Close/Cancel because background content is visible. Close the overlay and assert that overlay is absent, not its catalogue title.')
                     if step.get('action') != 'click' or not isinstance(condition, dict) or not str(condition.get('name', '')).strip():
                         raise ValueError('Invalid verification plan: unlessVisible requires a click and a named destination target')
             final = steps[-1]
@@ -563,6 +565,7 @@ def verify_functions(page, prompt, provider, attempt=0, feedback="", sources=Non
             if not isinstance(steps, list) or not 1 <= len(steps) <= 24:
                 raise ValueError('Invalid steps')
             asserted = False
+            closed_overlay_assertion = None
             for step in steps:
                 action = step.get('action')
                 if action == 'click' and step.get('unlessVisible'):
@@ -621,6 +624,9 @@ def verify_functions(page, prompt, provider, attempt=0, feedback="", sources=Non
                         raise ValueError('No matching element is visible')
                     asserted = True
                 elif action == 'absent':
+                    if closed_overlay_assertion is not None and step is closed_overlay_assertion[0]:
+                        # Closing a view does not remove its product from catalogue.
+                        locator = closed_overlay_assertion[1]
                     # React drawers often stay mounted while CSS/hidden state
                     # closes them. Only visible matches violate user-facing absence.
                     deadline = time.monotonic() + 3
@@ -655,6 +661,15 @@ def verify_functions(page, prompt, provider, attempt=0, feedback="", sources=Non
                     if action == 'fill': locator.fill(str(step.get('value', ''))[:500], timeout=3000)
                     if action == 'select': locator.select_option(str(step.get('value', ''))[:200], timeout=3000)
                     if action == 'click':
+                        is_closing = bool(re.match(r'^(close\b|cancel$)', str(specification.get('name', '')), re.I))
+                        if is_closing:
+                            closing_parent = locator.locator('xpath=ancestor::*[@role="dialog" or @role="alertdialog" or @aria-modal="true" or self::dialog or self::aside][1]')
+                            index = next(i for i, candidate in enumerate(steps) if candidate is step)
+                            following = steps[index + 1] if index + 1 < len(steps) else None
+                            if closing_parent.count() == 1 and following and following.get('action') == 'absent':
+                                next_target = following.get('target') or {}
+                                if next_target.get('by') == 'text' and target(closing_parent, next_target).count():
+                                    closed_overlay_assertion = (following, closing_parent)
                         cleanup = (step is steps[-1] and asserted
                                    and re.match(r'^(close\b|cancel$)', str(specification.get('name', '')), re.I))
                         container = None
