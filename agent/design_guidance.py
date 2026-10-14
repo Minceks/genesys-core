@@ -136,6 +136,11 @@ reachable after the deleted item and its detail view disappear. Give confirmatio
 actions distinct accessible names and use labeled dialogs/alertdialogs. Keep cards
 as semantic articles/list items with real action buttons, not buttons containing buttons.
 Use useEffect for timers and state side effects; useMemo only computes derived values.
+Call React hooks, including usePersistentState and shared project hooks, only at the
+top level of function components or custom use-prefixed hooks. Never call one at module
+scope, store its result in a global variable, or invoke it inside an event/async callback.
+Persist plain application data; initialize hook state inside App and pass values/actions
+to ordinary logic functions. Import hooks statically and preserve hook order across renders.
 For ordinary user-created app data, persist changes across reloads. Import the provided
 usePersistentState hook from src/usePersistentState.js when present, use a stable descriptive
 storage key, validate loaded data shape when needed and show storageError to the user.

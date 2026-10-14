@@ -1375,6 +1375,7 @@ for name, contents in files.items():
     def run_build(
         self,
     ) -> dict[str, Any]:
+        from .react_preflight import HOOK_PREFLIGHT
 
         # Reused sandboxes may have lost node_modules. Install locked
         # dependencies only when Vite is missing, then capture install and
@@ -1385,7 +1386,8 @@ for name, contents in files.items():
                 "echo 'Vite is missing; installing locked dependencies'; "
                 "npm ci || exit $?; "
                 "fi; "
-                "npm run build 2>&1"
+                + 'node -e ' + shlex.quote(HOOK_PREFLIGHT) + ' 2>&1 || exit $?; '
+                + "npm run build 2>&1"
             ),
             cwd=REMOTE_PROJECT_ROOT,
             timeout=300,
