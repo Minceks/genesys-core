@@ -3234,6 +3234,11 @@ def run_agent(
             console_result = None
 
             try:
+                # Each verification attempt uses a fresh isolated browser session.
+                # Synthetic local records and open overlays from an earlier failed
+                # attempt must not leak into the next plan or another user request.
+                if project_id != PROJECT_ID_DEFAULT:
+                    get_browser(project_id).stop()
                 print(
                     "🔧 TOOL: browser_screenshot"
                 )

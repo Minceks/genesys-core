@@ -158,6 +158,10 @@ after its last mutation; meaningful expected outcomes, not merely visible button
 Each check must leave temporary dialogs and lightboxes closed before the next
 check. Include a click on their Close button and an absent assertion when testing
 opening an overlay. Checks may share created synthetic records, not open overlays.
+After basket tests, close the actual basket drawer before testing catalogue filters.
+After reload, reopen the basket only if it is closed. Capture and compare actual item
+quantity/subtotal, not generic catalogue text. For SVGs use role=img and their accessible
+name; aria-label is not visible text. Do not submit orders to external integrations.
 Absent means no matching element is visible, not necessarily removed from the DOM.
 When closing checkout, assert the named dialog or its unique heading is absent;
 do not require unrelated navigation buttons labeled Checkout to disappear.
