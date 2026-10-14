@@ -18,6 +18,9 @@ SNAPSHOT_SCRIPT = """() => {
   const mainTitle = [...document.querySelectorAll('main h1,main h2,main h3,h1')]
     .filter(el => visible(el) && !el.closest('header,nav'))
     .sort((a,b) => parseFloat(getComputedStyle(b).fontSize)-parseFloat(getComputedStyle(a).fontSize))[0];
+  const bodySizes = [...document.querySelectorAll('main p')].filter(visible)
+    .map(el=>parseFloat(getComputedStyle(el).fontSize)).filter(size=>Number.isFinite(size) && size>=12 && size<=24).sort((a,b)=>a-b);
+  const bodyTextSize = bodySizes.length ? bodySizes[Math.floor(bodySizes.length/2)] : 16;
   const dataSurfaces = [...document.querySelectorAll('table,[role=grid],form')].filter(visible);
   return { width: innerWidth, overflow: document.documentElement.scrollWidth > innerWidth + 2,
     overflowElements: [...document.querySelectorAll('body *')].filter(el => visible(el) && el.getBoundingClientRect().right > innerWidth + 2)
@@ -28,6 +31,8 @@ SNAPSHOT_SCRIPT = """() => {
     textLength: text.length, hasGraphics: !!document.querySelector('canvas,svg,img,video'),
     starterVisible: text.includes('Your project is ready') && text.includes('Describe what you want to build'),
     titleSize: mainTitle ? parseFloat(getComputedStyle(mainTitle).fontSize) : 0,
+    bodyTextSize,
+    titleElement: mainTitle ? {tag:mainTitle.tagName,id:mainTitle.id,class:mainTitle.className,text:mainTitle.innerText.slice(0,160)} : null,
     brandVisual: !!document.querySelector('header svg,header img,nav svg,nav img'),
     favicon: !!document.querySelector('link[rel*=icon][href]'),
     dataSurfaceRatio: Math.max(0,...dataSurfaces.map(el=>visibleArea(el)/viewportArea)),
@@ -42,8 +47,17 @@ def assess_visual_quality(snapshots, *, allow_unstyled=False, require_images=Fal
         if public_website and not allow_unstyled:
             if not snapshot.get('brandVisual') or not snapshot.get('favicon'):
                 issues.append('The public website needs a visible original logo and a configured favicon. Add appropriate SVG branding without imitating another company.')
-            if snapshot.get('titleSize', 0) < (32 if width >= 900 else 28):
-                issues.append(f'At {width}px, the public homepage lacks a clear visual headline hierarchy. Compose a visitor-facing hero with readable, prominent typography.')
+            title_size = snapshot.get('titleSize', 0)
+            body_size = snapshot.get('bodyTextSize', 16)
+            minimum = 28 if width >= 900 else 20
+            ratio = 1.4 if width >= 900 else 1.3
+            if title_size < minimum or title_size < body_size * ratio:
+                element = snapshot.get('titleElement') or {}
+                issues.append(f'At {width}px, the main headline is {title_size}px versus {body_size}px body text. '
+                              f'Give it readable emphasis: at least {minimum}px and {ratio} times the body size. '
+                              f'Repair the applicable responsive CSS for {element.get("tag", "heading")} '
+                              f'id={element.get("id", "")} class={element.get("class", "")} '
+                              f'text={element.get("text", "")[:100]}; preserve phone wrapping and content.')
             if snapshot.get('dataSurfaceRatio', 0) > 0.45:
                 issues.append(f'At {width}px, a form/table dominates the public homepage. Put detailed booking or management workflows in a dedicated view and lead with the visitor-facing website.')
         if require_images and snapshot.get('loadedImages', 0) < 2:
