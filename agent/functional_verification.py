@@ -83,6 +83,12 @@ invent timestamps or dynamic record IDs; scope cancellation by the unique visibl
 synthetic data, using the actual button's visible text if its aria-label contains an ID.
 Every complete-flow check must clear any search filter that could hide its selected
 item, explicitly select its own item and then submit the matching current button.
+For baskets, open the drawer before inspecting line items or quantity fields. Scope
+those checks to the actual drawer/dialog so catalogue cards do not satisfy assertions.
+Use visible text for a badge when its accessible name is different; exact:false is
+supported for partial role/text names, but mutation targets must still be unique.
+Capture only a stable subtotal/item summary or basket count that actually exists.
+Never guess Basket (1): previous checks may have created other synthetic items.
 An independent persistence check must create its own record; it cannot depend on a
 record created by a failed earlier check. Test create, reload and delete together.
 Scope filter assertions to the filtered list/cards, not dropdown options elsewhere.
@@ -227,7 +233,7 @@ def target(page, spec):
             raise ValueError('Invalid verification plan: field name is missing or ambiguous')
         return fields.nth(matches[0])
     if by == 'role':
-        return scope.get_by_role(str(spec.get('role', '')), name=name, exact=True)
+        return scope.get_by_role(str(spec.get('role', '')), name=name, exact=spec.get('exact') is not False)
     if by == 'label':
         found = scope.get_by_label(name, exact=True)
         if found.count() == 1:
@@ -302,7 +308,8 @@ def observed_control_target(page, spec):
             if(parent.getAttribute('aria-label'))contexts.push(parent.getAttribute('aria-label'));
         }
         return {index:i,name:e.getAttribute('aria-label')||labelled||e.innerText,
-            text:e.innerText,contexts,visible:rect.width>0 && rect.height>0 && style.visibility!=='hidden'};
+            text:e.innerText,contexts,visible:rect.width>0 && rect.height>0 && rect.right>0 && rect.left<innerWidth
+                && style.visibility!=='hidden' && !e.closest('[aria-hidden="true"],[inert]')};
     })''')
     clean = lambda text: re.sub(r'\s+', ' ', str(text)).strip().casefold()
     wanted = clean(spec.get('name', ''))
@@ -311,7 +318,8 @@ def observed_control_target(page, spec):
     if not wanted:
         return None
     matches = [item for item in observed if item['visible']
-               and wanted in {clean(item['name']), clean(item['text'])}
+               and (wanted in {clean(item['name']), clean(item['text'])}
+                    or (spec.get('exact') is False and any(wanted in clean(value) for value in (item['name'], item['text']))))
                and (not scope or any(scope == clean(context) for context in item['contexts']))]
     if len(matches) != 1:
         return None
@@ -551,10 +559,10 @@ def verify_functions(page, prompt, provider, attempt=0, feedback="", sources=Non
                 try:
                     locator = target(page, specification)
                 except ValueError:
-                    locator = observed_control_target(page, specification) if action == 'click' else None
+                    locator = observed_control_target(page, specification) if action in {'click', 'rememberText', 'sameText'} else None
                     if locator is None:
                         raise
-                if action == 'click' and locator.count() != 1:
+                if action in {'click', 'rememberText', 'sameText'} and locator.count() != 1:
                     resolved = observed_control_target(page, specification)
                     if resolved is not None:
                         locator = resolved
