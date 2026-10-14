@@ -86,6 +86,11 @@ Every complete-flow check must clear any search filter that could hide its selec
 item, explicitly select its own item and then submit the matching current button.
 For baskets, open the drawer before inspecting line items or quantity fields. Scope
 those checks to the actual drawer/dialog so catalogue cards do not satisfy assertions.
+Adding an item may already open its drawer. For opening a view use a conditional
+click: {"action":"click","target":{"by":"role","role":"button","name":"Open Basket"},
+"unlessVisible":{"by":"text","name":"Your basket"}}. The click is skipped ONLY
+when its intended destination is already visible. Always assert the destination
+and action outcomes afterward. Never toggle an already-open drawer blindly.
 Use visible text for a badge when its accessible name is different; exact:false is
 supported for partial role/text names, but mutation targets must still be unique.
 Capture only a stable subtotal/item summary or basket count that actually exists.
@@ -520,6 +525,10 @@ def verify_functions(page, prompt, provider, attempt=0, feedback="", sources=Non
                         captured_keys.add(key)
                     elif key not in captured_keys:
                         raise ValueError('Invalid verification plan: compare text only after capturing it')
+                if 'unlessVisible' in step:
+                    condition = step['unlessVisible']
+                    if step.get('action') != 'click' or not isinstance(condition, dict) or not str(condition.get('name', '')).strip():
+                        raise ValueError('Invalid verification plan: unlessVisible requires a click and a named destination target')
             if steps[-1].get('action') not in {'visible', 'absent', 'value', 'attribute', 'invalid', 'sameText'}:
                 raise ValueError('Invalid verification plan: missing final outcome assertion')
     except ValueError as error:
@@ -548,6 +557,11 @@ def verify_functions(page, prompt, provider, attempt=0, feedback="", sources=Non
             asserted = False
             for step in steps:
                 action = step.get('action')
+                if action == 'click' and step.get('unlessVisible'):
+                    destination = target(page, step['unlessVisible'])
+                    if any(destination.nth(i).is_visible() for i in range(destination.count())):
+                        asserted = False
+                        continue
                 if action == 'reload':
                     page.reload(wait_until='networkidle', timeout=15000)
                     asserted = False
