@@ -76,6 +76,15 @@ visible text. Assert the actual image accessible name, item title or state outpu
 value checks are ONLY for input/select/textarea values. Check a button label with
 visible or sameText, never value. For a created record assert fields its JSX actually
 renders; do not assume the customer's name appears if only dates and locations render.
+For a hidden input use {"by":"field","name":"actual HTML name"} with action=value.
+Hidden fields have no accessible label. Never invent a label from a source variable.
+Use ASCII synthetic record markers and simple stable confirmation substrings. Do not
+invent timestamps or dynamic record IDs; scope cancellation by the unique visible
+synthetic data, using the actual button's visible text if its aria-label contains an ID.
+Every complete-flow check must clear any search filter that could hide its selected
+item, explicitly select its own item and then submit the matching current button.
+An independent persistence check must create its own record; it cannot depend on a
+record created by a failed earlier check. Test create, reload and delete together.
 Scope filter assertions to the filtered list/cards, not dropdown options elsewhere.
 For invalid-input checks use the invalid assertion; a rejected submission is the
 expected outcome, not an application error. Never use example.com as an image
@@ -105,7 +114,8 @@ to their actual card heading using withinText; never invent synthetic card title
 {"action":"attribute","target":{"by":"role","role":"button","name":"Favorite"},"attribute":"aria-pressed","value":"true"}
 Allowed read-only attributes: aria-pressed, aria-selected, aria-expanded, src,
 href, min, max, type, required, disabled. Do not invent other assertion attributes.
-Targets use exact accessible names: by=role,label,text,placeholder. Optional
+Targets use exact accessible names: by=role,label,text,placeholder. For read-only
+form-state assertions, by=field uses the actual HTML name including hidden inputs. Optional
 withinText scopes to a row/listitem containing unique synthetic text.
 withinText also supports article/group cards and visible confirmation dialogs.
 withinText and withinRole are target properties, never actions. For example:
@@ -195,6 +205,13 @@ def target(page, spec):
     if not name:
         raise ValueError('Invalid verification plan: empty target name')
     by = spec.get('by')
+    if by == 'field':
+        fields = scope.locator('input,select,textarea')
+        names = fields.evaluate_all('els => els.map(e => e.name)')
+        matches = [i for i, field_name in enumerate(names) if field_name == name]
+        if len(matches) != 1:
+            raise ValueError('Invalid verification plan: field name is missing or ambiguous')
+        return fields.nth(matches[0])
     if by == 'role':
         return scope.get_by_role(str(spec.get('role', '')), name=name, exact=True)
     if by == 'label':
@@ -299,7 +316,7 @@ def verify_functions(page, prompt, provider, attempt=0, feedback="", sources=Non
     original_storage = page.evaluate('''() => ({local: {...localStorage}, session: {...sessionStorage}})''')
     controls = page.locator('input,select,textarea,button,a').evaluate_all('''els => els.slice(0,80).map(e => ({
         tag:e.tagName,type:e.type,name:e.getAttribute('aria-label') || (()=>{const l=e.labels?.[0]?.cloneNode(true); if(!l)return e.innerText; l.querySelectorAll('input,textarea,select').forEach(x=>x.remove()); return l.textContent.trim()})(),
-        placeholder:e.placeholder,min:e.min,max:e.max,value:e.value,
+        placeholder:e.placeholder,fieldName:e.name,min:e.min,max:e.max,value:e.value,
         nearbyHeadings:(()=>{let p=e.parentElement; for(let i=0;p && i<5;i++,p=p.parentElement){const hs=Array.from(p.querySelectorAll('h2,h3,h4')).map(h=>h.innerText); if(hs.length && hs.length<=3)return hs;} return [];})(),
         options:e.tagName==='SELECT'?Array.from(e.options).map(o=>({text:o.text,value:o.value})):undefined
     }))''')
@@ -346,7 +363,7 @@ def verify_functions(page, prompt, provider, attempt=0, feedback="", sources=Non
     # Subjective appearance is reported honestly outside functional coverage.
     # Keep every requirement that also names an interaction or user-data behavior.
     def subjective_design(name):
-        return (bool(re.search(r'\b(aesthetic|visual design|different ui|design quality|visual style|visual criteria)\b', name, re.I))
+        return (bool(re.search(r'\b(aesthetic|visual design|different ui|design quality|visual style|visual criteria|polished|nice looking)\b', name, re.I))
                 and not re.search(r'\b(click|submit|save|delete|reset|persist|booking|search|navigation|filter|form|control|layout|overflow|logo|favicon)\b', name, re.I))
     if isinstance(requirements, list) and all(isinstance(item, dict) for item in requirements):
         visual_ids = {item['id'] for item in requirements if isinstance(item.get('id'), str) and subjective_design(str(item.get('name', '')))}
@@ -430,6 +447,12 @@ def verify_functions(page, prompt, provider, attempt=0, feedback="", sources=Non
             for step in steps:
                 if not isinstance(step, dict):
                     raise ValueError('Invalid verification plan step')
+                step_target = step.get('target')
+                test_text = ' '.join(value for value in (
+                    step.get('value', ''), step_target.get('name', '') if isinstance(step_target, dict) else ''
+                ) if isinstance(value, str))
+                if re.search(r'[\x00-\x08\x0b\x0c\x0e-\x1f]', test_text):
+                    raise ValueError('Invalid verification plan: control characters in test text. Use plain ASCII synthetic values and stable real UI text.')
                 if step.get('action') not in {'fill', 'click', 'select', 'reload', 'visible', 'absent', 'value', 'invalid', 'attribute', 'rememberText', 'sameText'}:
                     raise ValueError(
                         f"Invalid verification plan: unsupported action {str(step.get('action'))[:80]}. "
@@ -440,6 +463,8 @@ def verify_functions(page, prompt, provider, attempt=0, feedback="", sources=Non
                     spec = step.get('target')
                     if not isinstance(spec, dict) or not str(spec.get('name', '')).strip():
                         raise ValueError('Invalid verification plan: empty target name')
+                    if spec.get('by') == 'field' and step.get('action') not in {'value', 'attribute'}:
+                        raise ValueError('Invalid verification plan: field-name selectors are read-only assertions; fill visible controls by their accessible labels.')
                     if step.get('action') == 'value' and spec.get('by') == 'role' and spec.get('role') in {'button', 'link', 'heading', 'dialog', 'region', 'article'}:
                         raise ValueError('Invalid verification plan: value only asserts form-control values. Use visible or sameText to assert button text.')
                 if step.get('action') in {'rememberText', 'sameText'}:
@@ -606,7 +631,7 @@ def verify_functions(page, prompt, provider, attempt=0, feedback="", sources=Non
             'controls': page.locator('input,select,textarea,button,a').evaluate_all('''els => els.slice(0,100).map(e => ({
                 tag:e.tagName,type:e.type,name:e.getAttribute('aria-label') || e.labels?.[0]?.innerText || e.innerText,
                 nearbyHeadings:(()=>{let p=e.parentElement; for(let i=0;p && i<5;i++,p=p.parentElement){const hs=Array.from(p.querySelectorAll('h2,h3,h4')).map(h=>h.innerText); if(hs.length && hs.length<=3)return hs;} return [];})(),
-                value:e.value,min:e.min,options:e.tagName==='SELECT'?Array.from(e.options).map(o=>({text:o.text,value:o.value})):undefined
+                fieldName:e.name,value:e.value,min:e.min,options:e.tagName==='SELECT'?Array.from(e.options).map(o=>({text:o.text,value:o.value})):undefined
             }))'''),
         }
         # A revised plan must start from the same isolated browser state, not
