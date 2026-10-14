@@ -1962,7 +1962,7 @@ def run_agent(
         try:
             product_brief['buildSpecification'] = prepare_build_spec(workspace, prompt, product_brief, provider)
         except Exception as exc:
-            print('Build specification unavailable:', type(exc).__name__)
+            print('Build specification unavailable:', type(exc).__name__, str(exc)[:250])
             return {'status': 'error', 'requestType': 'build', 'errorType': 'planning',
                     'message': 'The build requirements could not be prepared. Your existing project is preserved; retry the request.',
                     'buildPassed': False, 'browserVerified': False, 'modifiedFiles': []}
