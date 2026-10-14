@@ -86,6 +86,11 @@ item, explicitly select its own item and then submit the matching current button
 An independent persistence check must create its own record; it cannot depend on a
 record created by a failed earlier check. Test create, reload and delete together.
 Scope filter assertions to the filtered list/cards, not dropdown options elsewhere.
+For repeated gallery buttons, use imageSrc on the button target with the exact
+observed thumbnail URL to select that image. Then assert the main image src changes
+to that URL. Thumbnail alt text is an image accessible name, not visible text.
+Do not require real external payment processing for a generic store request unless
+the user explicitly asks to integrate/process real payments; report it as an integration.
 For invalid-input checks use the invalid assertion; a rejected submission is the
 expected outcome, not an application error. Never use example.com as an image
 fixture; reuse a real image URL from the implementation with unique synthetic text.
@@ -150,6 +155,15 @@ def target(page, spec):
     if not isinstance(spec, dict):
         raise ValueError('Invalid browser target')
     scope = page
+    if spec.get('imageSrc'):
+        inner = {key: value for key, value in spec.items() if key != 'imageSrc'}
+        candidates = target(page, inner)
+        wanted = str(spec['imageSrc'])
+        matches = [i for i in range(candidates.count()) if candidates.nth(i).is_visible()
+                   and wanted in candidates.nth(i).locator('img').evaluate_all('els => els.map(e => e.getAttribute("src"))')]
+        if len(matches) != 1:
+            raise ValueError('Invalid verification plan: thumbnail image target is missing or ambiguous')
+        return candidates.nth(matches[0])
     if spec.get('withinRole'):
         outer = spec['withinRole']
         if not isinstance(outer, dict) or outer.get('role') not in {'navigation', 'banner', 'region', 'form', 'dialog', 'alertdialog'}:
@@ -317,6 +331,7 @@ def verify_functions(page, prompt, provider, attempt=0, feedback="", sources=Non
     controls = page.locator('input,select,textarea,button,a').evaluate_all('''els => els.slice(0,80).map(e => ({
         tag:e.tagName,type:e.type,name:e.getAttribute('aria-label') || (()=>{const l=e.labels?.[0]?.cloneNode(true); if(!l)return e.innerText; l.querySelectorAll('input,textarea,select').forEach(x=>x.remove()); return l.textContent.trim()})(),
         placeholder:e.placeholder,fieldName:e.name,min:e.min,max:e.max,value:e.value,
+        images:[...e.querySelectorAll('img')].map(img=>({alt:img.alt,src:img.getAttribute('src')})),
         nearbyHeadings:(()=>{let p=e.parentElement; for(let i=0;p && i<5;i++,p=p.parentElement){const hs=Array.from(p.querySelectorAll('h2,h3,h4')).map(h=>h.innerText); if(hs.length && hs.length<=3)return hs;} return [];})(),
         options:e.tagName==='SELECT'?Array.from(e.options).map(o=>({text:o.text,value:o.value})):undefined
     }))''')
@@ -377,6 +392,10 @@ def verify_functions(page, prompt, provider, attempt=0, feedback="", sources=Non
     visual_core = [name for name in core if subjective_design(name)]
     core = [name for name in core if name not in visual_core]
     unverified.extend('Separate visual review: ' + name for name in visual_core)
+    if not re.search(r'\b(integrat\w*|connect\w*|process\w*|real|live|stripe|paypal)\b.{0,60}\b(payment|payments|checkout|purchase|purchases)\b|\b(payment|payments)\b.{0,60}\b(integrat\w*|process\w*|real|live)\b', prompt, re.I):
+        external_core = [name for name in core if re.search(r'\b(external|server|remote)\b.*\b(payment|payments|purchase|purchases)\b', name, re.I)]
+        core = [name for name in core if name not in external_core]
+        unverified.extend('External integration not requested: ' + name for name in external_core)
     if not isinstance(requirements, list) or not requirements or any(
         not isinstance(item, dict) or not isinstance(item.get('id'), str)
         or not item.get('id').strip() or not isinstance(item.get('name'), str)
