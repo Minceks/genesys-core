@@ -9,7 +9,7 @@ export function Footer() {
           <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-blue-600 text-white"><Cpu size={15} /></span>
           GeneSys
         </Link>
-        <p className="text-xs text-slate-500">Make something useful. Then make it yours.</p>
+        <p className="text-xs text-slate-500">Build, preview, and review with GeneSys.</p>
         <div className="flex items-center gap-5 text-xs font-medium text-slate-500">
           <Link to="/pricing" className="no-underline transition hover:text-blue-700">Pricing</Link>
           <Link to="/terms" className="no-underline transition hover:text-blue-700">Terms</Link>
