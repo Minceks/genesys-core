@@ -4,6 +4,7 @@ from .build_metrics import record_repair
 from .model_context import text_safe, ModelBudgetExceeded
 
 import json
+import logging
 import os
 import re
 import time
@@ -2364,7 +2365,7 @@ def run_agent(
             print("   - None detected")
 
         print("✅ Project intelligence complete.")
-        print(project_context)
+        logging.getLogger(__name__).info('project_inspection_context chars=%s', len(project_context))
 
     except Exception as exc:
         project_scan = {
@@ -2702,13 +2703,8 @@ def run_agent(
                 "🧭 Diff classification:"
             )
 
-            print(
-                json.dumps(
-                    diff_classification,
-                    indent=2,
-                    ensure_ascii=False,
-                )
-            )
+            logging.getLogger(__name__).info('diff_classification categories=%s changed_lines=%s',
+                diff_classification.get('categories', []), len(diff_classification.get('changedLines', [])))
 
             print(
                 "📊 Diff summary:"

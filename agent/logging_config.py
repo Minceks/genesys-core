@@ -30,6 +30,10 @@ def configure_logging() -> None:
     root_logger.setLevel(
         getattr(logging, log_level, logging.INFO)
     )
+    # Polling and sandbox file downloads can emit hundreds of successful HTTP
+    # records. Retain warnings/errors without drowning out application failures.
+    for name in ('httpx', 'httpx2', 'httpcore'):
+        logging.getLogger(name).setLevel(logging.DEBUG if log_level == 'DEBUG' else logging.WARNING)
 
     log_format = (
         "%(asctime)s %(levelname)s %(name)s "

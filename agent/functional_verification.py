@@ -5,6 +5,7 @@ import re
 import time
 from urllib.parse import urlsplit, urlunsplit
 from .verification_schema import READ_ONLY_ATTRIBUTES
+from .verification_input import INPUT_ACTIONS, perform_input, validate_input_budget, validate_number, assert_number
 
 
 def verification_location(page):
@@ -210,7 +211,30 @@ Fill a date input before asserting its value. An action=value only checks state;
 it never sets a value. Derive future dates from browserCurrentDate.
 On confirmation, use the dialog's actual text and button name. Never invent an
 item name in a confirmation dialog that does not display that name.
-Never use CSS, JavaScript, coordinates or tool calls. Each check needs an outcome assertion
+For canvas, games, maps and continuous controls, use real input, not repeated
+center clicks followed by an invented win/loss assertion. The supported actions include:
+{"action":"press","target":{"by":"label","name":"Game canvas"},"key":"ArrowRight"}
+{"action":"hold","target":{"by":"label","name":"Game canvas"},"keys":["d","Space"],"durationMs":1000}
+{"action":"pointer","target":{"by":"label","name":"Game canvas"},"mode":"click","x":0.7,"y":0.4}
+For pointer movement use mode=move; for drag provide endX/endY. Coordinates are
+fractions 0..1 within a real named control, never page pixels or guessed enemy
+positions. Use implementation and observed geometry to choose valid inputs.
+For pointer mode=hold, durationMs holds the pointer down; for mode=drag it holds
+at the endpoint before release, supporting a real joystick. Use 0 for click/move.
+{"action":"wait","durationMs":500} allows a bounded real-time transition.
+Hold is at most 3000ms, wait at most 2000ms; total wait/hold budget is 15000ms
+per workflow and 45000ms per plan. Only unmodified letters/digits, arrows, Space,
+Enter, Escape and navigation keys are allowed. No OS shortcuts. Always assert a
+real resulting HUD/state outcome, not merely the presence of a canvas. A few
+shots do not prove an entire level or player death; if a long or unpredictable
+game outcome cannot be exercised honestly, leave its coverage incomplete.
+Never inject game state, change timers, add win buttons or weaken gameplay to
+satisfy a test. Do not claim saved preferences prove missing on-screen controls.
+Use {"action":"number","target":{"by":"label","name":"Score"},"comparison":"gt","value":0}
+to assert a real changing numeric output without guessing its exact eventual value.
+Comparisons are gt/gte/lt/lte/eq; the named output must contain exactly one number.
+Use separate scoped HUD outputs, not a whole panel containing several numbers.
+Never use CSS, JavaScript or tool calls. Each check needs an outcome assertion
 after its last mutation; meaningful expected outcomes, not merely visible buttons.
 Each check must leave temporary dialogs and lightboxes closed before the next
 check. Include a click on their Close button and an absent assertion when testing
@@ -518,6 +542,30 @@ def contract_browser_checks(checks, contract):
     return result
 
 
+def declared_browser_gaps(plan, contract):
+    """Keep explicit missing browser outcomes bound to persisted acceptance text.
+
+    A passed preference check must not erase an admitted missing interaction.
+    Unknown IDs and visual/external review still cannot add browser scope.
+    """
+    gaps = {}
+    evidence = plan.get('coreRequestEvidence', [])
+    if not isinstance(evidence, list): return gaps
+    for requirement in contract.get('requirements', []):
+        if requirement.get('scope') != 'browser': continue
+        identifier = str(requirement.get('id', ''))
+        acceptance = str(requirement.get('acceptance', ''))
+        if not identifier or not acceptance: continue
+        for entry in plan.get('unverifiedCore', []) or []:
+            if not isinstance(entry, str) or not re.match(r'^' + re.escape(identifier) + r'(?:\s*:|\b)', entry): continue
+            for item in evidence:
+                if not isinstance(item, dict) or item.get('requirement') not in {entry, identifier}: continue
+                quote = item.get('requestQuote')
+                if isinstance(quote, str) and len(quote.strip()) >= 16 and quote.casefold() in acceptance.casefold():
+                    gaps[identifier] = entry
+    return gaps
+
+
 def verify_functions(page, prompt, provider, attempt=0, feedback="", sources=None, preverified=(), planning_retry=0, contract=None, validation_retry=0, passed_checks=(), _repair_round=0):
     if contract:
         from .build_spec import verification_scopes
@@ -567,6 +615,10 @@ def verify_functions(page, prompt, provider, attempt=0, feedback="", sources=Non
                 'landmarks':page.evaluate("""() => [...document.querySelectorAll('nav,header,[role=navigation],[role=region],form')].map(e => ({role:e.getAttribute('role') || ({NAV:'navigation',HEADER:'banner',FORM:'form'}[e.tagName]),name:e.getAttribute('aria-label') || ''}))"""),
                 'buildSpecification':contract,
                 'untrustedRenderedText':snapshot,'untrustedControls':controls,
+                'interactiveSurfaces':page.locator('canvas,svg[tabindex],[role=application]').evaluate_all('''els => els.slice(0,12).map(e => ({
+                    tag:e.tagName,name:e.getAttribute('aria-label'),tabIndex:e.tabIndex,
+                    width:e.getBoundingClientRect().width,height:e.getBoundingClientRect().height,
+                    intrinsicWidth:e.width,intrinsicHeight:e.height}))'''),
                 'accessibilitySnapshot': getattr(page.locator('body'), 'aria_snapshot', lambda: '')()[:12000],
                 'untrustedImplementation':sources or {}})}], []).text.strip()
         raw = re.sub(r'^```(?:json)?\s*|\s*```$', '', raw)
@@ -588,7 +640,9 @@ def verify_functions(page, prompt, provider, attempt=0, feedback="", sources=Non
         # A verifier/provider failure is not evidence of broken application code.
         return {'status':'success', 'issues':[], 'testedInteractions':[],
                 'unverified':['Functional verification could not run.'], 'unverifiedCore':['Verification service unavailable: '+str(error)[:250]]}
-    logging.getLogger(__name__).info('functional_verification_plan %s', json.dumps(plan)[:12000])
+    logging.getLogger(__name__).info('functional_verification_plan checks=%s requirements=%s',
+        len(plan.get('checks', [])) if isinstance(plan, dict) else 0,
+        len(plan.get('requirements', [])) if isinstance(plan, dict) else 0)
     checks = plan.get('checks') if isinstance(plan, dict) else None
     if not isinstance(checks, list) or len(checks) > 8:
         return {'status':'success', 'issues':[], 'testedInteractions':[], 'unverified':[], 'unverifiedCore':['Invalid functional verification plan.']}
@@ -615,7 +669,7 @@ def verify_functions(page, prompt, provider, attempt=0, feedback="", sources=Non
         # Planner prose cannot add blocking scope to the persisted contract.
         # Executed failures and missing contract coverage are still appended below.
         unverified.extend('Planner limitation: ' + item for item in core)
-        core = []
+        core = list(declared_browser_gaps(plan, contract).values())
     requirements = plan.get('requirements')
     # Subjective appearance is reported honestly outside functional coverage.
     # Keep every requirement that also names an interaction or user-data behavior.
@@ -699,6 +753,7 @@ def verify_functions(page, prompt, provider, attempt=0, feedback="", sources=Non
     # consume app repair attempts or trigger edits to working application code.
     try:
         captured_keys = set()
+        validate_input_budget(checks)
         if sum(len(check.get('steps', [])) for check in checks if isinstance(check, dict) and isinstance(check.get('steps'), list)) > 96:
             raise ValueError('Invalid verification plan: total step limit exceeded')
         for check in checks:
@@ -722,13 +777,13 @@ def verify_functions(page, prompt, provider, attempt=0, feedback="", sources=Non
                 ) if isinstance(value, str))
                 if re.search(r'[\x00-\x08\x0b\x0c\x0e-\x1f]', test_text):
                     raise ValueError('Invalid verification plan: control characters in test text. Use plain ASCII synthetic values and stable real UI text.')
-                if step.get('action') not in {'fill', 'type', 'click', 'select', 'reload', 'tab', 'focused', 'visible', 'absent', 'value', 'invalid', 'attribute', 'rememberText', 'sameText', 'newTabValue', 'newTabText'}:
+                if step.get('action') not in {'fill', 'type', 'click', 'select', 'reload', 'tab', 'focused', 'visible', 'absent', 'value', 'invalid', 'attribute', 'rememberText', 'sameText', 'newTabValue', 'newTabText', 'number'} | INPUT_ACTIONS:
                     raise ValueError(
                         f"Invalid verification plan: unsupported action {str(step.get('action'))[:80]}. "
                         "Use fill, type, click, select, reload, visible, absent, value, invalid, attribute, rememberText or sameText. "
                         "withinText and withinRole belong inside target, never in action."
                     )
-                if step.get('action') not in {'reload', 'tab'}:
+                if step.get('action') not in {'reload', 'tab', 'wait'}:
                     spec = step.get('target')
                     unnamed_assertion = (isinstance(spec, dict)
                         and spec.get('by') == 'role' and spec.get('role') in {'alert', 'status', 'dialog', 'alertdialog'}
@@ -741,6 +796,7 @@ def verify_functions(page, prompt, provider, attempt=0, feedback="", sources=Non
                         raise ValueError('Invalid verification plan: value/newTabValue only assert form-control values. Use visible or sameText for current text, or newTabText for exact text in a real new tab.')
                     if step.get('action') == 'attribute' and spec.get('by') == 'role' and spec.get('role') == 'img' and step.get('attribute') in {'aria-pressed', 'aria-selected', 'aria-expanded', 'disabled', 'required'}:
                         raise ValueError('Invalid verification plan: images do not expose control state. Assert the image is visible; assert selection on the actual observed button or option.')
+                if step.get('action') == 'number': validate_number(step)
                 if step.get('action') in {'rememberText', 'sameText'}:
                     key = step.get('key')
                     if not isinstance(key, str) or not key.strip():
@@ -761,7 +817,7 @@ def verify_functions(page, prompt, provider, attempt=0, feedback="", sources=Non
             closing_cleanup = (final.get('action') == 'click'
                                and re.match(r'^(close\b|cancel$)', str((final.get('target') or {}).get('name', '')), re.I)
                                and any(item.get('action') in {'visible', 'absent', 'value', 'attribute', 'invalid', 'sameText'} for item in steps[:-1]))
-            if final.get('action') not in {'visible', 'absent', 'value', 'attribute', 'invalid', 'sameText', 'focused', 'newTabValue', 'newTabText'} and not closing_cleanup:
+            if final.get('action') not in {'visible', 'absent', 'value', 'attribute', 'invalid', 'sameText', 'focused', 'newTabValue', 'newTabText', 'number'} and not closing_cleanup:
                 raise ValueError('Invalid verification plan: missing final outcome assertion')
         if contract:
             planned_ids = {key for check in checks for key in check['covers']}
@@ -845,6 +901,10 @@ def verify_functions(page, prompt, provider, attempt=0, feedback="", sources=Non
                     page.keyboard.press('Tab')
                     asserted = False
                     continue
+                if action == 'wait':
+                    perform_input(page, None, step)
+                    asserted = False
+                    continue
                 specification = step.get('target')
                 if isinstance(specification, dict):
                     specification = dict(specification)
@@ -864,6 +924,10 @@ def verify_functions(page, prompt, provider, attempt=0, feedback="", sources=Non
                     locator = observed_control_target(page, specification) if action in {'click', 'rememberText', 'sameText'} else None
                     if locator is None:
                         raise
+                if action in INPUT_ACTIONS:
+                    perform_input(page, locator, step)
+                    asserted = False
+                    continue
                 if action in {'click', 'rememberText', 'sameText'} and locator.count() != 1:
                     from .observed_targets import active_dialog_target
                     scoped = active_dialog_target(page, specification, target)
@@ -934,6 +998,9 @@ def verify_functions(page, prompt, provider, attempt=0, feedback="", sources=Non
                     if attribute not in READ_ONLY_ATTRIBUTES:
                         raise ValueError('Unsupported assertion attribute')
                     expect(locator).to_have_attribute(attribute, str(step.get('value', '')), timeout=3000)
+                    asserted = True
+                elif action == 'number':
+                    assert_number(page, locator, step)
                     asserted = True
                 elif action in {'fill', 'type', 'select', 'click'}:
                     if locator.count() != 1:
@@ -1044,6 +1111,8 @@ def verify_functions(page, prompt, provider, attempt=0, feedback="", sources=Non
         for pending in checks[len(passed):]:
             failed_checks.update(pending['covers'])
     covered.difference_update(failed_checks - external_coverage)
+    if contract:
+        covered.difference_update(declared_browser_gaps(plan, contract))
     missing = [name for key, name in requirement_names.items() if key not in covered]
     core.extend('Not verified: ' + name for name in missing)
     logging.getLogger(__name__).info('functional_verification_result %s', json.dumps({'passed':passed, 'issues':issues, 'unverifiedCore':core})[:6000])
@@ -1088,6 +1157,12 @@ def verify_functions(page, prompt, provider, attempt=0, feedback="", sources=Non
                  'Wrong selectors, invented expected values, missing setup/selection, ambiguous targets and '
                  'test ordering are verification failures. Only classify an application failure when the '
                  'executed actions were valid and source plus resulting DOM establish the defect. '
+                 'For animation/canvas code inspect whether a requestAnimationFrame callback started '
+                 'once captures initial useState values forever; setState does not refresh that closure. '
+                 'A continuously spawned initial wave or never-updating simulation can be an actual '
+                 'source defect. Pause that unmounts/remounts the game resets progress instead of '
+                 'resuming. Missing requested touch joystick/fire controls are application defects. '
+                 'Do not infer win/loss defects solely from a few untargeted clicks. '
                  'Inspect failedSteps reloadTransitions: if an addressable detail existed before reload '
                  'but the URL/view resets to home, and source initializes/writes home over the URL, '
                  'that is an application routing defect, not an invented selector. Preserve that failure '
@@ -1111,6 +1186,11 @@ def verify_functions(page, prompt, provider, attempt=0, feedback="", sources=Non
             # Uncovered requirements caused by the confirmed app defect should
             # be repaired, rather than returning before the repair loop runs.
             logging.getLogger(__name__).info('confirmed_application_failure %s', str(verdict['evidence'])[:1500])
+            if not issues and contract and declared_browser_gaps(plan, contract):
+                # The source/DOM diagnosis confirmed a missing requested browser
+                # outcome. Route it to application repair rather than stopping
+                # as a verifier outage after a partial check happened to pass.
+                issues.append('Required browser functionality is incomplete: ' + str(verdict['evidence'])[:1000])
     result = {'status':'error' if issues else 'success', 'issues':issues,
             'testedInteractions':passed, 'unverified':unverified + core, 'unverifiedCore':core,
             'coverage':{'requirements':requirements, 'passedIds':sorted(covered), 'unverified':missing},

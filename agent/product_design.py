@@ -112,6 +112,19 @@ def prepare_design(workspace, prompt):
             brief['purposeChangedFrom'] = previous['productType']
             brief['designPolicy'] += ' The product purpose changed; replace unsuitable inherited theme and layout.'
     brief['buildIntent'] = 'replace-product' if previous and whole_product else 'edit-product' if retain else 'new-product'
+    if brief['productType'] == 'game':
+        brief['interactiveRuntime'] = (
+            'Use one authoritative simulation state in a ref or engine store and a single cancellable '
+            'requestAnimationFrame loop; React state mirrors HUD values rather than owning each frame. '
+            'Never capture initial state in a permanent animation/event callback. Stop scheduling on '
+            'unmount and terminal outcomes. Pause freezes the same scene and clears held inputs; Resume '
+            'continues that exact run, Restart explicitly resets it. Scale pointer coordinates from the '
+            'rendered canvas to its logical dimensions. Implement real touch joystick/fire controls when '
+            'offered; settings must change actual inputs. Clear held input on blur/pointercancel. '
+            'Keep the canvas keyboard-focusable and expose live health, score, wave and outcomes as '
+            'accessible HUD text. Persist progress only after an actual completed run. Verify movement, '
+            'combat, pause/resume and touch interactions through real inputs; never create shortcuts '
+            'or fake outcomes for verification.')
     if previous and whole_product:
         brief['designPolicy'] = ('Replace the website/application in THIS project with the newly requested product. '
             'The latest request supersedes the old product brief, brand, content and feature requirements. '

@@ -34,10 +34,21 @@ def step(actions, target=TARGET, **properties):
 
 
 ASSERTION = {'anyOf': [step(['visible', 'absent'], target=VISIBILITY_TARGET), step(['invalid', 'focused']), step(['value', 'newTabValue', 'newTabText'], value=TEXT),
+                       step(['number'], comparison={'type':'string','enum':['gt','gte','lt','lte','eq']}, value={'type':'number'}),
                        step(['sameText'], key=NONEMPTY), step(['attribute'],
                        attribute={'type': 'string', 'enum': READ_ONLY_ATTRIBUTES}, value=TEXT)]}
 STEP = {'anyOf': [*ASSERTION['anyOf'], step(['fill', 'type', 'select'], value=TEXT),
                    step(['click'], unlessVisible={'anyOf': [DESTINATION_TARGET, {'type': 'null'}]}),
+                   step(['press'], key=NONEMPTY),
+                   step(['hold'], keys={'type': 'array', 'minItems': 1, 'maxItems': 3, 'items': NONEMPTY},
+                        durationMs={'type': 'integer', 'minimum': 50, 'maximum': 3000}),
+                   step(['pointer'], mode={'type': 'string', 'enum': ['move', 'click', 'drag', 'hold']},
+                        durationMs={'type': 'integer', 'minimum': 0, 'maximum': 3000},
+                        x={'type': 'number', 'minimum': 0, 'maximum': 1}, y={'type': 'number', 'minimum': 0, 'maximum': 1},
+                        endX={'type': ['number', 'null'], 'minimum': 0, 'maximum': 1},
+                        endY={'type': ['number', 'null'], 'minimum': 0, 'maximum': 1}),
+                   obj({'action': {'type': 'string', 'enum': ['wait']},
+                        'durationMs': {'type': 'integer', 'minimum': 50, 'maximum': 2000}}),
                    step(['rememberText'], key=NONEMPTY), obj({'action': {'type': 'string', 'enum': ['reload', 'tab']}})]}
 PLAN_SCHEMA = obj({
     'checks': {'type': 'array', 'minItems': 1, 'maxItems': 8, 'items': obj({
