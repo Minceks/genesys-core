@@ -119,15 +119,51 @@ def test_frontend_notifies_only_after_its_own_version_is_live_and_keeps_secret_s
         def read(self, _): return b'{"deploymentId":"frontend-release"}'
     def request(value, **kwargs):
         calls.append(value)
-        return Reply(202 if not isinstance(value, str) else 200)
+        return Reply(202 if value.data else 200)
     monkeypatch.setattr(notify, 'build_opener', lambda *args: SimpleNamespace(open=request))
     monkeypatch.setattr(notify.threading, 'Thread', lambda **kwargs: SimpleNamespace(start=kwargs['target']))
     notify.notify_deployment()
-    assert calls[0] == 'https://frontend.example.test/health'
+    assert calls[0].full_url == 'https://frontend.example.test/health'
+    assert not calls[0].has_header('X-genesys-smoke-key')
     assert calls[1].full_url == 'https://backend.example.test/internal/deployment-smoke'
     assert calls[1].headers['X-genesys-smoke-key'] == 'fixture-smoke-key-' * 3
     assert json.loads(calls[1].data) == {'source': 'frontend', 'deploymentId': 'frontend-release'}
     assert notify.NoRedirects().redirect_request(None, None, None, None, None, None) is None
+
+
+def test_router_notification_checks_concrete_wildcard_origin_before_notifying(monkeypatch):
+    import asyncio
+    import importlib.util
+    from pathlib import Path
+    spec = importlib.util.spec_from_file_location('genesys_router_smoke_test',
+        Path(__file__).resolve().parents[1] / 'preview_proxy/server.py')
+    server = importlib.util.module_from_spec(spec); spec.loader.exec_module(server)
+    for key, value in {'RAILWAY_ENVIRONMENT_ID': 'fixture', 'RAILWAY_DEPLOYMENT_ID': 'router-release',
+            'RAILWAY_PUBLIC_DOMAIN': '*.previews.example.test', 'GENESYS_PREVIEW_DOMAIN': 'previews.example.test',
+            'GENESYS_PREVIEW_PROXY_KEY': 'fixture-proxy-key-' * 3, 'GENESYS_DEPLOY_SMOKE_KEY': 'fixture-smoke-key-' * 3,
+            'GENESYS_SMOKE_BACKEND_URL': 'https://backend.example.test', 'GENESYS_DEPLOY_SMOKE_ENABLED': '1'}.items():
+        monkeypatch.setenv(key, value)
+    calls = []
+    class Reply:
+        def __init__(self, status): self.status = status
+        async def __aenter__(self): return self
+        async def __aexit__(self, *args): pass
+        async def json(self): return {'deploymentId': 'router-release'}
+    class Client:
+        def get(self, url, **kwargs): calls.append(('GET', url, kwargs)); return Reply(200)
+        def post(self, url, **kwargs): calls.append(('POST', url, kwargs)); return Reply(202)
+        async def close(self): pass
+    monkeypatch.setattr(server.aiohttp, 'ClientSession', lambda **kwargs: Client())
+    async def run():
+        app = server.create_app(); lifecycle = app.cleanup_ctx[0](app)
+        await anext(lifecycle); await asyncio.sleep(0)
+        try: await anext(lifecycle)
+        except StopAsyncIteration: pass
+    asyncio.run(run())
+    assert calls[0][1] == 'https://deployment-check.previews.example.test/health'
+    assert 'headers' not in calls[0][2]
+    assert calls[1][1] == 'https://backend.example.test/internal/deployment-smoke'
+    assert calls[1][2]['json'] == {'source': 'preview-router', 'deploymentId': 'router-release'}
 
 
 def test_real_browser_probe_opens_phone_and_desktop_without_sending_write_requests(tmp_path, monkeypatch):

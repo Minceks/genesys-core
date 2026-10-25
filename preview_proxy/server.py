@@ -41,15 +41,22 @@ def create_app():
                 or len(key) < 32 or not backend.startswith('https://')): return
         deployment = os.getenv('RAILWAY_DEPLOYMENT_ID', 'startup')
         own = os.getenv('RAILWAY_PUBLIC_DOMAIN', '')
+        # A wildcard DNS name is not a resolvable URL host. Probe a concrete
+        # hostname on the same wildcard certificate and routing configuration.
+        if own.startswith('*.'): own = 'deployment-check.' + own[2:]
         deadline = time.monotonic() + 180
+        failure, stage = 'not_ready', 'rollout'
         for _ in range(60):
             if time.monotonic() >= deadline: break
             try:
                 if own:
+                    stage = 'rollout'
                     async with app['client'].get('https://' + own + '/health', allow_redirects=False,
                             timeout=aiohttp.ClientTimeout(total=8)) as response:
                         if response.status != 200 or (await response.json()).get('deploymentId') != deployment:
+                            failure = 'http_' + str(response.status) + '_or_version_pending'
                             await asyncio.sleep(3); continue
+                stage = 'notification'
                 async with app['client'].post(backend + '/internal/deployment-smoke',
                         json={'source': 'preview-router', 'deploymentId': deployment},
                         headers={'X-GeneSys-Smoke-Key': key}, allow_redirects=False,
@@ -57,9 +64,11 @@ def create_app():
                     if response.status == 202:
                         logging.getLogger(__name__).info('deployment_smoke_notified source=preview-router')
                         return
-            except (aiohttp.ClientError, asyncio.TimeoutError, ValueError): pass
+                    failure = 'http_' + str(response.status)
+            except (aiohttp.ClientError, asyncio.TimeoutError, ValueError) as error:
+                failure = type(error).__name__
             await asyncio.sleep(3)
-        logging.getLogger(__name__).error('deployment_smoke_notification_failed source=preview-router')
+        logging.getLogger(__name__).error('deployment_smoke_notification_failed source=preview-router stage=%s reason=%s', stage, failure)
 
     async def register(request):
         supplied = request.headers.get('X-GeneSys-Proxy-Key', '')
