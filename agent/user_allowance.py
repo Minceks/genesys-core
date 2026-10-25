@@ -27,6 +27,10 @@ def allowance(user_id):
 
 
 def record(response):
+    from .build_metrics import current
+    metrics = current.get()
+    if metrics is not None:
+        metrics.record(response)
     user_id = account_context.get()
     if not user_id:
         return

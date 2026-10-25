@@ -1,6 +1,6 @@
+aiohttp>=3.14.0,<4
 Flask
 flask-cors
-httpx
 PyGithub
 python-dotenv
 gunicorn
@@ -8,5 +8,6 @@ groq
 daytona
 playwright
 google-genai
-openai>=1.66,<3
-tiktoken>=0.9,<1
+httpx
+openai
+tiktoken

@@ -1,4 +1,7 @@
+[build]
+buildCommand = "npm ci --prefix reference_tools --omit=dev --ignore-scripts --no-audit --no-fund && python scripts/check_reference_runtime.py --browser && python -c \"import flask, flask_cors, github, dotenv, gunicorn, groq, daytona, playwright.sync_api, google.genai, httpx, openai, tiktoken; print('Backend dependency check passed')\""
+
 [deploy]
-startCommand = "gunicorn --timeout 300 cloud_agent:app"
+startCommand = "gunicorn --bind 0.0.0.0:$PORT --timeout 300 cloud_agent:app"
 healthcheckPath = "/health"
 healthcheckTimeout = 30

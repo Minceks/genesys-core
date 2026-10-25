@@ -54,7 +54,9 @@ usage_limiter = UsageLimiter()
 
 
 def reserve_build(prompt):
-    if classify_request_type(str(prompt)) == 'chat':
+    from agent.builder_modes import parse_mode
+    mode, plain_prompt = parse_mode(str(prompt))
+    if mode in {'plan', 'discuss'} or (mode != 'build' and classify_request_type(plain_prompt) == 'chat'):
         return None
     return usage_limiter.reserve(getattr(g, 'user', {}).get('id', 'legacy-api'))
 
@@ -99,6 +101,12 @@ def begin_request_logging():
 
 @app.before_request
 def require_api_key():
+    if request.path.startswith('/internal/preview-builds/'):
+        expected = os.getenv('GENESYS_PREVIEW_PROXY_KEY', '')
+        supplied = request.headers.get('X-GeneSys-Proxy-Key', '')
+        if len(expected) < 32 or not hmac.compare_digest(expected.encode(), supplied.encode()):
+            return '', 401
+        return None
     if request.method in {'GET', 'HEAD'} and request.path.startswith('/apps/'):
         return None
     if request.method == "OPTIONS" or request.path.rstrip("/") in {
@@ -111,7 +119,7 @@ def require_api_key():
         try:
             g.user = user_auth.current_user(request.headers.get('Authorization', ''))
             project_paths = {'/publish', '/list-files', '/read-file', '/write-file', '/agent/run', '/preview', '/restore', '/promote', '/beta/feedback'}
-            if request.path in project_paths or request.path.startswith('/agent/jobs'):
+            if request.path in project_paths or request.path.startswith('/agent/jobs') or request.path.startswith('/builder/'):
                 user_auth.owned_project(get_project_id(), g.user)
             if request.path == '/promote':
                 admins = {value.strip() for value in os.getenv('GENESYS_PROMOTION_ADMIN_IDS', '').split(',') if value.strip()}
@@ -245,12 +253,19 @@ def get_json_body() -> dict:
     methods=["GET"],
 )
 def health():
+    from agent.reference_inspection import rea_command
+    reference_ready = bool(rea_command())
     return jsonify(
         {
             "status": (
                 "Genesys Cloud Bridge is Online"
             ),
             "agent": True,
+            "visualReview": {"enabled": os.getenv('GENESYS_VISUAL_REVIEW','1')!='0',
+                             "providerConfigured": bool(os.getenv('OPENAI_API_KEY'))},
+            "referenceInspection": {"enabled": os.getenv('GENESYS_REFERENCE_INSPECTION','1')!='0',
+                                    "reaInstalled": reference_ready,
+                                    "reaVersion": '6.7.0' if reference_ready else None},
             "daytona": bool(
                 os.getenv(
                     "DAYTONA_API_KEY"
@@ -399,6 +414,10 @@ def write():
 
         project_id = get_project_id()
 
+        if jobs.is_running(project_id):
+            return jsonify(status='error',message='Wait for the current build to finish before editing files.'),409
+        from agent.version_history import operate
+        operate(get_workspace(project_id),'capture',label='Before manual source edit')
         result = write_file(
             filename=str(
                 filename
@@ -430,10 +449,24 @@ def write():
 # ============================================================
 
 def execute_agent_request(prompt, project_id, conversation_history, reservation=None, recovery_context=None):
+    from agent.build_metrics import current, BuildMetrics
+    metrics = BuildMetrics()
+    metrics_token = current.set(metrics)
     token = account_context.set(reservation[0] if reservation else None)
     try:
-        return _execute_agent_request(prompt, project_id, conversation_history, recovery_context)
+        result = _execute_agent_request(prompt, project_id, conversation_history, recovery_context)
+        if isinstance(result, dict):
+            result['metrics'] = metrics.summary(result)
+            if result.get('requestType') != 'chat' and result.get('modifiedFiles'):
+                try:
+                    from agent.version_history import operate
+                    result['sourceVersion'] = operate(get_workspace(project_id),'capture',
+                        label='After build: '+str(result.get('status','unknown')))
+                except Exception:
+                    logger.exception('source_version_capture_failed')
+        return result
     finally:
+        current.reset(metrics_token)
         usage_limiter.release(reservation)
         account_context.reset(token)
 
@@ -460,13 +493,32 @@ def _execute_agent_request(prompt, project_id, conversation_history, recovery_co
                 workspace = get_workspace(project_id)
                 if result.get('status') == 'success' and result.get('browserVerified') and checkpoint.get('status') == 'success':
                     result['previewUrl'] = verified_preview(workspace, checkpoint)
+                    from agent.preview_hosting import save, configured
+                    if configured():
+                        result['previewUrl'] = save(workspace, project_id)
+                        result['previewPersistent'] = True
                 elif result.get('status') != 'success' and not result.get('previewUrl'):
                     result['previewUrl'] = verified_preview(workspace)
+                    # A failed new build must not strand the last verified build
+                    # on a temporary sandbox URL that disappears with the sandbox.
+                    from agent.preview_hosting import save, configured
+                    if result['previewUrl'] and configured():
+                        result['previewUrl'] = save(workspace, project_id)
+                        result['previewPersistent'] = True
                     result['previousPreviewPreserved'] = bool(result['previewUrl'])
             except Exception:
                 logger.exception('verified_preview_failed')
                 result['previewUrl'] = None
-        if result.get('previewUrl'):
+                result['previewHostingError'] = 'The new build could not be saved to persistent hosting. Please report this problem; your previous saved preview is preserved.'
+                result['text'] = str(result.get('text') or result.get('message') or '') + '\n\n' + result['previewHostingError']
+        from agent.preview_hosting import available_url
+        durable = available_url(project_id) if result.get('requestType') != 'chat' else None
+        if durable:
+            result['previewUrl'] = durable
+            result['previewPersistent'] = True
+            if result.get('previewHostingError'):
+                result['previousPreviewPreserved'] = True
+        if result.get('previewUrl') and not result.get('previewPersistent'):
             try:
                 result['previewUrl'] = publish_preview(result['previewUrl'], project_id)
             except Exception:
@@ -474,6 +526,8 @@ def _execute_agent_request(prompt, project_id, conversation_history, recovery_co
                 result['previewUrl'] = None
                 result['previewStarted'] = False
                 result['message'] = str(result.get('message') or '') + ' Preview could not reconnect. Please retry from the builder.'
+        from agent.verification_report import finalize_report
+        finalize_report(result)
         result.setdefault("requestType", "build")
         checkpoint = result.get("checkpoint")
         if (
@@ -521,6 +575,12 @@ def agent_run():
 
         project_id = get_project_id()
 
+        from agent.builder_modes import encode_mode
+        try:
+            prompt = encode_mode(str(prompt).strip(), data.get('mode'))
+        except ValueError as error:
+            return jsonify(status='error', message=str(error)), 400
+
         project_id = (
             str(project_id).strip()
             or "genesys-project"
@@ -567,6 +627,8 @@ def agent_run():
 
 
 jobs = JobManager(execute=execute_agent_request)
+from agent.preview_hosting import start_migration
+start_migration()
 
 
 @app.route("/agent/jobs", methods=["POST"])
@@ -576,6 +638,11 @@ def start_agent_job():
     project_id = get_project_id()
     if not prompt or len(prompt) > 8000 or not project_id or len(project_id) > 128:
         return jsonify(status="error", message="A project and a prompt of at most 8000 characters are required."), 400
+    from agent.builder_modes import encode_mode
+    try:
+        prompt = encode_mode(prompt, data.get('mode'))
+    except ValueError as error:
+        return jsonify(status='error', message=str(error)), 400
     history = [{"role": turn.get("role"), "content": str(turn.get("content") or "")[:2000]}
                for turn in (data.get("history") or [])[-10:] if isinstance(turn, dict)] if isinstance(data.get("history"), list) else []
     try:
@@ -585,9 +652,11 @@ def start_agent_job():
     try:
         previous = jobs.latest(project_id)
         verification_retry = saved_build_retry(previous, prompt)
+        from agent.jobs import implementation_retry_context
         job_id = jobs.submit(project_id, request_id_context.get(),
             prompt=prompt, history=history, reservation=reservation,
             verification_retry=verification_retry,
+            implementation_retry=implementation_retry_context(previous,prompt),
             user_id=g.user["id"] if getattr(g, "user", None) else None)
     except ValueError as error:
         usage_limiter.release(reservation, refund=True)
@@ -596,6 +665,40 @@ def start_agent_job():
         usage_limiter.release(reservation, refund=True)
         raise
     return jsonify(jobs.get(job_id, project_id)), 202
+
+
+@app.get('/builder/reviews')
+def builder_reviews():
+    from agent.visual_evidence import latest_reviews
+    return jsonify(reviews=latest_reviews(get_project_id()))
+
+
+@app.get('/builder/reviews/<review_id>/<viewport>')
+def builder_review_image(review_id, viewport):
+    from flask import send_file, abort
+    from agent.visual_evidence import image_path
+    path = image_path(get_project_id(), review_id, viewport)
+    if path is None:
+        abort(404)
+    response = send_file(path.resolve(), mimetype='image/png')
+    response.headers['Cache-Control'] = 'private, no-store'
+    return response
+
+
+@app.route('/builder/controls', methods=['GET', 'PUT'])
+def builder_controls():
+    from agent.builder_controls import get_controls, save_controls, ControlsConflict
+    data = get_json_body() if request.method == 'PUT' else {}
+    project_id = str(request.args.get('projectId') or data.get('projectId') or '').strip()
+    if not project_id or len(project_id) > 128:
+        return jsonify(status='error', message='A project is required.'), 400
+    try:
+        controls = save_controls(project_id, data) if request.method == 'PUT' else get_controls(project_id)
+        return jsonify(controls)
+    except ControlsConflict as error:
+        return jsonify(status='error', message=str(error)), 409
+    except ValueError as error:
+        return jsonify(status='error', message=str(error)), 400
 
 
 @app.route('/agent/jobs', methods=['GET'])
@@ -619,12 +722,18 @@ def reconnect_preview():
     project_id = get_project_id()
     if not project_id or len(project_id) > 128:
         return jsonify(status="error", message="projectId is required."), 400
+    from agent.preview_hosting import available_url, save, configured
+    durable = available_url(project_id)
+    if durable:
+        return jsonify(status='success', url=durable, running=True, persistent=True)
     if jobs.is_running(project_id):
         return jsonify(status="error", message="Wait for the current request to finish before reconnecting the preview."), 409
     try:
         workspace = get_workspace(project_id)
         workspace._ensure_sandbox_running()
         saved = verified_preview(workspace)
+        if saved and configured():
+            return jsonify(status='success', url=save(workspace, project_id), running=True, persistent=True)
         result = {'status': 'success', 'url': saved, 'running': True} if saved else workspace.start_preview()
         if result.get('url'):
             result['url'] = publish_preview(result['url'], project_id)
@@ -651,10 +760,55 @@ def restore_project():
         if result.get('status') != 'success':
             return jsonify(status='error', message='The previous version could not be restored.'), 503
         url = verified_preview(workspace)
-        return jsonify(status='success', url=publish_preview(url, project_id), message='Last verified version restored. Previous edits are saved in the project Git stash.')
+        from agent.preview_hosting import save, configured
+        url = save(workspace, project_id) if configured() else publish_preview(url, project_id)
+        return jsonify(status='success', url=url, persistent=configured(), message='Last verified version restored. Previous edits are saved in the project Git stash.')
     except Exception:
         logger.exception('restore_failed')
         return jsonify(status='error', message='No working version could be restored. Please retry or report this problem.'), 503
+
+
+@app.route('/builder/history', methods=['GET','POST'])
+def project_history():
+    import re
+    from agent.version_history import operate,local_versions
+    project_id=get_project_id()
+    if jobs.is_running(project_id):
+        return jsonify(status='error',message='Wait for the current build to finish.'),409
+    try:
+        from agent.daytona_workspace import get_daytona, sandbox_name_for_project
+        from types import SimpleNamespace
+        if request.method=='GET':
+            saved=local_versions(project_id)
+            if saved:return jsonify(versions=saved)
+            workspace=SimpleNamespace(project_id=project_id,sandbox=get_daytona().get(sandbox_name_for_project(project_id)))
+            return jsonify(versions=operate(workspace,'list'))
+        from agent.builder_controls import get_controls
+        version=str(get_json_body().get('versionId') or '')
+        if not re.fullmatch(r'[0-9a-f]{32}',version):
+            return jsonify(status='error',message='Choose a valid source version.'),400
+        workspace=get_workspace(project_id)
+        result=operate(workspace,'restore',id=version,locks=get_controls(project_id)['lockedPaths'])
+        return jsonify(status='success',**result)
+    except Exception:
+        logger.exception('project_history_failed')
+        return jsonify(status='error',message='Source history is unavailable or restore was blocked. Check frozen files and workspace availability. Your last published preview has not changed.'),503
+
+
+@app.post('/builder/app-backend')
+def configure_app_backend():
+    from agent.app_backend import install,validate
+    project_id=get_project_id()
+    if jobs.is_running(project_id):
+        return jsonify(message='Wait for the current build to finish.'),409
+    try:
+        data=get_json_body();validate(data)
+        return jsonify(install(get_workspace(project_id),data))
+    except ValueError as error:
+        return jsonify(message=str(error)),400
+    except Exception:
+        logger.exception('app_backend_configuration_failed')
+        return jsonify(message='App backend setup failed. Your previous published site is unchanged; check source history before retrying.'),503
 
 
 @app.route("/beta/feedback", methods=["POST"])
@@ -734,6 +888,30 @@ def published_app(publication, filename='index.html'):
     return response
 
 
+@app.get('/internal/preview-builds/<ticket>/')
+@app.get('/internal/preview-builds/<ticket>/<path:filename>')
+def completed_preview_asset(ticket, filename='index.html'):
+    from pathlib import Path
+    from agent.preview_hosting import directory
+    if '\\' in filename or any(part.startswith('.') for part in Path(filename).parts):
+        return '', 404
+    active = directory(ticket)
+    if active is None:
+        return '', 404
+    if not (active / filename).is_file():
+        # Client-side routes fall back to HTML, missing JS/images never do.
+        if 'text/html' in request.headers.get('Accept', '') and not Path(filename).suffix:
+            filename = 'index.html'
+        else:
+            return '', 404, {'X-GeneSys-Preview-Hosted': '1'}
+    response = send_from_directory(active, filename)
+    response.headers['X-GeneSys-Preview-Hosted'] = '1'
+    response.headers['Cache-Control'] = 'no-cache'
+    response.headers['X-Content-Type-Options'] = 'nosniff'
+    response.headers['Content-Security-Policy'] = 'sandbox allow-scripts allow-same-origin allow-forms allow-popups allow-downloads'
+    return response
+
+
 @app.delete('/publish')
 def unpublish_project():
     import json
@@ -778,6 +956,8 @@ def delete_user_project(project_id):
                 if json.loads(proof.read_text()).get('projectId') == project_id:
                     (proof.parent / '.unpublished').touch()
         user_auth.call('DELETE', '/rest/v1/projects', g.user['access_token'], params={'id':'eq.'+project_id})
+        from agent.preview_hosting import disable
+        disable(project_id)
         return jsonify(status='success', message='Project deleted; workspace archived.')
     except user_auth.AccessError as error:
         return jsonify(status='error', message=str(error)), error.status

@@ -1182,6 +1182,48 @@ class GeminiProvider(AIProvider):
 # GROQ PROVIDER
 # ============================================================
 
+def recover_namespaced_tool(failed, tools):
+    """Recover a provider-added namespace only for a declared, validated tool.
+
+    Failed-generation text is untrusted. Do not guess names, fix arguments or
+    accept schemas this deliberately small validator cannot fully enforce.
+    """
+    if not isinstance(failed, dict) or set(failed) != {'name', 'arguments'}:
+        return None
+    name = failed['name']
+    if not isinstance(name, str) or not name.startswith(('functions/', 'functions.')):
+        return None
+    name = name[len('functions/'):]
+    matches = [t.get('function', {}) for t in tools if t.get('function', {}).get('name') == name]
+    if len(matches) != 1:
+        return None
+    schema = matches[0].get('parameters', {})
+    arguments = failed['arguments']
+    if (schema.get('type') != 'object' or schema.get('additionalProperties') is not False
+            or not isinstance(arguments, dict)
+            or set(schema) - {'type', 'properties', 'required', 'additionalProperties', 'description'}):
+        return None
+    properties = schema.get('properties', {})
+    if not set(schema.get('required', [])).issubset(arguments) or set(arguments) - set(properties):
+        return None
+    for key, value in arguments.items():
+        rule = properties[key]
+        if set(rule) - {'type', 'description', 'enum', 'minimum', 'maximum', 'minLength', 'maxLength'}:
+            return None
+        kind = rule.get('type')
+        if not ((kind == 'string' and isinstance(value, str))
+                or (kind == 'integer' and type(value) is int)
+                or (kind == 'boolean' and type(value) is bool)):
+            return None
+        if 'enum' in rule and value not in rule['enum']:
+            return None
+        if kind == 'integer' and not rule.get('minimum', value) <= value <= rule.get('maximum', value):
+            return None
+        if kind == 'string' and not rule.get('minLength', 0) <= len(value) <= rule.get('maxLength', len(value)):
+            return None
+    return AIToolCall(id='repaired_' + uuid.uuid4().hex, name=name, arguments=arguments)
+
+
 class GroqProvider(AIProvider):
     """Groq implementation preserving the existing GeneSys behavior."""
 
@@ -1317,6 +1359,9 @@ class GroqProvider(AIProvider):
                             failed = json.loads(detail.get("failed_generation", ""))
                         except (TypeError, ValueError):
                             failed = None
+                        recovered = recover_namespaced_tool(failed, tools)
+                        if recovered is not None:
+                            return AIResponse(text='', tool_calls=[recovered])
                         allowed = {tool.get("function", {}).get("name") for tool in tools}
                         if (isinstance(failed, dict) and failed.get("name") == "list_file"
                                 and "list_files" in allowed
@@ -1328,6 +1373,7 @@ class GroqProvider(AIProvider):
                             prepared_messages.append({"role": "user", "content":
                                 "The previous tool call was rejected. Available exact tool names: "
                                 + ", ".join(sorted(allowed)) +
+                                ". Never prepend functions/ or functions. to a tool name" +
                                 ". Use existing source context and edit necessary files, "
                                 "or respond normally when implementation is complete."})
                             continue
@@ -1437,7 +1483,39 @@ class OpenAIProvider(AIProvider):
         self.model = model or settings.genesys_openai_model
         self.client = client or OpenAI(api_key=settings.openai_api_key, timeout=60.0, max_retries=0)
 
-    def generate(self, messages, tools):
+    def generate_structured(self, messages, schema):
+        return self.generate(messages, [], response_schema=schema)
+
+    def review_images(self, instruction, context, images, schema):
+        """Dedicated vision path: never pass image bytes through text compaction."""
+        import base64
+        from .model_context import reserve_model_budget
+        if not 2 <= len(images) <= 4:
+            raise ValueError('Visual review needs two to four bounded screenshots')
+        parts = [{'type':'text','text':json.dumps(context,ensure_ascii=False)[:18000]}]
+        for label, data in images:
+            if not isinstance(data,bytes) or len(data)>2_000_000:
+                raise ValueError('Visual review screenshot exceeds its limit')
+            mime='image/png' if data.startswith(b'\x89PNG') else 'image/jpeg' if data.startswith(b'\xff\xd8') else None
+            if not mime:
+                raise ValueError('Unsupported screenshot format')
+            parts += [{'type':'text','text':label}, {'type':'image_url','image_url':{
+                'url':'data:'+mime+';base64,'+base64.b64encode(data).decode('ascii'),'detail':'high'}}]
+        # Reserve text and a conservative image allowance through existing budgets.
+        bounded_messages([{'role':'system','content':instruction},{'role':'user','content':parts[0]['text']}],[])
+        reserve_model_budget(6000*len(images))
+        options=dict(model=self.model,messages=[{'role':'system','content':instruction},{'role':'user','content':parts}],
+            max_completion_tokens=2400,timeout=60,
+            response_format={'type':'json_schema','json_schema':{'name':'visual_design_review','strict':True,'schema':schema}})
+        if self.model.startswith(('gpt-5','gpt-6','o3','o4')):
+            options['reasoning_effort']='low'
+        response=self.client.chat.completions.create(**options)
+        record_model_usage(response)
+        if not response.choices or response.choices[0].finish_reason!='stop' or not response.choices[0].message.content:
+            raise RuntimeError('Visual review did not return a complete assessment')
+        return AIResponse(text=response.choices[0].message.content)
+
+    def generate(self, messages, tools, response_schema=None):
         messages = bounded_messages(messages, tools)
         # Strip provider-specific signatures without truncating source context.
         prepared = []
@@ -1456,7 +1534,11 @@ class OpenAIProvider(AIProvider):
             prepared.append(item)
         options = dict(model=self.model, messages=prepared,
                        max_completion_tokens=min(12000, max(2000, int(os.getenv('GENESYS_OUTPUT_TOKEN_LIMIT', '6000')))))
-        if json_response_requested(prepared, tools):
+        if response_schema is not None:
+            options['timeout'] = 120.0
+            options['response_format'] = {'type': 'json_schema', 'json_schema': {
+                'name': 'browser_verification_plan', 'strict': True, 'schema': response_schema}}
+        elif json_response_requested(prepared, tools):
             options['response_format'] = {'type': 'json_object'}
         if self.model.startswith(('gpt-5', 'gpt-6', 'o3', 'o4')):
             options['reasoning_effort'] = 'low'

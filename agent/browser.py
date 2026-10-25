@@ -1,5 +1,6 @@
 from typing import Any
 import json
+import logging
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from functools import wraps
@@ -360,24 +361,87 @@ class BrowserSession:
             contract = json.loads(workspace.read_file('.genesys-build-spec.json').get('content', '{}'))
         except (ValueError, TypeError, AttributeError, FileNotFoundError):
             contract = None
-        return verify_functions(page, prompt, provider, sources=sources, preverified=preverified, contract=contract)
+        from .saved_verification import PATH, matching_plan, saved_plan_record, SavedPlanProvider
+        fingerprint = None
+        try:
+            fingerprint = workspace.build_fingerprint()
+            saved = json.loads(workspace.read_file(PATH).get('content', '{}'))
+            plan = matching_plan(saved, prompt, fingerprint, contract)
+            if plan:
+                provider = SavedPlanProvider(plan, provider)
+        except Exception:
+            logging.getLogger(__name__).info('verified_plan_cache_unavailable')
+        result = verify_functions(page, prompt, provider, sources=sources, preverified=preverified, contract=contract)
+        verified_plan = result.pop('_verifiedPlan', None)
+        if verified_plan and fingerprint:
+            try:
+                if workspace.build_fingerprint() == fingerprint:
+                    record = saved_plan_record(prompt, fingerprint, verified_plan, contract)
+                    saved = workspace.write_file(PATH, json.dumps(record, ensure_ascii=False))
+                    if saved.get('status') != 'success':
+                        raise RuntimeError('Verified plan could not be saved')
+            except Exception:
+                logging.getLogger(__name__).warning('verified_plan_cache_write_failed', exc_info=True)
+        return result
 
     @browser_thread
-    def visual_quality(self, *, allow_unstyled=False, require_images=False, public_website=False) -> dict[str, Any]:
+    def visual_quality(self, *, allow_unstyled=False, require_images=False, public_website=False, reference=None, vision_loop=None, design_brief=None) -> dict[str, Any]:
         page = self.start()
         original = page.viewport_size
+        original_scroll = page.evaluate('() => ({x:scrollX,y:scrollY})')
         snapshots = []
+        reference_snapshots = []
+        captures = {}
+        vision_images = []
+        capture_details = {}
         try:
             for width, height in ((1280, 800), (390, 844)):
                 page.set_viewport_size({'width': width, 'height': height})
+                page.evaluate('() => scrollTo({top:0,left:0,behavior:"instant"})')
                 page.wait_for_timeout(200)
                 if require_images or public_website:
                     page.evaluate("""async () => { await Promise.race([Promise.all([...document.images].filter(img => { const r=img.getBoundingClientRect(); return r.width>0 && r.height>0; }).map(img => { img.loading = 'eager'; return img.decode().catch(() => {}); })), new Promise(resolve => setTimeout(resolve, 5000))]); }""")
                 snapshots.append(page.evaluate(SNAPSHOT_SCRIPT))
+                if reference and reference.get('status') == 'observed':
+                    from .reference_inspection import METRICS_SCRIPT
+                    reference_snapshots.append(page.evaluate(METRICS_SCRIPT))
+                captures['desktop' if width == 1280 else 'phone'] = page.screenshot(type='png', full_page=True, animations='disabled')
+                if vision_loop is not None:
+                    from .visual_capture import capture_design_sheet
+                    label = 'generated-desktop' if width == 1280 else 'generated-phone'
+                    data, samples = capture_design_sheet(page)
+                    vision_images.append((label, data))
+                    capture_details[label] = samples
         finally:
             if original:
                 page.set_viewport_size(original)
-        return assess_visual_quality(snapshots, allow_unstyled=allow_unstyled, require_images=require_images, public_website=public_website)
+            page.evaluate('(p) => scrollTo({top:p.y,left:p.x,behavior:"instant"})', original_scroll)
+        result = assess_visual_quality(snapshots, allow_unstyled=allow_unstyled, require_images=require_images, public_website=public_website)
+        if reference:
+            from .reference_inspection import compare_reference
+            result['referenceComparison'] = compare_reference(reference, reference_snapshots)
+        if vision_loop is not None and result['status']=='success':
+            from .visual_review import review_screenshots
+            from .visual_evidence import image_path
+            from .ai_provider import OpenAIProvider
+            import os
+            if reference and reference.get('reviewId'):
+                for viewport in ('desktop','phone'):
+                    path=image_path(self.project_id,reference['reviewId'],viewport)
+                    if path and path.stat().st_size<=2_000_000:
+                        vision_images.append(('reference-'+viewport,path.read_bytes()))
+            result['visualReview'],result['visualPolishRequested']=vision_loop.run(
+                get_workspace(self.project_id).build_fingerprint(),
+                lambda previous:review_screenshots(OpenAIProvider(model=os.getenv('GENESYS_VISUAL_REVIEW_MODEL') or None),
+                    design_brief or {},vision_images,previous,capture_details=capture_details))
+            if not result['visualPolishRequested'] and result['visualReview']['status']!='ready':
+                result.setdefault('suggestions',[]).append('Screenshot review: '+result['visualReview']['summary'])
+        try:
+            from .visual_evidence import save_review
+            result['reviewId'] = save_review(self.project_id, result, captures)['id']
+        except Exception:
+            logging.getLogger(__name__).warning('visual_evidence_save_failed', exc_info=True)
+        return result
 
     @browser_thread
     def get_console(

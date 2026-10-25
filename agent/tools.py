@@ -1,5 +1,11 @@
 import inspect
 from typing import Any
+from contextvars import ContextVar
+from pathlib import PurePosixPath
+import time
+
+# Request-local authority, never inferred from a model-writable brief.
+replacement_project = ContextVar('replacement_project', default=None)
 
 from .browser import get_browser
 
@@ -102,7 +108,22 @@ def write_file(
         existing.get("truncated")
         or len(existing.get("content", "")) > READ_FILE_MAX_CHARS
     ):
-        raise ValueError("Existing file exceeds the complete model read budget. Use edit_file to preserve its unshown content.")
+        path = PurePosixPath(filename)
+        replace_source = (replacement_project.get() == project_id
+            and not path.is_absolute() and '..' not in path.parts and '\\' not in filename
+            and path.parts[0] == 'src' and not any(part.startswith('.') for part in path.parts)
+            and path.suffix in {'.js', '.jsx', '.ts', '.tsx', '.css', '.scss'})
+        if not replace_source:
+            raise ValueError("Existing file exceeds the complete model read budget. Use edit_file to preserve its unshown content.")
+        original = existing.get('content', '')
+        if existing.get('truncated'):
+            from .daytona_workspace import safe_remote_path
+            original = workspace.sandbox.fs.download_file(safe_remote_path(filename)).decode('utf-8')
+        if len(original.encode('utf-8')) > 250000:
+            raise ValueError('Replacement backup exceeds its source size limit; use targeted edits.')
+        backup = workspace.write_file(f'.genesys-rebuild-backups/{time.time_ns()}/{filename}', original)
+        if not isinstance(backup, dict) or backup.get('status') != 'success':
+            raise RuntimeError('Source backup failed; existing file was not replaced.')
 
     return workspace.write_file(
         filename,

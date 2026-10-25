@@ -1,9 +1,11 @@
 """Bounded initial source context shared with the model and provider fallbacks."""
 
 def tools_for_repair(tools, inspections):
-    # Fresh targeted source is necessary after edits. Repetitive identical calls
-    # remain bounded by the orchestrator's loop guard and overall step budget.
-    return tools
+    # Permit fresh targeted source after each successful edit, then require
+    # implementation or a no-tool response so mandatory verification can run.
+    if inspections < 2:
+        return tools
+    return [tool for tool in tools if tool['function']['name'] not in {'read_file', 'list_files'}]
 
 
 class InspectionCache:
@@ -23,7 +25,7 @@ class InspectionCache:
 def initial_source_context(cache, files, targets):
     available = set(files or [])
     priority = ['src/App.jsx', 'src/App.tsx', 'src/styles.css', 'src/usePersistentState.js'] if '.genesys-user-project' in available else []
-    candidates = list(dict.fromkeys(priority + list(targets or [])))
+    candidates = list(dict.fromkeys(list(targets or []) + priority))
     parts = []
     remaining = 12000
     for path in candidates:

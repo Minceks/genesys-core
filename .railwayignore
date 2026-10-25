@@ -1,0 +1,14 @@
+.git/
+.env
+.env.*
+node_modules/
+dist/
+.vite/
+venv/
+__pycache__/
+**/__pycache__/
+.pytest_cache/
+.test-tmp*/
+debug.log
+backups/
+genesys-pro/

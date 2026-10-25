@@ -4,12 +4,13 @@ import re
 from .design_strategy import design_strategy, requests_redesign
 from .layout_library import layout_reference_library
 from .content_direction import content_direction
+from .visual_system import visual_system
 
 BRIEF_PATH = '.genesys-design.json'
 PRODUCTS = {
     'game': r'\b(game|gaming|zombie|shooter|platformer|survival game)\b',
     'portfolio': r'\b(portfolio|photographer|photography)\b',
-    'store': r'\b(store|shop|ecommerce|e-commerce|marketplace)\b',
+    'store': r'\b(store|shop|ecommerce|e-commerce|marketplace)\b|\b(?:sell|sells|selling)\s+(?:\w+\s+){0,2}(?:products?|goods|merchandise)\b',
     'dashboard': r'\b(dashboard|analytics dashboard|admin panel)\b',
     'app': r'\b(app|application|tracker|planner|task manager)\b',
     'website': r'\b(website|landing page|business site|blog|informational site)\b',
@@ -25,11 +26,11 @@ DIRECTIONS = {
         'assets':'Actual photos/artwork; use provided assets first and clearly label stock samples.',
         'technology':'Responsive React with an accessible gallery/lightbox when required.',
         'checks':['Images load', 'Gallery and detail interactions work', 'Contact actions have a real destination']},
-    'store': {'layout':'Product discovery, filters, product detail, basket and checkout states.',
-        'visual':'Clear merchandise hierarchy, consistent product imagery and prominent purchase actions.',
+    'store': {'layout':'Editorial merchandise hero, curated collection, search/category/sort discovery, product detail with quantity and saved items, useful comparison, basket, checkout and local order history.',
+        'visual':'Substantial product imagery, deliberate typography, varied editorial sections, meaningful buying guidance and a coherent visual language through catalog, detail, cart and confirmation.',
         'assets':'Relevant product photos and truthful product information.',
         'technology':'React storefront; payments and inventory require real backend integrations, not fake success.',
-        'checks':['Product filters work', 'Basket quantities and totals update', 'Checkout integration status is accurate']},
+        'checks':['Search, categories, sorting, reset and empty states work', 'Saved items and selected quantities persist correctly', 'Comparison uses truthful product information', 'Basket quantities and totals update', 'Local order history and cancellation work; payment integration status is accurate']},
     'dashboard': {'layout':'Navigation, summary metrics, meaningful charts, tables and filters.',
         'visual':'Readable data hierarchy, compact density, consistent units and restrained accent colors.',
         'assets':'Purposeful data visualizations; label demo data.',
@@ -71,10 +72,18 @@ def presentation_contract(product):
 
 
 def prepare_design(workspace, prompt):
+    from .build_intent import replaces_product
+    whole_product = replaces_product(prompt)
     redesign = requests_redesign(prompt)
     previous = None
     try:
         result = workspace.read_file(BRIEF_PATH)
+        if result.get('truncated'):
+            from .daytona_workspace import safe_remote_path
+            raw = workspace.sandbox.fs.download_file(safe_remote_path(BRIEF_PATH))
+            if len(raw) > 256000:
+                raise ValueError('Saved design brief exceeds metadata limit')
+            result = {'status':'success','content':raw.decode('utf-8')}
         previous = json.loads(result.get('content', '')) if result.get('status') == 'success' else None
         if not isinstance(previous, dict) or previous.get('productType') not in PRODUCTS:
             previous = None
@@ -85,7 +94,7 @@ def prepare_design(workspace, prompt):
             and not re.search(r'\b(playable|movement|shooting|platformer|survival game)\b', prompt, re.I)):
         selected = 'website'
     replacement = bool(re.search(r'\b(build|create|make|replace|convert|turn|transform|redesign)\b', prompt, re.I))
-    retain = previous and (not selected or selected == previous['productType'] or not replacement)
+    retain = previous and not whole_product and (not selected or selected == previous['productType'] or not replacement)
     if retain:
         brief = dict(previous)
         brief['latestRequest'] = prompt
@@ -102,6 +111,13 @@ def prepare_design(workspace, prompt):
         if previous:
             brief['purposeChangedFrom'] = previous['productType']
             brief['designPolicy'] += ' The product purpose changed; replace unsuitable inherited theme and layout.'
+    brief['buildIntent'] = 'replace-product' if previous and whole_product else 'edit-product' if retain else 'new-product'
+    if previous and whole_product:
+        brief['designPolicy'] = ('Replace the website/application in THIS project with the newly requested product. '
+            'The latest request supersedes the old product brief, brand, content and feature requirements. '
+            'Reuse compatible infrastructure, not unrelated old pages or data. Preserve old stored records without '
+            'reinterpreting them as the new product; namespace new records. Do not create a separate project. '
+            'Implement actual requested workflows; unavailable AI/backend integrations must be disclosed, never faked.')
     if not brief.get('designResearch') or redesign:
         from .design_research import research_design
         brief['designResearch'] = research_design(prompt, brief['productType'])
@@ -113,11 +129,11 @@ def prepare_design(workspace, prompt):
         brief['layout'] = 'Featured game hero, curated ranked discoveries, genre/platform browsing and focused game detail.'
     brief['presentationContract'] = presentation_contract(brief['productType'])
     brief['contentDirection'] = content_direction(
-        prompt, (previous or {}).get('contentDirection') or content_direction(brief['originalRequest']),
+        prompt, (previous or {}).get('contentDirection') if retain else content_direction(brief['originalRequest']),
     )
     if redesign or not brief.get('designStrategy') or not retain:
         brief['designStrategy'] = design_strategy(
-            workspace.project_id, brief['productType'], prompt, previous, redesign,
+            getattr(workspace, 'project_id', 'genesys-project'), brief['productType'], prompt, previous if retain else None, redesign,
         )
     elif brief.get('designStrategy'):
         brief['designStrategy'] = {**brief['designStrategy'], 'redesign': False,
@@ -130,6 +146,21 @@ def prepare_design(workspace, prompt):
     brief['layoutReferences'] = layout_reference_library(
         brief['productType'], prompt, brief['designStrategy'],
     )
+    if redesign or not retain or not brief.get('visualSystem'):
+        brief['visualSystem'] = visual_system(getattr(workspace, 'project_id', 'genesys-project'),
+            brief['productType'], prompt if redesign else brief['originalRequest'] + '\n' + prompt, brief['designStrategy'])
+    brief['integrationPolicy'] = {
+        'payments': 'Real payment processing is deferred unless explicitly requested with a working integration. '
+                    'Build a polished local basket, order summary, validation and cancellation. Preserve the basket; '
+                    'never claim payment/order completion. Explain availability only at the payment step, '
+                    'not in the homepage hero or product cards.',
+    }
+    from .experience_blueprint import experience_blueprint
+    brief['experienceBlueprint'] = experience_blueprint(brief)
+    from .reference_inspection import prepare_reference
+    reference = prepare_reference(workspace, prompt, brief, previous if retain else None, redesign)
+    if reference:
+        brief['referenceAnalysis'] = reference
     brief['qualityStandard'] = {
         'composition': 'Distinctive focal point, purposeful section rhythm and product-appropriate density.',
         'typography': 'Coherent type hierarchy, readable body copy and deliberate line lengths.',
@@ -138,6 +169,17 @@ def prepare_design(workspace, prompt):
         'responsive': 'Intentional phone layout, reachable actions, no hover-only functionality.',
         'finish': 'Real relevant imagery, concise copy, polished interaction states and preserved working behavior.',
     }
+    from .design_foundation import prepare_foundation
+    foundation = prepare_foundation(workspace, brief['visualSystem'], previous)
+    if foundation:
+        brief['designFoundation'] = foundation
+    # Keep the implementable art direction near the beginning when provider
+    # context limits shorten a large brief or a parallel worker's first message.
+    from .design_execution import design_execution
+    brief['designExecution'] = design_execution(brief)
+    brief = {'visualSystem': brief['visualSystem'], 'experienceBlueprint': brief['experienceBlueprint'], 'designExecution': brief['designExecution'],
+             **({'referenceAnalysis': brief['referenceAnalysis']} if brief.get('referenceAnalysis') else {}),
+             **{key: value for key, value in brief.items() if key not in {'visualSystem', 'experienceBlueprint', 'designExecution', 'referenceAnalysis'}}}
     saved = workspace.write_file(BRIEF_PATH, json.dumps(brief, ensure_ascii=False, indent=2))
     if not isinstance(saved, dict) or saved.get('status') != 'success':
         raise RuntimeError('Could not save project design brief')

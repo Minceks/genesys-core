@@ -222,6 +222,7 @@ class DaytonaWorkspace:
         )
 
         self.client = get_daytona()
+        self._sandbox_created = False
 
         self.sandbox = (
             self._get_or_create()
@@ -232,6 +233,8 @@ class DaytonaWorkspace:
             missing = self.sandbox.process.exec('test -f ' + shlex.quote(helper), timeout=10)
             if missing.exit_code != 0:
                 self.sandbox.fs.upload_file(PERSISTENT_STATE_SOURCE.encode(), helper)
+            from .version_history import restore_after_sandbox_loss
+            self.source_recovery = restore_after_sandbox_loss(self,created=self._sandbox_created)
 
     def _is_user_project(self) -> bool:
         try:
@@ -409,6 +412,24 @@ for name, contents in files.items():
 # ========================================================
 # GET OR CREATE SANDBOX
 # ========================================================
+
+    def _run_file_operation(self, operation):
+        """Retry idempotent file I/O while a stopped sandbox becomes reachable."""
+        for attempt in range(3):
+            try:
+                return operation()
+            except Exception as error:
+                # Daytona can report STARTED before its container has an IP.
+                # Do not retry permission, missing-file, or application errors.
+                if "SANDBOX_NOT_RUNNING" not in str(error).upper() and (
+                    "failed to resolve container IP" not in str(error)
+                ):
+                    raise
+                if attempt == 2:
+                    raise
+                logger.warning("Sandbox unavailable during file I/O; recovering (attempt %s)", attempt + 1)
+                self._ensure_sandbox_running()
+                time.sleep(attempt + 1)
 
     def _get_or_create(self):
 
@@ -608,6 +629,8 @@ for name, contents in files.items():
                 sandbox
             )
 
+            self._sandbox_created = True
+
             return sandbox
 
     # ========================================================
@@ -787,7 +810,7 @@ for name, contents in files.items():
         """Identify source and dependencies associated with an existing build."""
         result = self.sandbox.process.exec(
             "find . -type f -not -path './node_modules/*' "
-            "-not -path './.git/*' -not -path './.genesys*' "
+            "-not -path './.git/*' \\( -not -path './.genesys*' -o -path './.genesys-build-spec.json' \\) "
             "-print0 | sort -z | xargs -0 sha256sum | sha256sum",
             cwd=REMOTE_PROJECT_ROOT, timeout=30,
         )
@@ -999,6 +1022,10 @@ for name, contents in files.items():
                 f"{MAX_WRITE_CHARS} characters."
             )
 
+        from .builder_controls import assert_writable
+        assert_writable(self.project_id, relative)
+        self._ensure_sandbox_running()
+
         # ----------------------------------------------------
         # Check whether the file exists using file metadata.
         # ----------------------------------------------------
@@ -1006,8 +1033,8 @@ for name, contents in files.items():
         existed = False
 
         try:
-            self.sandbox.fs.get_file_info(
-                remote_path
+            self._run_file_operation(
+                lambda: self.sandbox.fs.get_file_info(remote_path)
             )
 
             existed = True
@@ -1026,11 +1053,11 @@ for name, contents in files.items():
         )
 
         mkdir_result = (
-            self.sandbox.process.exec(
+            self._run_file_operation(lambda: self.sandbox.process.exec(
                 "mkdir -p "
                 + shlex.quote(parent),
                 timeout=30,
-            )
+            ))
         )
 
         if mkdir_result.exit_code != 0:
@@ -1044,13 +1071,13 @@ for name, contents in files.items():
         # ----------------------------------------------------
 
         try:
-            self.sandbox.fs.upload_file(
+            self._run_file_operation(lambda: self.sandbox.fs.upload_file(
                 content.encode(
                     "utf-8"
                 ),
                 remote_path,
                 timeout=120,
-            )
+            ))
 
         except Exception as error:
             raise RuntimeError(
