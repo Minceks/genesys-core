@@ -39,6 +39,10 @@ def publish(workspace, project_id, checkpoint_id, commit):
         blob = workspace.sandbox.fs.download_file(archive)
     finally:
         workspace.sandbox.process.exec('rm -f ' + shlex.quote(archive), timeout=10)
+    current = workspace.sandbox.process.exec(
+        'cat ../.genesys-verified-preview/.proof.json', cwd=REMOTE_PROJECT_ROOT, timeout=10)
+    if current.exit_code != 0 or json.loads(current.result) != {'checkpointId': checkpoint_id, 'commit': commit}:
+        raise ValueError('The verified build changed during export. Review the latest version before publishing.')
     if len(blob) > 25 * 1024 * 1024:
         raise ValueError('The published build exceeds the 25 MB beta limit.')
     base = root() / publication

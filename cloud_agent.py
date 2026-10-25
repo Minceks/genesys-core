@@ -101,6 +101,12 @@ def begin_request_logging():
 
 @app.before_request
 def require_api_key():
+    if request.path == '/internal/deployment-smoke':
+        expected = os.getenv('GENESYS_DEPLOY_SMOKE_KEY', '')
+        supplied = request.headers.get('X-GeneSys-Smoke-Key', '')
+        if len(expected) < 32 or not hmac.compare_digest(expected.encode(), supplied.encode()):
+            return '', 401
+        return None
     if request.path.startswith('/internal/preview-builds/'):
         expected = os.getenv('GENESYS_PREVIEW_PROXY_KEY', '')
         supplied = request.headers.get('X-GeneSys-Proxy-Key', '')
@@ -118,7 +124,7 @@ def require_api_key():
     if user_auth.configured() or request.path.startswith('/api/projects'):
         try:
             g.user = user_auth.current_user(request.headers.get('Authorization', ''))
-            project_paths = {'/publish', '/list-files', '/read-file', '/write-file', '/agent/run', '/preview', '/restore', '/promote', '/beta/feedback'}
+            project_paths = {'/publish', '/publish/review', '/list-files', '/read-file', '/write-file', '/agent/run', '/preview', '/restore', '/promote', '/beta/feedback'}
             if request.path in project_paths or request.path.startswith('/agent/jobs') or request.path.startswith('/builder/'):
                 user_auth.owned_project(get_project_id(), g.user)
             if request.path == '/promote':
@@ -254,6 +260,7 @@ def get_json_body() -> dict:
 )
 def health():
     from agent.reference_inspection import rea_command
+    from agent.deployment_smoke import checks
     reference_ready = bool(rea_command())
     return jsonify(
         {
@@ -261,6 +268,8 @@ def health():
                 "Genesys Cloud Bridge is Online"
             ),
             "agent": True,
+            "deploymentId": os.getenv('RAILWAY_DEPLOYMENT_ID', ''),
+            "deploymentSmoke": checks.summary(),
             "visualReview": {"enabled": os.getenv('GENESYS_VISUAL_REVIEW','1')!='0',
                              "providerConfigured": bool(os.getenv('OPENAI_API_KEY'))},
             "referenceInspection": {"enabled": os.getenv('GENESYS_REFERENCE_INSPECTION','1')!='0',
@@ -528,6 +537,11 @@ def _execute_agent_request(prompt, project_id, conversation_history, recovery_co
                 result['message'] = str(result.get('message') or '') + ' Preview could not reconnect. Please retry from the builder.'
         from agent.verification_report import finalize_report
         finalize_report(result)
+        try:
+            from agent.release_review import save_evidence
+            save_evidence(project_id, result)
+        except Exception:
+            logger.exception('release_evidence_save_failed')
         result.setdefault("requestType", "build")
         checkpoint = result.get("checkpoint")
         if (
@@ -629,6 +643,25 @@ def agent_run():
 jobs = JobManager(execute=execute_agent_request)
 from agent.preview_hosting import start_migration
 start_migration()
+from agent.deployment_smoke import start_checks
+start_checks()
+
+
+@app.route('/internal/deployment-smoke', methods=['GET', 'POST'])
+def deployment_smoke():
+    import re
+    from agent.deployment_smoke import checks
+    if os.getenv('GENESYS_DEPLOY_SMOKE_ENABLED', '1') == '0':
+        return jsonify(status='disabled', message='Deployment smoke checks are disabled.'), 503
+    if request.method == 'POST':
+        data = get_json_body()
+        source = data.get('source')
+        deployment = str(data.get('deploymentId') or '')
+        if source not in {'frontend', 'preview-router', 'manual'} or not re.fullmatch(r'[a-zA-Z0-9:._-]{1,100}', deployment):
+            return jsonify(message='Invalid deployment check trigger.'), 400
+        scheduled = checks.schedule(source + ':' + deployment)
+        return jsonify(scheduled=scheduled, **checks.summary()), 202
+    return jsonify(checks.report)
 
 
 @app.route("/agent/jobs", methods=["POST"])
@@ -833,6 +866,21 @@ def beta_feedback():
 # VERIFIED PRODUCTION PROMOTION
 # ============================================================
 
+@app.post('/publish/review')
+def review_publication():
+    from agent.release_review import review
+    data = get_json_body()
+    checkpoint = str(data.get('checkpointId') or '')
+    project_id = get_project_id()
+    commit = verify_checkpoint_promotion_token(str(data.get('promotionToken') or ''),
+        signing_key=settings.promotion_signing_key or '', project_id=project_id, checkpoint_id=checkpoint)
+    if not settings.promotion_signing_key or not commit:
+        return jsonify(status='error', message='Publishing approval has expired. Run verification again; your saved preview is unchanged.'), 403
+    if jobs.is_running(project_id):
+        return jsonify(status='error', message='Wait for the current build to finish.'), 409
+    return jsonify(review(project_id, checkpoint, commit))
+
+
 @app.post('/publish')
 def publish_project():
     from agent.publishing import publish
@@ -848,9 +896,13 @@ def publish_project():
     commit = verify_checkpoint_promotion_token(str(data.get('promotionToken') or ''),
         signing_key=settings.promotion_signing_key or '', project_id=project_id, checkpoint_id=checkpoint)
     if not settings.promotion_signing_key or not commit:
-        return jsonify(status='error', message='Verification expired. Build and verify the project again.'), 403
+        return jsonify(status='error', message='Publishing approval has expired. Run verification again; your saved preview is unchanged.'), 403
     if jobs.is_running(project_id):
         return jsonify(status='error', message='Wait for the current build to finish.'), 409
+    from agent.release_review import review, acknowledged
+    release = review(project_id, checkpoint, commit)
+    if not acknowledged(release, data.get('reviewHash'), data.get('acknowledgements')):
+        return jsonify(status='error', message='Resolve blocking checks and review this exact version before publishing.', review=release), 428
     try:
         publication = publish(get_workspace(project_id), project_id, checkpoint, commit)
         domain = os.getenv('GENESYS_PREVIEW_DOMAIN', '').strip()

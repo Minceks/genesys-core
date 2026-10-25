@@ -6,6 +6,7 @@ import os
 import re
 import secrets
 import time
+import logging
 from urllib.parse import urlsplit
 
 import aiohttp
@@ -26,9 +27,39 @@ def create_app():
         app['client'] = aiohttp.ClientSession(auto_decompress=False,
             cookie_jar=aiohttp.DummyCookieJar(),
             timeout=aiohttp.ClientTimeout(total=None, connect=10, sock_read=60))
+        notification = asyncio.create_task(notify_deployment())
         yield
+        notification.cancel()
+        await asyncio.gather(notification, return_exceptions=True)
         await app['client'].close()
     app.cleanup_ctx.append(lifecycle)
+
+    async def notify_deployment():
+        key = os.getenv('GENESYS_DEPLOY_SMOKE_KEY', '')
+        backend = os.getenv('GENESYS_SMOKE_BACKEND_URL', '').rstrip('/')
+        if (not os.getenv('RAILWAY_ENVIRONMENT_ID') or os.getenv('GENESYS_DEPLOY_SMOKE_ENABLED', '1') == '0'
+                or len(key) < 32 or not backend.startswith('https://')): return
+        deployment = os.getenv('RAILWAY_DEPLOYMENT_ID', 'startup')
+        own = os.getenv('RAILWAY_PUBLIC_DOMAIN', '')
+        deadline = time.monotonic() + 180
+        for _ in range(60):
+            if time.monotonic() >= deadline: break
+            try:
+                if own:
+                    async with app['client'].get('https://' + own + '/health', allow_redirects=False,
+                            timeout=aiohttp.ClientTimeout(total=8)) as response:
+                        if response.status != 200 or (await response.json()).get('deploymentId') != deployment:
+                            await asyncio.sleep(3); continue
+                async with app['client'].post(backend + '/internal/deployment-smoke',
+                        json={'source': 'preview-router', 'deploymentId': deployment},
+                        headers={'X-GeneSys-Smoke-Key': key}, allow_redirects=False,
+                        timeout=aiohttp.ClientTimeout(total=8)) as response:
+                    if response.status == 202:
+                        logging.getLogger(__name__).info('deployment_smoke_notified source=preview-router')
+                        return
+            except (aiohttp.ClientError, asyncio.TimeoutError, ValueError): pass
+            await asyncio.sleep(3)
+        logging.getLogger(__name__).error('deployment_smoke_notification_failed source=preview-router')
 
     async def register(request):
         supplied = request.headers.get('X-GeneSys-Proxy-Key', '')
@@ -161,7 +192,9 @@ def create_app():
         except (aiohttp.ClientError, asyncio.TimeoutError):
             return web.Response(status=503, text='Preview is temporarily offline. Reconnect from GeneSys.', headers={'Cache-Control': 'no-store'})
 
-    app.router.add_get('/health', lambda request: web.json_response({'status': 'ok'}))
+    async def health(request):
+        return web.json_response({'status': 'ok', 'deploymentId': os.getenv('RAILWAY_DEPLOYMENT_ID', '')})
+    app.router.add_get('/health', health)
     app.router.add_post('/internal/previews', register)
     app.router.add_route('*', '/{path:.*}', proxy)
     return app
