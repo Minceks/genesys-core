@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { apiFetch } from '../../lib/api';
 
 export type PublicationCandidate = { checkpointId: string; promotionToken: string };
@@ -26,6 +26,13 @@ export function PublishProject({ projectId, candidate, busy }: {
   const [publishing, setPublishing] = useState(false);
   const [notice, setNotice] = useState('');
   const [url, setUrl] = useState('');
+  const [open, setOpen] = useState(false);
+  const dialog = useRef<HTMLDialogElement>(null);
+
+  useEffect(() => {
+    if (open && !dialog.current?.open) dialog.current?.showModal();
+    else if (!open && dialog.current?.open) dialog.current.close();
+  }, [open]);
 
   async function loadReview(signal?: AbortSignal) {
     if (!candidate || busy) return;
@@ -73,8 +80,16 @@ export function PublishProject({ projectId, candidate, busy }: {
     } finally { setPublishing(false); }
   }
 
-  return <details className="mt-3 rounded-xl border border-white/10 p-3 text-xs text-white/75">
-    <summary className="cursor-pointer font-medium">Publish website</summary>
+  return <>
+    <button type="button" onClick={() => setOpen(true)} className="mt-3 min-h-11 w-full rounded-xl border border-white/15 p-3 text-left text-xs font-medium text-white/80">Publish website</button>
+    <dialog ref={dialog} onCancel={() => setOpen(false)} onClose={() => setOpen(false)} aria-labelledby="publication-review-title"
+      style={{ width: 'min(620px, calc(100vw - 32px))', maxHeight: '85dvh' }}
+      className="m-auto overflow-y-auto rounded-2xl border border-white/20 bg-slate-950 p-0 text-sm text-slate-200 shadow-2xl backdrop:bg-black/75">
+    <div className="sticky top-0 z-10 flex items-center justify-between gap-4 border-b border-white/10 bg-slate-950 px-5 py-4">
+      <h2 id="publication-review-title" className="text-lg font-semibold text-white">Review and publish</h2>
+      <button type="button" autoFocus aria-label="Close publishing review" onClick={() => setOpen(false)} className="min-h-11 rounded-lg border border-white/20 px-3">Close</button>
+    </div>
+    <div className="p-5">
     <p className="mt-3 leading-relaxed">Review this version’s design checks and integration limits before making it public.</p>
     {!candidate ? <p className="mt-2 text-amber-200">Complete a successful build and browser verification to prepare this version for publishing.</p> : <>
       {checking && <p role="status" className="mt-3">Loading release checks…</p>}
@@ -93,12 +108,14 @@ export function PublishProject({ projectId, candidate, busy }: {
           </label>
         </div>)}
       </div>}
-      <button type="button" disabled={busy || publishing || checking} onClick={() => void loadReview()} className="mt-3 min-h-11 rounded-lg border border-white/20 px-3 py-2 disabled:opacity-40">Refresh release checks</button>
-      <button type="button" disabled={!reviewed || busy || publishing || checking} onClick={() => void publish()} className="mt-3 ml-2 min-h-11 rounded-lg bg-blue-600 px-4 py-2 font-medium text-white disabled:opacity-40">
+      <button type="button" disabled={busy || publishing || checking} onClick={() => void loadReview()} className="mt-4 min-h-11 w-full rounded-lg border border-white/20 px-3 py-2 disabled:opacity-40 sm:w-auto">Refresh release checks</button>
+      <button type="button" disabled={!reviewed || busy || publishing || checking} onClick={() => void publish()} className="mt-3 min-h-11 w-full rounded-lg bg-blue-600 px-4 py-2 font-medium text-white disabled:opacity-40 sm:ml-2 sm:w-auto">
         {publishing ? 'Publishing…' : url ? 'Publish this version again' : 'Publish verified version'}
       </button>
     </>}
     {notice && <p role="status" className="mt-3 leading-relaxed">{notice}</p>}
     {url && <a href={url} target="_blank" rel="noreferrer" className="mt-2 block break-all text-blue-300 underline">Open published website</a>}
-  </details>;
+    </div>
+    </dialog>
+  </>;
 }

@@ -112,6 +112,10 @@ try:
      page.get_by_role('button',name='Build this plan').click();expect(page.get_by_text('Audit build complete.',exact=True)).to_be_visible()
      assert [j.get('mode') for j in state['jobs'].values()]==['plan','discuss','build']
      page.get_by_text('Publish website',exact=True).click()
+     expect(page.get_by_role('dialog',name='Review and publish')).to_be_visible()
+     page.keyboard.press('Escape')
+     expect(page.get_by_role('dialog',name='Review and publish')).not_to_be_visible()
+     page.get_by_text('Publish website',exact=True).click()
      expect(page.get_by_role('button',name='Publish verified version',exact=True)).to_be_disabled()
      assert not any(path=='/publish' for _,path,_ in state['requests'])
      expect(page.get_by_text('External email delivery is deferred.',exact=True)).to_be_visible()
@@ -130,6 +134,7 @@ try:
      expect(page.get_by_text('Phone form overlaps the primary action.',exact=True)).to_be_visible()
      expect(page.get_by_role('button',name='Publish this version again',exact=True)).to_be_disabled()
      assert not page.get_by_role('checkbox').first.is_checked()
+     page.get_by_role('button',name='Close publishing review').click()
      assert 'fixture-promotion-proof' not in page.evaluate('JSON.stringify(sessionStorage)+JSON.stringify(localStorage)')
      state['verificationFail']=True
      page.locator('textarea').last.fill('Audit failed verification')
@@ -137,6 +142,7 @@ try:
      expect(page.get_by_text('Audit build needs fixes.',exact=True)).to_be_visible()
      page.get_by_text('Publish website',exact=True).click()
      expect(page.get_by_role('button',name='Publish verified version',exact=True)).to_have_count(0)
+     page.get_by_role('button',name='Close publishing review').click()
      input_box=page.get_by_role('textbox',name='Message Genesys').bounding_box()
      assert input_box and input_box['y']>=0 and input_box['y']+input_box['height']<=1000,'Composer must remain visible with settings expanded'
      if width<1024:page.get_by_role('button',name='Preview',exact=True).click()
