@@ -1,4 +1,4 @@
-"""Separate preview service. Each expiring link receives its own origin."""
+"""Isolated project origins for durable builds and temporary editor previews."""
 import asyncio
 import hmac
 import hashlib
@@ -10,7 +10,6 @@ from urllib.parse import urlsplit
 
 import aiohttp
 from aiohttp import web
-
 HOP = {'connection', 'keep-alive', 'proxy-authenticate', 'proxy-authorization',
        'te', 'trailer', 'transfer-encoding', 'upgrade'}
 
@@ -69,6 +68,31 @@ def create_app():
         host = request.host.split(':', 1)[0].lower()
         suffix = '.' + domain
         ticket = host[:-len(suffix)] if host.endswith(suffix) else ''
+        if re.fullmatch(r'[0-9a-f]{32}', ticket):
+            backend = os.getenv('GENESYS_PUBLISHED_BACKEND_URL', '').rstrip('/')
+            if backend.startswith('https://'):
+                if request.method not in {'GET', 'HEAD'}:
+                    return web.Response(status=405)
+                internal_headers = {'X-GeneSys-Proxy-Key': secret}
+                for key in ('Accept', 'If-None-Match', 'If-Modified-Since', 'Range'):
+                    if key in request.headers:
+                        internal_headers[key] = request.headers[key]
+                target = backend + '/internal/preview-builds/' + ticket + request.rel_url.raw_path
+                try:
+                    async with app['client'].request(request.method, target, headers=internal_headers, allow_redirects=False) as upstream:
+                        # An absent durable project may still have a live editor.
+                        # A missing asset in a hosted project must stay a 404.
+                        if upstream.status != 404 or upstream.headers.get('X-GeneSys-Preview-Hosted') == '1':
+                            result_headers = {k:v for k,v in upstream.headers.items() if k.lower() not in HOP | {
+                                'set-cookie', 'content-security-policy', 'access-control-allow-origin', 'x-genesys-preview-hosted'}}
+                            result_headers['Content-Security-Policy'] = 'sandbox allow-scripts allow-same-origin allow-forms allow-popups allow-downloads'
+                            result_headers['Referrer-Policy'] = 'strict-origin-when-cross-origin'
+                            result_headers['Permissions-Policy'] = 'camera=(), microphone=(), geolocation=(self)'
+                            result_headers['Cache-Control'] = 'no-cache'
+                            content=await upstream.read()
+                            return web.Response(status=upstream.status, body=content, headers=result_headers)
+                except (aiohttp.ClientError, asyncio.TimeoutError):
+                    return web.Response(status=503, text='Saved build temporarily unavailable. Please retry.', headers={'Cache-Control':'no-store'})
         if re.fullmatch(r'app-[0-9a-f]{32}', ticket):
             backend = os.getenv('GENESYS_PUBLISHED_BACKEND_URL', '').rstrip('/')
             if not backend.startswith('https://'):
@@ -84,7 +108,8 @@ def create_app():
                 async with app['client'].request(request.method, backend + path, allow_redirects=False) as upstream:
                     result_headers = {k:v for k,v in upstream.headers.items() if k.lower() not in HOP | {'set-cookie','content-security-policy','access-control-allow-origin'}}
                     result_headers['Content-Security-Policy'] = 'sandbox allow-scripts allow-same-origin allow-forms allow-popups allow-downloads'
-                    result_headers['Referrer-Policy'] = 'no-referrer'
+                    result_headers['Referrer-Policy'] = 'strict-origin-when-cross-origin'
+                    result_headers['Permissions-Policy'] = 'camera=(), microphone=(), geolocation=(self)'
                     return web.Response(status=upstream.status, body=await upstream.read(), headers=result_headers)
             except (aiohttp.ClientError, asyncio.TimeoutError):
                 return web.Response(status=503, text='Published app temporarily unavailable.')
@@ -124,9 +149,9 @@ def create_app():
                 location = result_headers.get('Location')
                 if location and location.startswith(entry['upstream'] + '/'):
                     result_headers['Location'] = 'https://' + host + location[len(entry['upstream']):]
-                result_headers['Referrer-Policy'] = 'no-referrer'
+                result_headers['Referrer-Policy'] = 'strict-origin-when-cross-origin'
                 result_headers['Cache-Control'] = 'no-store'
-                result_headers['Permissions-Policy'] = 'camera=(), microphone=(), geolocation=()'
+                result_headers['Permissions-Policy'] = 'camera=(), microphone=(), geolocation=(self)'
                 response = web.StreamResponse(status=upstream.status, headers=result_headers)
                 await response.prepare(request)
                 async for chunk in upstream.content.iter_chunked(65536):
