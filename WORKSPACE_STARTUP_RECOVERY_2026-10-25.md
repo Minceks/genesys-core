@@ -1,0 +1,13 @@
+# Editor workspace startup and saved-preview fallback
+
+Two redesign requests for project `6789d7c7-511f-44df-bede-ac5a339d5497` stopped before editing because the cached Daytona editor had auto-stopped. The build tried to capture its pre-edit source version before reaching the later file-listing lifecycle check. The failure handler then tried to read the stopped sandbox's verified preview, adding a misleading hosting error even though the durable public preview was healthy.
+
+Real workspaces now prepare before initialization and before a build's pre-edit source backup. Preparation wakes the existing sandbox and runs a harmless `true` command to confirm actual toolbox reachability; STARTED metadata is insufficient while the container has no IP. Only this readiness command is retried for recognized not-running/container-IP failures, with eight attempts and a 45-second retry deadline in addition to the SDK's bounded lifecycle/command timeouts. A five-second readiness cache avoids duplicate startup probes during immediately following backup operations. No build, source-restore or other potentially non-idempotent operation is blindly replayed.
+
+Version-history operations and immutable preview operations also prepare their editor adapter before remote access. File reads recover recognized offline errors and preserve an exhausted offline failure as infrastructure failure rather than reporting a missing source file. Permission and unrelated failures are not retried. Editor creation is now allowed only after a definitive sandbox lookup 404; a failed wake, authentication error or other outage cannot create a replacement editor.
+
+Failed editor jobs use the existing durable preview directly without accessing the sandbox. The job remains failed and retains its original error type; the saved website remains available and is not labeled as a new verified build. Source-backup failures still stop edits. No auto-stop setting or publishing/verification gate is weakened.
+
+Validation: 63 tests passed across stopped/started-without-IP readiness, bounded failures, source reads, pre-edit backup ordering, durable fallback without sandbox access, version history, source recovery, immutable previews, project jobs, and safe edits. A live read-only probe found the actual editor STOPPED, started the same sandbox, executed commands and read its existing source successfully. No source files were changed, no sandbox was recreated and no AI generation was started. The pending redesign must be retried; these checks do not claim its UI was redesigned.
+
+Evidence is in `.verification-evidence/workspace-readiness-20261025/`, including `live-readiness.json`. The existing game remains at `https://9a2e41f59c5c9e4d452b217e5bc13b44.previews.gene-sys.life/`.

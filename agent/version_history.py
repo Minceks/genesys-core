@@ -47,6 +47,8 @@ def restore_after_sandbox_loss(workspace, *, created=False):
 
 
 def operate(workspace,action,**payload):
+    from .workspace_readiness import prepare_workspace
+    prepare_workspace(workspace)
     from .daytona_workspace import REMOTE_PROJECT_ROOT
     script=Path(__file__).with_name('version_worker.py').read_text(encoding='utf-8')
     remote=str(Path(REMOTE_PROJECT_ROOT).parent).replace('\\','/')+'/.genesys-version-history'

@@ -23,6 +23,8 @@ ThreadingHTTPServer(('0.0.0.0', 4174), Handler).serve_forever()
 
 
 def verified_preview(workspace, checkpoint=None):
+    from .workspace_readiness import prepare_workspace
+    prepare_workspace(workspace)
     from .daytona_workspace import REMOTE_PROJECT_ROOT
     root = REMOTE_PROJECT_ROOT
     if checkpoint:

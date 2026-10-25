@@ -1967,9 +1967,15 @@ def run_agent(
 
     active_provider_name = settings.provider_name
 
-    workspace = get_workspace(
-        project_id
-    )
+    try:
+        workspace = get_workspace(project_id)
+        from .workspace_readiness import prepare_workspace
+        prepare_workspace(workspace)
+    except Exception:
+        logging.getLogger(__name__).exception('workspace_preparation_failed project_id=%s', project_id)
+        return {'status':'error','requestType':'build','errorType':'workspace_unavailable',
+            'message':'The editor workspace could not become ready. Your saved preview and source are preserved. Retry when workspace startup is available.',
+            'buildPassed':False,'browserVerified':False,'modifiedFiles':[]}
 
     browser = BrowserSession(
         project_id=project_id

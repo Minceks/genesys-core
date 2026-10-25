@@ -223,10 +223,13 @@ class DaytonaWorkspace:
 
         self.client = get_daytona()
         self._sandbox_created = False
+        self._readiness_lock = threading.RLock()
+        self._prepared_at = None
 
         self.sandbox = (
             self._get_or_create()
         )
+        self.prepare()
         if self._is_user_project():
             self._prepare_user_project(self.sandbox)
             helper = REMOTE_PROJECT_ROOT + '/src/usePersistentState.js'
@@ -413,6 +416,37 @@ for name, contents in files.items():
 # GET OR CREATE SANDBOX
 # ========================================================
 
+    def prepare(self):
+        """Wake cached sandboxes and verify toolbox reachability before editing.
+
+        STARTED metadata alone does not prove that a container has an IP. Only
+        the harmless readiness command is replayed; build/restore operations
+        are not automatically repeated after an ambiguous transport failure.
+        """
+        from .workspace_readiness import sandbox_not_ready
+        lock = getattr(self, '_readiness_lock', None)
+        if lock is None:
+            self._readiness_lock = lock = threading.RLock()
+        with lock:
+            prepared = getattr(self, '_prepared_at', None)
+            if prepared is not None and time.monotonic() - prepared < 5:
+                return
+            self._prepared_at = None
+            deadline = time.monotonic() + 45
+            for attempt in range(8):
+                try:
+                    self._ensure_sandbox_running()
+                    result = self.sandbox.process.exec('true', timeout=8)
+                    if result.exit_code != 0:
+                        raise RuntimeError('Sandbox readiness command failed')
+                    self._prepared_at = time.monotonic()
+                    return
+                except Exception as error:
+                    if not sandbox_not_ready(error) or attempt == 7 or time.monotonic() >= deadline:
+                        raise
+                    logger.warning('sandbox_readiness_pending attempt=%s type=%s', attempt + 1, type(error).__name__)
+                    time.sleep(min(attempt + 1, 3))
+
     def _run_file_operation(self, operation):
         """Retry idempotent file I/O while a stopped sandbox becomes reachable."""
         for attempt in range(3):
@@ -432,6 +466,7 @@ for name, contents in files.items():
                 time.sleep(attempt + 1)
 
     def _get_or_create(self):
+        sandbox = None
 
         print(
             "🔎 GETTING DAYTONA SANDBOX:",
@@ -539,6 +574,12 @@ for name, contents in files.items():
             return sandbox
 
         except Exception as error:
+            # A failed wake/lookup does not establish that an existing editor
+            # was deleted. Create only after a definitive lookup-not-found.
+            missing = (getattr(error, 'status_code', None) == 404
+                       or type(error).__name__ == 'DaytonaNotFoundError')
+            if sandbox is not None or not missing:
+                raise
 
             print(
                 "ℹ️ DAYTONA GET FAILED — CREATING SANDBOX:",
@@ -625,6 +666,8 @@ for name, contents in files.items():
                 flush=True,
             )
 
+            self.sandbox = sandbox
+            self.prepare()
             self._clone_project(
                 sandbox
             )
@@ -918,12 +961,15 @@ for name, contents in files.items():
 
         try:
             content = (
-                self.sandbox.fs.download_file(
-                    remote_path
-                )
+                self._run_file_operation(lambda: self.sandbox.fs.download_file(remote_path))
             )
 
         except Exception as error:
+            from .workspace_readiness import sandbox_not_ready
+            if sandbox_not_ready(error):
+                # Offline storage is not a missing file. Preserve the cause so
+                # planners do not mistake unavailable source for an empty app.
+                raise
             raise FileNotFoundError(
                 f"Unable to read {filename}: "
                 f"{error}"

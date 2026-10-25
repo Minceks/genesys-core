@@ -499,21 +499,27 @@ def _execute_agent_request(prompt, project_id, conversation_history, recovery_co
         checkpoint = result.get('checkpoint') or {}
         if result.get('requestType') != 'chat':
             try:
-                workspace = get_workspace(project_id)
                 if result.get('status') == 'success' and result.get('browserVerified') and checkpoint.get('status') == 'success':
+                    workspace = get_workspace(project_id)
                     result['previewUrl'] = verified_preview(workspace, checkpoint)
                     from agent.preview_hosting import save, configured
                     if configured():
                         result['previewUrl'] = save(workspace, project_id)
                         result['previewPersistent'] = True
                 elif result.get('status') != 'success' and not result.get('previewUrl'):
-                    result['previewUrl'] = verified_preview(workspace)
                     # A failed new build must not strand the last verified build
                     # on a temporary sandbox URL that disappears with the sandbox.
-                    from agent.preview_hosting import save, configured
-                    if result['previewUrl'] and configured():
-                        result['previewUrl'] = save(workspace, project_id)
+                    from agent.preview_hosting import available_url, save, configured
+                    durable = available_url(project_id)
+                    if durable:
+                        result['previewUrl'] = durable
                         result['previewPersistent'] = True
+                    else:
+                        workspace = get_workspace(project_id)
+                        result['previewUrl'] = verified_preview(workspace)
+                        if result['previewUrl'] and configured():
+                            result['previewUrl'] = save(workspace, project_id)
+                            result['previewPersistent'] = True
                     result['previousPreviewPreserved'] = bool(result['previewUrl'])
             except Exception:
                 logger.exception('verified_preview_failed')
