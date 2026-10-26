@@ -1,4 +1,5 @@
 """Shared product-aware design criteria for generation and screenshot review."""
+from .engineering_strategy import SENIOR_ENGINEERING_STANDARD
 
 
 BUILD_STANDARD = '''DEFAULT BUILD STANDARD: PREMIUM UI, USEFUL FUNCTIONS, SOLID ENGINEERING
@@ -18,6 +19,8 @@ button visibility or an unrun check never proves a finished premium product. Mis
 remains unverified. Respect explicit minimal/text-led requests; quality is not feature count.
 '''
 
+
+BUILD_STANDARD += '\n' + SENIOR_ENGINEERING_STANDARD
 
 FAMILY_FINISH = {
     'business': ('Brand and service story',

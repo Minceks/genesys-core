@@ -58,7 +58,7 @@ def review_draft(files, plan, source, provider):
         existing_files = context.get('files') or {}
         existing_files = {key: value for key, value in existing_files.items()
                           if key not in files and isinstance(value, str)}
-        design = {key: brief[key] for key in ('visualSystem', 'experienceBlueprint', 'referenceAnalysis', 'designExecution', 'designStrategy', 'presentationContract', 'contentDirection', 'integrationPolicy') if key in brief}
+        design = {key: brief[key] for key in ('visualSystem', 'engineeringStrategy', 'trendIntelligence', 'experienceBlueprint', 'referenceAnalysis', 'designExecution', 'designStrategy', 'presentationContract', 'contentDirection', 'integrationPolicy') if key in brief}
     except (ValueError, TypeError, AttributeError):
         design = source[-8000:]
         existing_files = {}
@@ -137,6 +137,9 @@ def draft_project(prompt, source, provider_for, deadline):
         'Also include designDecision: {"direction":"chosen composition", "reason":"audience and task fit", '
         '"signature":"one distinctive visual detail", "mobile":"intentional phone composition"}. '
         'Add concrete typography, palette, spacing and heroGeometry strings to designDecision. '
+        'Apply engineeringStrategy: compare two practical approaches, choose maintainable boundaries, '
+        'and record trendAdaptation in designDecision with zero to three relevant ideas, source/date '
+        'or curated basis, user benefit and rejected mismatches. User scope, genre and preferences win. '
         'Use visualSystem as a starting point and explain any override for the user brand or audience. '
         'Use observed referenceAnalysis to make a concrete original adaptation from measured desktop '
         'and phone geometry, type and image proportions. Include referenceAdaptation in designDecision '

@@ -1,6 +1,8 @@
 """Fast product classification and a persisted brief, without an extra model call."""
 import json
 import re
+import time
+from .trend_intelligence import trend_refresh_requested, FRESH_SECONDS
 from .design_strategy import design_strategy, requests_redesign
 from .layout_library import layout_reference_library
 from .content_direction import content_direction
@@ -74,7 +76,7 @@ def presentation_contract(product):
 def prepare_design(workspace, prompt):
     from .build_intent import replaces_product
     whole_product = replaces_product(prompt)
-    redesign = requests_redesign(prompt)
+    redesign = requests_redesign(prompt) or trend_refresh_requested(prompt)
     previous = None
     try:
         result = workspace.read_file(BRIEF_PATH)
@@ -90,6 +92,9 @@ def prepare_design(workspace, prompt):
     except (FileNotFoundError, ValueError, TypeError, AttributeError):
         previous = None
     selected = next((name for name, pattern in PRODUCTS.items() if re.search(pattern, prompt, re.I)), None)
+    retrying = bool(previous and prompt == previous.get('originalRequest') == previous.get('latestRequest'))
+    if retrying:
+        whole_product = False
     if (selected == 'game' and re.search(r'\b(website|site|blog|reviews|news|showcase)\b', prompt, re.I)
             and not re.search(r'\b(playable|movement|shooting|platformer|survival game)\b', prompt, re.I)):
         selected = 'website'
@@ -111,7 +116,8 @@ def prepare_design(workspace, prompt):
         if previous:
             brief['purposeChangedFrom'] = previous['productType']
             brief['designPolicy'] += ' The product purpose changed; replace unsuitable inherited theme and layout.'
-    brief['buildIntent'] = 'replace-product' if previous and whole_product else 'edit-product' if retain else 'new-product'
+    brief['buildIntent'] = (previous.get('buildIntent','new-product') if retrying else
+                            'replace-product' if previous and whole_product else 'edit-product' if retain else 'new-product')
     if brief['productType'] == 'game':
         brief['interactiveRuntime'] = (
             'Use one authoritative simulation state in a ref or engine store and a single cancellable '
@@ -131,9 +137,15 @@ def prepare_design(workspace, prompt):
             'Reuse compatible infrastructure, not unrelated old pages or data. Preserve old stored records without '
             'reinterpreting them as the new product; namespace new records. Do not create a separate project. '
             'Implement actual requested workflows; unavailable AI/backend integrations must be disclosed, never faked.')
-    if not brief.get('designResearch') or redesign:
+    research_time = (brief.get('designResearch') or {}).get('researchedAt')
+    stale_retry = retrying and type(research_time) in (int,float) and time.time()-research_time >= FRESH_SECONDS
+    if not brief.get('designResearch') or redesign or stale_retry:
         from .design_research import research_design
         brief['designResearch'] = research_design(prompt, brief['productType'])
+    from .trend_intelligence import trend_context
+    from .engineering_strategy import engineering_strategy
+    brief['trendIntelligence'] = trend_context(brief['designResearch'], brief['productType'])
+    brief['engineeringStrategy'] = engineering_strategy(brief, prompt, brief['trendIntelligence'])
     if brief['designResearch']['family'] == 'gaming-editorial':
         brief['visual'] = ('Modern gaming editorial: large featured artwork, bold condensed headings, '
             'cinematic crops, clear rankings and image-led asymmetric sections. Consider a dark '
@@ -191,8 +203,9 @@ def prepare_design(workspace, prompt):
     from .design_execution import design_execution
     brief['designExecution'] = design_execution(brief)
     brief = {'visualSystem': brief['visualSystem'], 'experienceBlueprint': brief['experienceBlueprint'], 'designExecution': brief['designExecution'],
+             'engineeringStrategy':brief['engineeringStrategy'], 'trendIntelligence':brief['trendIntelligence'],
              **({'referenceAnalysis': brief['referenceAnalysis']} if brief.get('referenceAnalysis') else {}),
-             **{key: value for key, value in brief.items() if key not in {'visualSystem', 'experienceBlueprint', 'designExecution', 'referenceAnalysis'}}}
+             **{key: value for key, value in brief.items() if key not in {'visualSystem', 'experienceBlueprint', 'designExecution', 'referenceAnalysis','engineeringStrategy','trendIntelligence'}}}
     saved = workspace.write_file(BRIEF_PATH, json.dumps(brief, ensure_ascii=False, indent=2))
     if not isinstance(saved, dict) or saved.get('status') != 'success':
         raise RuntimeError('Could not save project design brief')

@@ -5,7 +5,7 @@ from agent import design_research, product_design
 
 def test_gaming_website_uses_editorial_references():
     assert design_research.reference_family('Website for best games of the year', 'website') == 'gaming-editorial'
-    assert design_research.reference_family('Create a playable game', 'game') == 'product'
+    assert design_research.reference_family('Create a playable game', 'game') == 'game'
     assert design_research.reference_family('Appointment booking app', 'app') == 'booking'
 
 

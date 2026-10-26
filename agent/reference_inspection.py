@@ -194,7 +194,7 @@ def prepare_reference(workspace,prompt,brief,previous=None,redesign=False):
         return old
     if not explicit and previous and not redesign:
         return None
-    sources=explicit or [item['url'] for item in brief.get('designResearch',{}).get('references',[]) if item.get('status')=='fetched'][:1]
+    sources=explicit or [item['url'] for item in brief.get('designResearch',{}).get('references',[]) if item.get('status')=='fetched' and not item.get('discoveryOnly')][:1]
     if not sources or os.getenv('GENESYS_REFERENCE_INSPECTION','1')=='0':
         return None
     url=sources[0]
