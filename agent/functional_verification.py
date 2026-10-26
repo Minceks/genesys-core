@@ -812,7 +812,7 @@ def verify_functions(page, prompt, provider, attempt=0, feedback="", sources=Non
             steps = check['steps']
             if not 1 <= len(steps) <= 24:
                 raise ValueError('Invalid verification plan step count')
-            for step in steps:
+            for step_index, step in enumerate(steps):
                 if not isinstance(step, dict):
                     raise ValueError('Invalid verification plan step')
                 step_target = step.get('target')
@@ -836,7 +836,15 @@ def verify_functions(page, prompt, provider, attempt=0, feedback="", sources=Non
                         and spec.get('by') == 'role' and spec.get('role') in {'alert', 'status', 'dialog', 'alertdialog'}
                         and step.get('action') in {'visible', 'absent'})
                     if not isinstance(spec, dict) or (not str(spec.get('name', '')).strip() and not unnamed_assertion):
-                        raise ValueError('Invalid verification plan: empty target name')
+                        raise ValueError(
+                            'Invalid verification plan: empty target name at workflow '
+                            + str(check.get('name', ''))[:100] + ', step ' + str(step_index + 1)
+                            + ', action=' + str(step.get('action'))[:30]
+                            + ', by=' + str(spec.get('by') if isinstance(spec, dict) else None)[:30]
+                            + ', role=' + str(spec.get('role') if isinstance(spec, dict) else None)[:30]
+                            + '. Supply the exact observed non-whitespace accessible name. '
+                            'Only visible/absent on alert, status, dialog or alertdialog may use an unnamed role.'
+                        )
                     if spec.get('by') == 'field' and step.get('action') not in {'fill', 'value', 'newTabValue', 'attribute'}:
                         raise ValueError('Invalid verification plan: field-name selectors are read-only assertions; fill visible controls by their accessible labels.')
                     if step.get('action') in {'value', 'newTabValue'} and spec.get('by') == 'role' and spec.get('role') in {'button', 'link', 'heading', 'dialog', 'region', 'article'}:

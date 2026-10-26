@@ -63,6 +63,22 @@ def test_invalid_verification_only_retry_has_bounded_planner_budget():
     assert 'empty target name' in result['unverifiedCore'][0]
 
 
+@pytest.mark.parametrize('name', ['', ' ', '\t', '\n', '\u00a0'])
+def test_empty_name_error_identifies_workflow_and_step_without_mutating(name):
+    from tests.test_verification_plans import Page, Provider
+    plan = {'requirements': [{'id': 'R1', 'name': 'Start a game'}], 'checks': [
+        {'name': 'Keyboard activation', 'covers': ['R1'], 'steps': [
+            {'action': 'tab'},
+            {'action': 'focused', 'target': {'by': 'role', 'role': 'button', 'name': name}},
+            {'action': 'visible', 'target': {'by': 'text', 'name': 'Playing'}}]}]}
+    page = Page()
+    result = verify_functions(page, 'Start a game', Provider(plan), attempt=1)
+    assert page.mutations == 0
+    detail = result['unverifiedCore'][0]
+    assert 'Keyboard activation, step 2, action=focused, by=role, role=button' in detail
+    assert '_verifiedPlan' not in result
+
+
 def test_unnamed_alert_executes_real_browser_assertion():
     plan = {'requirements': [{'id': 'feedback', 'name': 'Show feedback'}],
             'checks': [{'name': 'Feedback appears', 'covers': ['feedback'],

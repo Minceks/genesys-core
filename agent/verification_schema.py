@@ -13,7 +13,7 @@ def ref(name):
 
 TEXT = {'type': 'string', 'pattern': r'^[^\x00-\x08\x0b\x0c\x0e-\x1f]*$'}
 READ_ONLY_ATTRIBUTES = ['aria-pressed', 'aria-selected', 'aria-expanded', 'src', 'href', 'min', 'max', 'type', 'required', 'disabled', 'viewBox']
-NONEMPTY = dict(TEXT, minLength=1)
+NONEMPTY = dict(TEXT, minLength=1, pattern=r'^[^\x00-\x08\x0b\x0c\x0e-\x1f]*[^\s\x00-\x08\x0b\x0c\x0e-\x1f][^\x00-\x08\x0b\x0c\x0e-\x1f]*$')
 STRINGS = {'type': 'array', 'items': NONEMPTY}
 SCOPE = obj({'role': {'type': 'string', 'enum': ['navigation', 'banner', 'region', 'form', 'dialog', 'alertdialog', 'complementary']}, 'name': TEXT})
 TARGET_FIELDS = {'name': TEXT, 'exact': {'type': 'boolean'},
