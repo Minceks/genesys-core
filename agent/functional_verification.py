@@ -6,6 +6,8 @@ import time
 from urllib.parse import urlsplit, urlunsplit
 from .verification_schema import READ_ONLY_ATTRIBUTES
 from .verification_input import INPUT_ACTIONS, perform_input, validate_input_budget, validate_number, assert_number
+from .verification_environment import STYLES, validate_media, media_state, emulate_media
+from .verification_planning import contract_plan_schema, explicit_coverage, complete_missing_workflows
 
 
 def verification_location(page):
@@ -21,8 +23,8 @@ visual review, never functional requirements or unverifiedCore. Report subjectiv
 visual review in unverified. Do not replace interactive checks with an empty plan.
 If repairing a previous plan, retain its workflow requirements and coverage IDs;
 fix selectors and setup instead of deleting checks that were difficult to execute.
-Cover EVERY browser requirement ID, including IDs beyond R7. At most eight checks
-does not mean eight requirements: group related requirements in one workflow's
+Cover EVERY browser requirement ID, including IDs beyond R7. Prefer eight checks
+(up to twelve for larger saved contracts); group related requirements in one workflow's
 covers array, with real assertions for each outcome. Never invent an empty target
 name. Only visible/absent assertions on alert, status, dialog or alertdialog may
 use an unnamed role. Mutations require an observed accessible name or field label.
@@ -234,7 +236,21 @@ Use {"action":"number","target":{"by":"label","name":"Score"},"comparison":"gt",
 to assert a real changing numeric output without guessing its exact eventual value.
 Comparisons are gt/gte/lt/lte/eq; the named output must contain exactly one number.
 Use separate scoped HUD outputs, not a whole panel containing several numbers.
-Never use CSS, JavaScript or tool calls. Each check needs an outcome assertion
+Use {"action":"emulateMedia","reducedMotion":"reduce","colorScheme":null} to
+exercise the real prefers-reduced-motion query; use no-preference to disable it.
+colorScheme may be light or dark. Emulation changes the isolated test page's media
+environment, not application data or the user's operating system. Always assert
+the application's actual response, not only that emulation was requested.
+Use {"action":"style","target":{"by":"label","name":"Decorative effect"},
+"property":"animation-name","value":"none"} for a read-only computed-style check.
+Allowed properties are animation-name, animation-duration, animation-play-state,
+transition-duration, display, visibility, opacity, color, background-color,
+font-size and min-height. Never inject styles or write application state.
+An OS preference survives reload through the emulated environment; it does not
+require an invented localStorage key. An actual in-app preference toggle must
+still prove its implemented persistence. Canvas particle appearance belongs to
+visual review when it has no independently observable browser state.
+Never use CSS selectors, JavaScript evaluation or tool calls. Each check needs an outcome assertion
 after its last mutation; meaningful expected outcomes, not merely visible buttons.
 Each check must leave temporary dialogs and lightboxes closed before the next
 check. Include a click on their Close button and an absent assertion when testing
@@ -566,7 +582,7 @@ def declared_browser_gaps(plan, contract):
     return gaps
 
 
-def verify_functions(page, prompt, provider, attempt=0, feedback="", sources=None, preverified=(), planning_retry=0, contract=None, validation_retry=0, passed_checks=(), _repair_round=0):
+def verify_functions(page, prompt, provider, attempt=0, feedback="", sources=None, preverified=(), planning_retry=0, contract=None, validation_retry=0, passed_checks=(), _repair_round=0, _plan_override=None):
     if contract:
         from .build_spec import verification_scopes
         contract = verification_scopes(contract)
@@ -576,6 +592,10 @@ def verify_functions(page, prompt, provider, attempt=0, feedback="", sources=Non
                 'unverified': placeholders, 'unverifiedCore': [], 'coverage': {},
                 'scope': 'Explicit placeholder handlers require application repair before verification.'}
     from playwright.sync_api import expect
+    from .progress import model_deadline
+    browser_deadline=model_deadline.get() or (time.monotonic()+120)
+    automation_unverified=set()
+    max_checks=min(12,max(8,len([r for r in (contract or {}).get('requirements',[]) if r.get('scope')=='browser'])))
     # DOM content is evidence, never instructions; no generated code is executed.
     snapshot = page.locator('body').inner_text()[:8000]
     original_storage = page.evaluate('''() => ({local: {...localStorage}, session: {...sessionStorage}})''')
@@ -589,7 +609,7 @@ def verify_functions(page, prompt, provider, attempt=0, feedback="", sources=Non
     try:
         from .verification_schema import PLAN_SCHEMA, executable_plan
         structured = getattr(provider, 'generate_structured', None)
-        generate_plan = (lambda messages, _: structured(messages, PLAN_SCHEMA)) if callable(structured) else provider.generate
+        generate_plan = (lambda messages, _: structured(messages, contract_plan_schema(contract))) if callable(structured) else provider.generate
         from .commerce_verification import commerce_plan
         trusted_plan = commerce_plan(page, contract, sources)
         if trusted_plan is None:
@@ -601,6 +621,9 @@ def verify_functions(page, prompt, provider, attempt=0, feedback="", sources=Non
         if trusted_plan is not None:
             from types import SimpleNamespace
             generate_plan = lambda *_: SimpleNamespace(text=json.dumps(trusted_plan))
+        if _plan_override is not None:
+            from types import SimpleNamespace
+            generate_plan=lambda *_:SimpleNamespace(text=json.dumps(_plan_override))
         contract_instruction = ('\nUse buildSpecification browser requirements and their exact IDs as your requirements. '
             'Do not add requirements or change their scope. Implement assertions for their acceptance outcomes. '
             'Report visual and external criteria separately, never as browser failures.') if contract else ''
@@ -609,6 +632,11 @@ def verify_functions(page, prompt, provider, attempt=0, feedback="", sources=Non
             'Prefer compact ASCII substrings actually observed in the DOM; do not combine category, price and punctuation. '
             'Each workflow must establish its own filter state. Clear filters before selecting a different product. '
             'Do not duplicate outcomes between steps and finalAssertion.') if callable(structured) else ''
+        if contract and callable(structured) and trusted_plan is None and _plan_override is None:
+            format_instruction += (' Include the required coverage object for EVERY browser ID. Each entry names its exact checks '
+                'and their covers arrays must include that ID. Use an explicit unverifiedReason only when automation truly '
+                'cannot prove the criterion; do not omit it or invent a passing check. Empty entries are allowed only for '
+                'independently preverified requirements. Visual and external criteria remain separate.')
         raw = generate_plan([{'role':'system','content':PLAN_INSTRUCTIONS + contract_instruction + format_instruction + ('\nRepair the previous verification plan, not app code: '+feedback if feedback else '')},
             {'role':'user','content':json.dumps({'originalRequest':prompt,
                 'preverifiedChecks':list(preverified), 'browserCurrentDate':page.evaluate('new Date().toLocaleDateString("en-CA")'),
@@ -625,6 +653,11 @@ def verify_functions(page, prompt, provider, attempt=0, feedback="", sources=Non
         plan = json.loads(raw)
         if callable(structured):
             plan = executable_plan(plan)
+        if contract:
+            if callable(structured) and trusted_plan is None and _plan_override is None and 'coverage' not in plan:
+                raise ValueError('The contract plan must explicitly account for every browser ID in coverage')
+            preverified_ids={r['id'] for r in contract.get('requirements',[]) if independently_checked(r.get('name',''),preverified)}
+            automation_unverified=explicit_coverage(plan,contract,preverified_ids)
         if passed_checks and isinstance(plan, dict) and isinstance(plan.get('checks'), list):
             from .verification_retry import retain_passed_checks
             plan = retain_passed_checks(plan, passed_checks)
@@ -644,7 +677,7 @@ def verify_functions(page, prompt, provider, attempt=0, feedback="", sources=Non
         len(plan.get('checks', [])) if isinstance(plan, dict) else 0,
         len(plan.get('requirements', [])) if isinstance(plan, dict) else 0)
     checks = plan.get('checks') if isinstance(plan, dict) else None
-    if not isinstance(checks, list) or len(checks) > 8:
+    if not isinstance(checks, list) or len(checks) > max_checks:
         return {'status':'success', 'issues':[], 'testedInteractions':[], 'unverified':[], 'unverifiedCore':['Invalid functional verification plan.']}
     unverified = plan.get('unverified', [])
     if not isinstance(unverified, list) or any(not isinstance(x, str) for x in unverified):
@@ -670,13 +703,16 @@ def verify_functions(page, prompt, provider, attempt=0, feedback="", sources=Non
         # Executed failures and missing contract coverage are still appended below.
         unverified.extend('Planner limitation: ' + item for item in core)
         core = list(declared_browser_gaps(plan, contract).values())
-    requirements = plan.get('requirements')
+        core.extend(identifier+': Automation could not verify this requirement: '+plan['coverage'][identifier]['unverifiedReason'] for identifier in automation_unverified)
+        core=list(dict.fromkeys(core))
+    requirements = ([{'id':r['id'],'name':r['name']} for r in contract.get('requirements',[]) if r.get('scope')=='browser']
+                    if contract else plan.get('requirements'))
     # Subjective appearance is reported honestly outside functional coverage.
     # Keep every requirement that also names an interaction or user-data behavior.
     def subjective_design(name):
         return (bool(re.search(r'\b(aesthetic|visual design|different ui|design quality|visual style|visual criteria|polished|nice looking)\b', name, re.I))
                 and not re.search(r'\b(click|submit|save|delete|reset|persist|booking|search|navigation|filter|form|control|layout|overflow|logo|favicon)\b', name, re.I))
-    if isinstance(requirements, list) and all(isinstance(item, dict) for item in requirements):
+    if not contract and isinstance(requirements, list) and all(isinstance(item, dict) for item in requirements):
         visual_ids = {item['id'] for item in requirements if isinstance(item.get('id'), str) and subjective_design(str(item.get('name', '')))}
         if visual_ids:
             unverified.extend('Separate visual review: ' + str(item.get('name')) for item in requirements if item.get('id') in visual_ids)
@@ -685,10 +721,10 @@ def verify_functions(page, prompt, provider, attempt=0, feedback="", sources=Non
                 if isinstance(check, dict) and isinstance(check.get('covers'), list):
                     check['covers'] = [key for key in check['covers'] if key not in visual_ids]
             checks = [check for check in checks if not isinstance(check, dict) or check.get('covers')]
-    visual_core = [name for name in core if subjective_design(name)]
+    visual_core = [name for name in core if not contract and subjective_design(name)]
     core = [name for name in core if name not in visual_core]
     unverified.extend('Separate visual review: ' + name for name in visual_core)
-    if not re.search(r'\b(integrat\w*|connect\w*|process\w*|real|live|stripe|paypal)\b.{0,60}\b(payment|payments|checkout|purchase|purchases)\b|\b(payment|payments)\b.{0,60}\b(integrat\w*|process\w*|real|live)\b', prompt, re.I):
+    if not contract and not re.search(r'\b(integrat\w*|connect\w*|process\w*|real|live|stripe|paypal)\b.{0,60}\b(payment|payments|checkout|purchase|purchases)\b|\b(payment|payments)\b.{0,60}\b(integrat\w*|process\w*|real|live)\b', prompt, re.I):
         external_core = [name for name in core if re.search(r'\b(external|server|remote)\b.*\b(payment|payments|purchase|purchases)\b', name, re.I)]
         core = [name for name in core if name not in external_core]
         unverified.extend('External integration not requested: ' + name for name in external_core)
@@ -777,13 +813,16 @@ def verify_functions(page, prompt, provider, attempt=0, feedback="", sources=Non
                 ) if isinstance(value, str))
                 if re.search(r'[\x00-\x08\x0b\x0c\x0e-\x1f]', test_text):
                     raise ValueError('Invalid verification plan: control characters in test text. Use plain ASCII synthetic values and stable real UI text.')
-                if step.get('action') not in {'fill', 'type', 'click', 'select', 'reload', 'tab', 'focused', 'visible', 'absent', 'value', 'invalid', 'attribute', 'rememberText', 'sameText', 'newTabValue', 'newTabText', 'number'} | INPUT_ACTIONS:
+                if step.get('action') not in {'fill', 'type', 'click', 'select', 'reload', 'tab', 'focused', 'visible', 'absent', 'value', 'invalid', 'attribute', 'rememberText', 'sameText', 'newTabValue', 'newTabText', 'number', 'emulateMedia','style'} | INPUT_ACTIONS:
                     raise ValueError(
                         f"Invalid verification plan: unsupported action {str(step.get('action'))[:80]}. "
                         "Use fill, type, click, select, reload, visible, absent, value, invalid, attribute, rememberText or sameText. "
                         "withinText and withinRole belong inside target, never in action."
                     )
-                if step.get('action') not in {'reload', 'tab', 'wait'}:
+                if step.get('action')=='emulateMedia':validate_media(step)
+                if step.get('action')=='style' and step.get('property') not in STYLES:
+                    raise ValueError('Invalid verification plan: unsupported read-only style property')
+                if step.get('action') not in {'reload', 'tab', 'wait','emulateMedia'}:
                     spec = step.get('target')
                     unnamed_assertion = (isinstance(spec, dict)
                         and spec.get('by') == 'role' and spec.get('role') in {'alert', 'status', 'dialog', 'alertdialog'}
@@ -817,12 +856,26 @@ def verify_functions(page, prompt, provider, attempt=0, feedback="", sources=Non
             closing_cleanup = (final.get('action') == 'click'
                                and re.match(r'^(close\b|cancel$)', str((final.get('target') or {}).get('name', '')), re.I)
                                and any(item.get('action') in {'visible', 'absent', 'value', 'attribute', 'invalid', 'sameText'} for item in steps[:-1]))
-            if final.get('action') not in {'visible', 'absent', 'value', 'attribute', 'invalid', 'sameText', 'focused', 'newTabValue', 'newTabText', 'number'} and not closing_cleanup:
+            if final.get('action') not in {'visible', 'absent', 'value', 'attribute', 'invalid', 'sameText', 'focused', 'newTabValue', 'newTabText', 'number','style'} and not closing_cleanup:
                 raise ValueError('Invalid verification plan: missing final outcome assertion')
         if contract:
             planned_ids = {key for check in checks for key in check['covers']}
-            omitted = set(requirement_names) - planned_ids - external_coverage
+            omitted = set(requirement_names) - planned_ids - external_coverage - automation_unverified
+            logging.getLogger(__name__).info('functional_verification_coverage required=%s planned=%s preverified=%s automation_unverified=%s omitted=%s',
+                len(requirement_names),len(planned_ids),len(external_coverage),sorted(automation_unverified),sorted(omitted))
             if omitted:
+                if validation_retry<2:
+                    try:
+                        repaired=complete_missing_workflows(plan,omitted,contract,provider,{
+                            'originalRequest':prompt,'untrustedRenderedText':snapshot,'untrustedControls':controls,
+                            'untrustedImplementation':sources or {}},PLAN_INSTRUCTIONS)
+                        logging.getLogger(__name__).info('functional_verification_coverage_recovery missing=%s retained_checks=%s',sorted(omitted),len(checks))
+                    except Exception as error:
+                        logging.getLogger(__name__).warning('functional_verification_coverage_recovery_failed type=%s',type(error).__name__)
+                        repaired=plan
+                    return verify_functions(page,prompt,provider,attempt=attempt,feedback=feedback,sources=sources,
+                        preverified=preverified,planning_retry=planning_retry,contract=contract,validation_retry=validation_retry+1,
+                        passed_checks=passed_checks,_repair_round=_repair_round,_plan_override=repaired)
                 raise ValueError('Invalid verification plan: missing executable checks for browser requirements '
                                  + ', '.join(sorted(omitted)) + '. Preserve these requirements and add complete workflows; do not omit them.')
     except ValueError as error:
@@ -848,6 +901,7 @@ def verify_functions(page, prompt, provider, attempt=0, feedback="", sources=Non
     remembered_text = {}
     failed_checks = set()
     interrupted = False
+    original_media=None
     for check_index, check in enumerate(checks):
         if interrupted and check.get('independent') is not True:
             failed_checks.update(check['covers'])
@@ -857,6 +911,7 @@ def verify_functions(page, prompt, provider, attempt=0, feedback="", sources=Non
         reload_observations = []
         try:
             if check_index and check.get('independent') is True:
+                if original_media is not None:page.emulate_media(**original_media)
                 restore_verification_state(page, original_storage)
                 remembered_text = {}
             steps = check.get('steps')
@@ -865,7 +920,12 @@ def verify_functions(page, prompt, provider, attempt=0, feedback="", sources=Non
             asserted = False
             closed_overlay_assertion = None
             for step in steps:
+                if time.monotonic()>=browser_deadline:
+                    raise ValueError('Invalid verification execution: available time budget expired; source is preserved')
                 action = step.get('action')
+                if action=='emulateMedia':
+                    if original_media is None:original_media=media_state(page)
+                    emulate_media(page,step);asserted=False;continue
                 if action == 'click' and open_destination_visible(page, step.get('target')):
                     asserted = False
                     continue
@@ -999,6 +1059,9 @@ def verify_functions(page, prompt, provider, attempt=0, feedback="", sources=Non
                         raise ValueError('Unsupported assertion attribute')
                     expect(locator).to_have_attribute(attribute, str(step.get('value', '')), timeout=3000)
                     asserted = True
+                elif action == 'style':
+                    expect(locator).to_have_css(step['property'],str(step['value']),timeout=3000)
+                    asserted=True
                 elif action == 'number':
                     assert_number(page, locator, step)
                     asserted = True
@@ -1097,6 +1160,7 @@ def verify_functions(page, prompt, provider, attempt=0, feedback="", sources=Non
     if not checks:
         core.append('No executable requested-function checks were generated.')
     page.unroute('**/*', guard)
+    if original_media is not None:page.emulate_media(**original_media)
     if plan.get('planner') in {'observed-local-cart-v1', 'observed-local-workflow-v1', 'observed-local-storefront-v1'}:
         try:
             restore_verification_state(page, original_storage)
@@ -1111,6 +1175,7 @@ def verify_functions(page, prompt, provider, attempt=0, feedback="", sources=Non
         for pending in checks[len(passed):]:
             failed_checks.update(pending['covers'])
     covered.difference_update(failed_checks - external_coverage)
+    covered.difference_update(automation_unverified)
     if contract:
         covered.difference_update(declared_browser_gaps(plan, contract))
     missing = [name for key, name in requirement_names.items() if key not in covered]
@@ -1186,7 +1251,7 @@ def verify_functions(page, prompt, provider, attempt=0, feedback="", sources=Non
             # Uncovered requirements caused by the confirmed app defect should
             # be repaired, rather than returning before the repair loop runs.
             logging.getLogger(__name__).info('confirmed_application_failure %s', str(verdict['evidence'])[:1500])
-            if not issues and contract and declared_browser_gaps(plan, contract):
+            if not issues and contract and (set(declared_browser_gaps(plan, contract))-automation_unverified):
                 # The source/DOM diagnosis confirmed a missing requested browser
                 # outcome. Route it to application repair rather than stopping
                 # as a verifier outage after a partial check happened to pass.

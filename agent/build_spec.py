@@ -5,6 +5,7 @@ import re
 import logging
 
 SPEC_PATH = '.genesys-build-spec.json'
+PLANNING_POLICY_VERSION = 3
 logger = logging.getLogger(__name__)
 
 SPEC_SCHEMA = {
@@ -80,6 +81,7 @@ def prepare_build_spec(workspace, prompt, brief, provider):
     try:
         previous = json.loads(workspace.read_file(SPEC_PATH).get('content', '{}'))
         if (previous.get('version') == 2 and previous.get('requestHash') == request_hash and previous.get('requirements')
+                and previous.get('planningPolicyVersion') == PLANNING_POLICY_VERSION
                 and (not replacing or previous.get('replacementContractVersion') == 1)):
             return validate_spec(previous)
     except (ValueError, TypeError, AttributeError, FileNotFoundError):
@@ -102,6 +104,14 @@ def prepare_build_spec(workspace, prompt, brief, provider):
          'Never copy schema placeholders into the result. Each acceptance criterion must name the '
          'actual requested action, expected state change and any persistence/reversal to prove. '
          'Do not bundle visual polish, policy review and browser interactions under one browser requirement. '
+         'Use only browser acceptance that can be exercised through named UI controls, keyboard/pointer inputs, '
+         'reversible reduced-motion/color-scheme media emulation and read-only DOM/computed-style assertions. '
+         'Separate subjective animation/art/particle appearance into visual scope while preserving actual '
+         'preference controls, state changes and critical feedback in browser scope. An operating-system '
+         'preference persists through the system/media environment; do NOT require a localStorage key or '
+         'invent an in-app toggle for it. Require local preference persistence only for an actual requested '
+         'or implemented in-app setting. Do not mix native OS state, speculative storage mechanisms and '
+         'pixel-level aesthetic judgment into a single mandatory browser criterion. '
          'Split interactive map/chart controls, navigation and state changes into browser outcomes; '
          'only their visual fidelity belongs to visual scope. Never hide working-control verification '
          'inside an all-visual requirement. When real payments are deferred, define a clearly labeled '
@@ -174,7 +184,7 @@ def prepare_build_spec(workspace, prompt, brief, provider):
                           'Include at least one browser regression flow for the actual primary navigation or interaction, '
                           'even for a visual redesign. Keep appearance criteria separate; do not relabel visual criteria '
                           'as browser checks or invent a new feature to satisfy validation.'}]
-    spec.update(version=2, requestHash=request_hash, request=prompt)
+    spec.update(version=2, planningPolicyVersion=PLANNING_POLICY_VERSION, requestHash=request_hash, request=prompt)
     if replacing:
         spec['replacementContractVersion'] = 1
     saved = workspace.write_file(SPEC_PATH, json.dumps(spec, ensure_ascii=False, indent=2))

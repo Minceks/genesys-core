@@ -1,4 +1,5 @@
 """Constrained output for the browser verification planner."""
+from .verification_environment import STYLES
 
 
 def obj(properties):
@@ -34,10 +35,14 @@ def step(actions, target=TARGET, **properties):
 
 
 ASSERTION = {'anyOf': [step(['visible', 'absent'], target=VISIBILITY_TARGET), step(['invalid', 'focused']), step(['value', 'newTabValue', 'newTabText'], value=TEXT),
+                       step(['style'], property={'type':'string','enum':STYLES}, value=TEXT),
                        step(['number'], comparison={'type':'string','enum':['gt','gte','lt','lte','eq']}, value={'type':'number'}),
                        step(['sameText'], key=NONEMPTY), step(['attribute'],
                        attribute={'type': 'string', 'enum': READ_ONLY_ATTRIBUTES}, value=TEXT)]}
 STEP = {'anyOf': [*ASSERTION['anyOf'], step(['fill', 'type', 'select'], value=TEXT),
+                   obj({'action':{'type':'string','enum':['emulateMedia']},
+                        'reducedMotion':{'type':['string','null'],'enum':['reduce','no-preference',None]},
+                        'colorScheme':{'type':['string','null'],'enum':['light','dark',None]}}),
                    step(['click'], unlessVisible={'anyOf': [DESTINATION_TARGET, {'type': 'null'}]}),
                    step(['press'], key=NONEMPTY),
                    step(['hold'], keys={'type': 'array', 'minItems': 1, 'maxItems': 3, 'items': NONEMPTY},

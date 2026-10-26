@@ -2,6 +2,11 @@ import pytest
 from agent.usage_limits import UsageLimiter, UsageLimited
 
 
+@pytest.fixture(autouse=True)
+def isolated_usage_store(tmp_path, monkeypatch):
+    monkeypatch.setenv('GENESYS_JOB_DB', str(tmp_path/'jobs.sqlite3'))
+
+
 def test_one_build_per_user_across_projects():
     limiter = UsageLimiter(cooldown=0)
     reservation = limiter.reserve('user')
