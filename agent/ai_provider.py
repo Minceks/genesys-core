@@ -1489,6 +1489,8 @@ class OpenAIProvider(AIProvider):
     def review_images(self, instruction, context, images, schema):
         """Dedicated vision path: never pass image bytes through text compaction."""
         import base64
+        from .structured_schema import validate_schema_limits
+        validate_schema_limits(schema)
         from .model_context import reserve_model_budget
         if not 2 <= len(images) <= 4:
             raise ValueError('Visual review needs two to four bounded screenshots')
@@ -1519,6 +1521,9 @@ class OpenAIProvider(AIProvider):
 
     def generate(self, messages, tools, response_schema=None):
         from .progress import model_request_timeout
+        if response_schema is not None:
+            from .structured_schema import validate_schema_limits
+            validate_schema_limits(response_schema)
         messages = bounded_messages(messages, tools)
         # Strip provider-specific signatures without truncating source context.
         prepared = []

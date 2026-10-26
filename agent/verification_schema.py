@@ -6,13 +6,17 @@ def obj(properties):
     return {'type': 'object', 'properties': properties, 'required': list(properties), 'additionalProperties': False}
 
 
+def ref(name):
+    return {'$ref': '#/$defs/' + name}
+
+
 TEXT = {'type': 'string', 'pattern': r'^[^\x00-\x08\x0b\x0c\x0e-\x1f]*$'}
 READ_ONLY_ATTRIBUTES = ['aria-pressed', 'aria-selected', 'aria-expanded', 'src', 'href', 'min', 'max', 'type', 'required', 'disabled', 'viewBox']
 NONEMPTY = dict(TEXT, minLength=1)
 STRINGS = {'type': 'array', 'items': NONEMPTY}
 SCOPE = obj({'role': {'type': 'string', 'enum': ['navigation', 'banner', 'region', 'form', 'dialog', 'alertdialog', 'complementary']}, 'name': TEXT})
 TARGET_FIELDS = {'name': TEXT, 'exact': {'type': 'boolean'},
-                 'withinText': {'type': ['string', 'null']}, 'withinRole': {'anyOf': [SCOPE, {'type': 'null'}]}}
+                 'withinText': {'type': ['string', 'null']}, 'withinRole': {'anyOf': [ref('scope'), {'type': 'null'}]}}
 TARGET = {'anyOf': [obj({'by': {'type': 'string', 'enum': ['role']},
     'role': {'type': 'string', 'enum': ['button', 'link', 'heading', 'img', 'dialog', 'alertdialog',
         'alert', 'status', 'navigation', 'banner', 'region', 'form', 'article', 'group', 'list',
@@ -30,11 +34,11 @@ VISIBILITY_TARGET = {'anyOf': [*TARGET['anyOf'], unnamed_roles(['alert', 'status
 DESTINATION_TARGET = {'anyOf': [*TARGET['anyOf'], unnamed_roles(['dialog', 'alertdialog'])]}
 
 
-def step(actions, target=TARGET, **properties):
-    return obj({'action': {'type': 'string', 'enum': actions}, 'target': target, **properties})
+def step(actions, target=None, **properties):
+    return obj({'action': {'type': 'string', 'enum': actions}, 'target': ref('target') if target is None else target, **properties})
 
 
-ASSERTION = {'anyOf': [step(['visible', 'absent'], target=VISIBILITY_TARGET), step(['invalid', 'focused']), step(['value', 'newTabValue', 'newTabText'], value=TEXT),
+ASSERTION = {'anyOf': [step(['visible', 'absent'], target=ref('visibilityTarget')), step(['invalid', 'focused']), step(['value', 'newTabValue', 'newTabText'], value=TEXT),
                        step(['style'], property={'type':'string','enum':STYLES}, value=TEXT),
                        step(['number'], comparison={'type':'string','enum':['gt','gte','lt','lte','eq']}, value={'type':'number'}),
                        step(['sameText'], key=NONEMPTY), step(['attribute'],
@@ -43,7 +47,7 @@ STEP = {'anyOf': [*ASSERTION['anyOf'], step(['fill', 'type', 'select'], value=TE
                    obj({'action':{'type':'string','enum':['emulateMedia']},
                         'reducedMotion':{'type':['string','null'],'enum':['reduce','no-preference',None]},
                         'colorScheme':{'type':['string','null'],'enum':['light','dark',None]}}),
-                   step(['click'], unlessVisible={'anyOf': [DESTINATION_TARGET, {'type': 'null'}]}),
+                   step(['click'], unlessVisible={'anyOf': [ref('destinationTarget'), {'type': 'null'}]}),
                    step(['press'], key=NONEMPTY),
                    step(['hold'], keys={'type': 'array', 'minItems': 1, 'maxItems': 3, 'items': NONEMPTY},
                         durationMs={'type': 'integer', 'minimum': 50, 'maximum': 3000}),
@@ -63,6 +67,8 @@ PLAN_SCHEMA = obj({
     'unverified': STRINGS, 'unverifiedCore': STRINGS,
     'coreRequestEvidence': {'type': 'array', 'items': obj({'requirement': NONEMPTY, 'requestQuote': NONEMPTY})},
 })
+PLAN_SCHEMA['$defs'] = {'scope': SCOPE, 'target': TARGET,
+                        'visibilityTarget': VISIBILITY_TARGET, 'destinationTarget': DESTINATION_TARGET}
 
 
 def executable_plan(plan):

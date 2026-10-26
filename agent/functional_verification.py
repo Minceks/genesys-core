@@ -667,7 +667,8 @@ def verify_functions(page, prompt, provider, attempt=0, feedback="", sources=Non
             plan = complete_text_captures(plan)
     except Exception as error:
         logging.getLogger(__name__).warning('functional_verification_planning_failed type=%s detail=%s', type(error).__name__, str(error)[:250])
-        if planning_retry == 0:
+        from .structured_schema import StructuredSchemaError
+        if planning_retry == 0 and not isinstance(error, StructuredSchemaError):
             return verify_functions(page, prompt, provider, attempt=attempt, planning_retry=1, validation_retry=validation_retry,
                 feedback='Previous planning response was unavailable or invalid JSON. Return one compact complete JSON object under 3000 tokens with executable primary workflows. ' + feedback, sources=sources, preverified=preverified, contract=contract, passed_checks=passed_checks, _repair_round=_repair_round)
         # A verifier/provider failure is not evidence of broken application code.

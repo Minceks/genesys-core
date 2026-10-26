@@ -1,0 +1,15 @@
+# Shared structured-response schema recovery
+
+The retry after the general coverage release failed before browser workflows could execute. The OpenAI API rejected the browser verification schema for exceeding its 1,000 total enum-value limit, reporting 1,006 values when it crossed the limit. A full count of the serialized schema is 1,017. Repeating the same planning request cannot repair a server-owned schema. This regression was introduced by expanding the inline action schema in the preceding release; the prior test suite mocked API responses without checking provider schema limits.
+
+The schema now defines shared named targets, visibility targets, destination targets and scopes through local `$defs`/`$ref`. This is supported by the [official OpenAI Structured Outputs documentation](https://developers.openai.com/api/docs/guides/structured-outputs?api-mode=chat). Fully expanding the new references produces exactly the previous deployed inline schema. Actions, accessible-name restrictions, null handling, required fields, final assertions and runtime safety rules are preserved.
+
+The actual serialized verification schema contains 199 enum values, 135 object properties and 2,264 characters in names and enum/const strings. The dynamic coverage matrix retains all browser IDs for contracts with up to 12 requirements without duplicating target enums. No requirement is removed and verification/publishing gates remain enforced.
+
+Every OpenAI structured text or screenshot-review request now checks documented overall enum, property and name-string budgets before an API call or context/image budget reservation. Counting includes repeated serialized objects: sharing a Python dict is not JSON deduplication. A deterministic size configuration error is reported as unavailable verification without asking the model to regenerate against the same invalid schema. This is a size check, not a complete replacement for the API's JSON Schema validator.
+
+Regression tests reproduce rejection of the old inline layout, verify the compact strict schema sent by the actual adapter with a mocked client, cover every supported contract size, resolve every local reference, retain action/target safety and final assertions, test limit boundaries and ensure oversized text/image schemas cause zero API calls or budget consumption. Browser tests and publishing/preview checks remain separate. No new paid model build is claimed passed by these tests.
+
+Evidence and regression output are saved under `.verification-evidence/schema-limits-20261026/`, excluded from deployed source.
+
+Validation: 243 schema, browser-verification, planning, publishing, saved-preview, visual-review, deployment and handoff tests passed. Another 41 source-safety, build-intent, context, provider, job and usage tests passed: 284 total. The provider checks use a mocked API client; no new paid model generation was started. Saved-preview availability does not establish that a fresh AI-generated build has completed verification.
