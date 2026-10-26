@@ -597,26 +597,23 @@ def _execute_agent_tool(
     if not isinstance(arguments, dict):
         arguments = {}
 
+    import inspect
+    signature = inspect.signature(execute_tool)
     try:
+        signature.bind(tool_name, arguments, project_id=project_id)
+    except TypeError:
+        try:
+            signature.bind(tool_name, arguments, project_id)
+        except TypeError:
+            signature.bind(tool_name, arguments)
+            return execute_tool(tool_name, arguments)
+        return execute_tool(tool_name, arguments, project_id)
+    else:
         return execute_tool(
             tool_name,
             arguments,
             project_id=project_id,
         )
-    except TypeError:
-        # Compatibility fallback for an execute_tool implementation
-        # that does not accept project_id as a keyword.
-        try:
-            return execute_tool(
-                tool_name,
-                arguments,
-                project_id,
-            )
-        except TypeError:
-            return execute_tool(
-                tool_name,
-                arguments,
-            )
 
 
 # ============================================================
@@ -3456,6 +3453,8 @@ def _run_agent(
                         require_images=bool(re.search(r"\b(photographer|photography|photographic)\b", prompt, re.I) and re.search(r"\b(portfolio|gallery|website|site)\b", prompt, re.I))
                     )
                     if quality['status'] != 'success':
+                        from .layout_repair import layout_evidence
+                        logging.getLogger(__name__).warning('layout_verification_failed %s',json.dumps(layout_evidence(quality),ensure_ascii=True))
                         raise RuntimeError('Rendered layout checks failed. Repair the reported elements and preserve working application logic. Fix sizing and wrapping; do not hide overflow, remove content or disable controls to mask the problem:\n' + json.dumps(quality, ensure_ascii=False))
                     if quality.get('visualPolishRequested'):
                         raise VisualPolishNeeded(json.dumps(quality['visualReview'],ensure_ascii=False))
@@ -3697,6 +3696,9 @@ def _run_agent(
 
                 inspection_budget.repair()
                 current_source = initial_source_context(InspectionCache(workspace), known_files, modified_files)
+                if str(exc).startswith('Rendered layout checks failed.'):
+                    from .layout_repair import layout_source_context
+                    current_source = layout_source_context(workspace,quality,known_files) or current_source
                 if current_source:
                     messages.append({'role': 'system', 'content':
                         'Repair the reported issue using the current source below. You may inspect two additional files, '

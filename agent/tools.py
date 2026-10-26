@@ -701,8 +701,20 @@ def execute_tool(
         "project_id",
         None,
     )
-
-    return function(
+    signature=inspect.signature(function)
+    ignored=[]
+    if 'priority' in arguments and 'priority' not in signature.parameters:
+        arguments.pop('priority');ignored.append('priority')
+    try:
+        signature.bind(project_id=project_id,**arguments)
+    except TypeError:
+        return {'status':'error','tool':name,'error':'Tool arguments do not match the declared parameters.',
+                'allowedArguments':[key for key in signature.parameters if key!='project_id'],
+                'receivedArguments':sorted(arguments),
+                'repairInstruction':'Return a corrected tool call using only its declared arguments. No operation was executed.'}
+    result = function(
         project_id=project_id,
         **arguments,
     )
+    if ignored and isinstance(result,dict):result=dict(result,ignoredMetadata=ignored)
+    return result

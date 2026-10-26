@@ -39,6 +39,16 @@ SNAPSHOT_SCRIPT = """async () => {
     const timer=setTimeout(()=>done(false),2000);
     image.onload=()=>done(image.naturalWidth>0);image.onerror=()=>done(false);image.src=faviconHref;
   }) : null;
+  const geometry = el => {
+    const r=el.getBoundingClientRect(), s=getComputedStyle(el);
+    return {tag:el.tagName,id:el.id,class:typeof el.className==='string'?el.className.slice(0,120):'',
+      left:Math.round(r.left),right:Math.round(r.right),width:Math.round(r.width),
+      scrollWidth:el.scrollWidth,clientWidth:el.clientWidth,display:s.display,
+      minWidth:s.minWidth,maxWidth:s.maxWidth,gridColumns:s.gridTemplateColumns,
+      gap:s.gap,flexWrap:s.flexWrap,position:s.position,
+      inlineStyle:(el.getAttribute('style')||'').slice(0,300),
+      inlineGridColumns:el.style?.gridTemplateColumns||'',inlineWidth:el.style?.width||''};
+  };
   return { width: innerWidth, overflow: document.documentElement.scrollWidth > innerWidth + 2,
     overflowElements: [...document.querySelectorAll('body *')].filter(el => visible(el) && el.getBoundingClientRect().right > innerWidth + 2)
       .slice(0,10).map(el => {const s=getComputedStyle(el), p=el.parentElement; return {
@@ -46,7 +56,8 @@ SNAPSHOT_SCRIPT = """async () => {
         width:Math.round(el.getBoundingClientRect().width),display:s.display,
         minWidth:s.minWidth,maxWidth:s.maxWidth,gridColumns:s.gridTemplateColumns,
         parentWidth:p?Math.round(p.getBoundingClientRect().width):null,
-        parentDisplay:p?getComputedStyle(p).display:null};}),
+        parentDisplay:p?getComputedStyle(p).display:null,
+        ancestors:(()=>{const result=[];let a=p;for(let i=0;a&&i<5;i++,a=a.parentElement)result.push(geometry(a));return result;})()};}),
     loadedImages: [...document.images].filter(el => visible(el) && el.complete && el.naturalWidth > 0).length,
     brokenImages: [...document.images].filter(el => visible(el) && el.complete && el.naturalWidth === 0).length,
     controls: controls.length, styledControls, composedLayout, customBackground,
@@ -123,6 +134,16 @@ def assess_visual_quality(snapshots, *, allow_unstyled=False, require_images=Fal
                     "A max-width plus auto margins can still shrink-wrap or exceed a phone; "
                     "use an explicit bounded width, minmax(0,1fr) tracks and wrapping where appropriate. "
                     "Do not hide overflow or remove content.")
+                parents=ancestor.get('ancestors',[])
+                constrained=next((p for p in parents if p.get('display') in {'grid','inline-grid'}
+                    and p.get('inlineGridColumns')),None)
+                if constrained:
+                    suggestions.append(f"The controlling ancestor {constrained.get('tag')} id={constrained.get('id','')} "
+                        f"class={constrained.get('class','')} has inline grid-template-columns={constrained['inlineGridColumns']} "
+                        f"(computed {constrained.get('gridColumns')}) inside {constrained.get('width')}px. "
+                        "Locate this ancestor in the component source. A descendant/sidebar max-width rule does not change "
+                        "its grid tracks. Move the inline layout into a named responsive class and reflow its tracks "
+                        "at phone widths while preserving the desktop layout and all content.")
         if snapshot['starterVisible']:
             issues.append("The preview still shows the starter placeholder instead of the requested application.")
         if snapshot['textLength'] < 15 and not snapshot['hasGraphics']:

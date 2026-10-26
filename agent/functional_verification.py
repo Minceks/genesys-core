@@ -236,6 +236,12 @@ Use {"action":"number","target":{"by":"label","name":"Score"},"comparison":"gt",
 to assert a real changing numeric output without guessing its exact eventual value.
 Comparisons are gt/gte/lt/lte/eq; the named output must contain exactly one number.
 Use separate scoped HUD outputs, not a whole panel containing several numbers.
+Use {"action":"key","key":"Escape"} for a real page-level key or Enter/Space
+on the currently focused control after tab/focused assertions. This preserves
+the existing focus; it does not refocus a hidden or unmounted old Start button.
+Use press with a named target only when deliberately focusing that visible
+control. For keyboard-navigation checks, use tab, focused, then key; focusing a
+different target before each key would invalidate proof of keyboard navigation.
 Use {"action":"emulateMedia","reducedMotion":"reduce","colorScheme":null} to
 exercise the real prefers-reduced-motion query; use no-preference to disable it.
 colorScheme may be light or dark. Emulation changes the isolated test page's media
@@ -823,7 +829,7 @@ def verify_functions(page, prompt, provider, attempt=0, feedback="", sources=Non
                 if step.get('action')=='emulateMedia':validate_media(step)
                 if step.get('action')=='style' and step.get('property') not in STYLES:
                     raise ValueError('Invalid verification plan: unsupported read-only style property')
-                if step.get('action') not in {'reload', 'tab', 'wait','emulateMedia'}:
+                if step.get('action') not in {'reload', 'tab', 'wait','emulateMedia','key'}:
                     spec = step.get('target')
                     unnamed_assertion = (isinstance(spec, dict)
                         and spec.get('by') == 'role' and spec.get('role') in {'alert', 'status', 'dialog', 'alertdialog'}
@@ -965,6 +971,10 @@ def verify_functions(page, prompt, provider, attempt=0, feedback="", sources=Non
                 if action == 'wait':
                     perform_input(page, None, step)
                     asserted = False
+                    continue
+                if action == 'key':
+                    perform_input(page,None,step)
+                    asserted=False
                     continue
                 specification = step.get('target')
                 if isinstance(specification, dict):

@@ -3,7 +3,8 @@ import math
 import re
 import time
 
-INPUT_ACTIONS = {'press', 'hold', 'pointer', 'wait'}
+INPUT_ACTIONS = {'press', 'hold', 'pointer', 'wait', 'key'}
+PAGE_KEYS = ['Tab','Enter','Space','Escape','ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Home','End','PageUp','PageDown']
 KEY = re.compile(r'^(?:[a-zA-Z0-9]|ArrowUp|ArrowDown|ArrowLeft|ArrowRight|Space|Enter|Escape|Tab|Backspace|Delete|Home|End|PageUp|PageDown)$')
 
 
@@ -42,6 +43,8 @@ def input_duration(step):
             raise ValueError('Invalid verification plan: bounded input duration required')
     else:
         duration = 0
+    if action=='key' and (not isinstance(step.get('key'),str) or step['key'] not in PAGE_KEYS):
+        raise ValueError('Invalid verification plan: unsupported focused-page key; modifiers and shortcuts are forbidden')
     if action in {'press', 'hold'}:
         keys = [step.get('key')] if action == 'press' else step.get('keys')
         if (not isinstance(keys, list) or not 1 <= len(keys) <= 3 or len(set(map(str, keys))) != len(keys)
@@ -80,6 +83,10 @@ def perform_input(page, locator, step):
     action = step['action']
     if action == 'wait':
         page.wait_for_timeout(step['durationMs']); return
+    if action == 'key':
+        # Preserve the focus established by Tab or a real UI action. Escape
+        # listeners may live on the document after the start control unmounts.
+        page.keyboard.press(step['key']);return
     if locator is None or locator.count() != 1 or not locator.is_visible():
         raise ValueError('Invalid verification plan: real input requires one visible named control')
     if action in {'hold', 'press'}:

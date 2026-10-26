@@ -1,5 +1,6 @@
 """Constrained output for the browser verification planner."""
 from .verification_environment import STYLES
+from .verification_input import PAGE_KEYS
 
 
 def obj(properties):
@@ -49,6 +50,7 @@ STEP = {'anyOf': [*ASSERTION['anyOf'], step(['fill', 'type', 'select'], value=TE
                         'colorScheme':{'type':['string','null'],'enum':['light','dark',None]}}),
                    step(['click'], unlessVisible={'anyOf': [ref('destinationTarget'), {'type': 'null'}]}),
                    step(['press'], key=NONEMPTY),
+                   obj({'action':{'type':'string','enum':['key']},'key':{'type':'string','enum':PAGE_KEYS}}),
                    step(['hold'], keys={'type': 'array', 'minItems': 1, 'maxItems': 3, 'items': NONEMPTY},
                         durationMs={'type': 'integer', 'minimum': 50, 'maximum': 3000}),
                    step(['pointer'], mode={'type': 'string', 'enum': ['move', 'click', 'drag', 'hold']},
