@@ -95,6 +95,7 @@ def prepare_design(workspace, prompt):
     retrying = bool(previous and prompt == previous.get('originalRequest') == previous.get('latestRequest'))
     if retrying:
         whole_product = False
+        redesign = False
     if (selected == 'game' and re.search(r'\b(website|site|blog|reviews|news|showcase)\b', prompt, re.I)
             and not re.search(r'\b(playable|movement|shooting|platformer|survival game)\b', prompt, re.I)):
         selected = 'website'

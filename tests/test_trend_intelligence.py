@@ -166,6 +166,25 @@ def test_explicit_trend_refresh_is_a_design_request_but_negation_is_not():
     assert strategy['mode']=='design-and-build'
 
 
+def test_retrying_modern_ui_request_does_not_rotate_the_design_or_repeat_research(monkeypatch):
+    calls=[]
+    def research(prompt,product):
+        calls.append(prompt);return {'family':product,'researchedAt':time.time(),'references':[]}
+    monkeypatch.setattr(design_research,'research_design',research)
+    class Workspace:
+        project_id='modern-retry'
+        content=''
+        def read_file(self,_):return {'status':'success','content':self.content}
+        def write_file(self,_,content):self.content=content;return {'status':'success'}
+    w=Workspace();prompt='Create a task app with a modern UI'
+    first=product_design.prepare_design(w,prompt)
+    retry=product_design.prepare_design(w,prompt)
+    assert len(calls)==1
+    assert retry['visualSystem']==first['visualSystem']
+    assert retry['designStrategy']['revision']==first['designStrategy']['revision']
+    assert retry['designStrategy']['direction']==first['designStrategy']['direction']
+
+
 def test_discovery_galleries_are_not_used_as_the_game_visual_reference(monkeypatch):
     from agent.reference_inspection import prepare_reference
     monkeypatch.setattr('agent.reference_inspection.inspect_reference',lambda *_:pytest.fail('A game listing is not a playable-scene reference'))
