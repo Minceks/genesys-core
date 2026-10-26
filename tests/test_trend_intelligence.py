@@ -22,7 +22,8 @@ def test_atom_launches_keep_dates_and_safe_source_links_without_following_destin
     assert 'secret' not in json.dumps(entries)
 
 
-@pytest.mark.parametrize('body',[b'<!DOCTYPE feed [<!ENTITY x "injected">]><feed/>',b'<feed><bad></feed>'])
+@pytest.mark.parametrize('body',[b'<!DOCTYPE feed [<!ENTITY x "injected">]><feed/>',
+    '<!DOCTYPE feed [<!ENTITY x "injected">]><feed/>'.encode('utf-16'), b'<feed><bad></feed>'])
 def test_unsafe_or_invalid_xml_is_a_research_failure(body):
     with pytest.raises(ValueError):
         discovery_entries(body,'https://www.producthunt.com/feed','application/atom+xml')

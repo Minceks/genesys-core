@@ -73,7 +73,8 @@ def discovery_entries(body, source, content_type):
         parser = DiscoveryLinks(source)
         parser.feed(body.decode('utf-8',errors='replace'))
         return parser.entries
-    if b'<!DOCTYPE' in body.upper() or b'<!ENTITY' in body.upper():
+    text = body.decode('utf-8-sig')
+    if '\x00' in text or '<!DOCTYPE' in text.upper() or '<!ENTITY' in text.upper():
         raise ValueError('Feed declarations are not accepted')
     parser = ET.XMLPullParser(events=('end',))
     entries = []
@@ -147,7 +148,7 @@ def trend_context(research, product, now=None):
         if fresh:
             for entry in entries[:4]:
                 published = entry.get('publishedAt')
-                if published is not None and (type(published) not in (int,float) or published > now+300 or now-published > 30*86400):
+                if published is not None and (type(published) not in (int,float) or not math.isfinite(published) or published > now+300 or now-published > 30*86400):
                     continue
                 observations.append({**entry,'source':reference.get('url'),'fetchedAt':fetched,
                                      'interpretation':'Observed discovery listing; publication, curation and platform popularity are different signals.'})
