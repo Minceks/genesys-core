@@ -1,5 +1,6 @@
 from __future__ import annotations
-from .progress import report_progress, progress_callback, execution_timeout
+from .progress import (report_progress, progress_callback, execution_timeout,
+                       model_request_scope, model_deadline, ModelDeadlineExceeded)
 from .build_metrics import record_repair
 from .model_context import text_safe, ModelBudgetExceeded
 
@@ -20,7 +21,7 @@ from .config import load_settings
 from .daytona_workspace import get_workspace
 from .design_guidance import project_design_guidance
 from .design_quality import BUILD_STANDARD
-from .build_context import InspectionCache, initial_source_context, tools_for_repair
+from .build_context import InspectionCache, initial_source_context, InspectionBudget, verification_due, transient_provider_error
 from .project_intelligence import (
     scan_project,
     build_project_context,
@@ -96,6 +97,9 @@ without tool calls; the orchestrator will then run mandatory verification. A sin
 does not mean the application is finished.
 18. Reuse complete source files supplied in initial inspection. Batch independent tool calls
 in one response when possible. Do not repeat inspection or planning after a provider switch.
+19. Initial inspection allows four source reads/listings. After an edit, inspect at most
+two additional files before applying the next changes. Batch related edits and finish
+implementation so mandatory build and browser checks retain their time budget.
 
 IMPORTANT TOOL LIMITATION:
 
@@ -1870,7 +1874,15 @@ def _build_recovery_report(
 # MAIN AGENT
 # ============================================================
 
-def run_agent(
+def run_agent(prompt: str, project_id: str = PROJECT_ID_DEFAULT,
+              conversation_history=None, recovery_context=None):
+    deadline = time.monotonic() + execution_timeout(
+        settings.agent_timeout_seconds, background=progress_callback.get() is not None)
+    with model_request_scope(deadline):
+        return _run_agent(prompt, project_id, conversation_history, recovery_context)
+
+
+def _run_agent(
     prompt: str,
     project_id: str = PROJECT_ID_DEFAULT,
     conversation_history: list[dict[str, str]] | None = None,
@@ -1931,8 +1943,8 @@ def run_agent(
             }
 
     report_progress("Preparing workspace")
-    agent_deadline = time.monotonic() + execution_timeout(
-        settings.agent_timeout_seconds, background=progress_callback.get() is not None)
+    agent_deadline = model_deadline.get() or (time.monotonic() + execution_timeout(
+        settings.agent_timeout_seconds, background=progress_callback.get() is not None))
 
     print()
     print("=" * 40)
@@ -2218,9 +2230,7 @@ def run_agent(
 
     last_tool_signature: tuple[str, str] | None = None
     repeated_tool_count = 0
-    pre_edit_read_count = 0
-    repair_inspection_count = 0
-    PRE_EDIT_READ_LIMIT = 8
+    inspection_budget = InspectionBudget()
 
     MAX_REPAIR_ATTEMPTS = 3
     repair_attempts = 0
@@ -2535,7 +2545,6 @@ def run_agent(
                         'Parallel workers implemented the shared application interface. Files: ' + ', '.join(drafts) +
                         '. Preserve their changes; repair only verification failures.'})
         except Exception as draft_error:
-            import logging
             logging.getLogger(__name__).exception('parallel_build_fell_back')
             # Keep complete owned drafts and exact review findings. Restarting
             # from the placeholder wastes completed work and the repair budget.
@@ -2577,6 +2586,11 @@ def run_agent(
 
         if time.monotonic() >= agent_deadline:
             return _agent_timeout_result()
+
+        if verification_due(step, MAX_STEPS, changed_since_build, implementation_ready,
+                            recovery_waiting_for_model, agent_deadline - time.monotonic()):
+            implementation_ready = True
+            report_progress('Checking saved implementation before further edits')
 
         if verification_complete:
             print(
@@ -3317,6 +3331,19 @@ def run_agent(
             console_result = None
 
             try:
+                if project_id != PROJECT_ID_DEFAULT:
+                    from .design_strategy import requests_redesign
+                    if requests_redesign(prompt):
+                        from .redesign_verification import presentation_changed
+                        presentation_diff = workspace.get_diff()
+                        new_presentation_sources = {}
+                        for path in modified_files:
+                            if path not in (known_files or []) and path.endswith(('.css','.scss','.sass','.less','.jsx','.tsx','.js','.ts','.vue','.svelte','.html','.svg')):
+                                new_presentation_sources[path] = workspace.read_file(path).get('content','')
+                        if presentation_diff.get('status') != 'success' or not presentation_changed(presentation_diff.get('diff',''),new_presentation_sources):
+                            raise RuntimeError('The request requires a real UI improvement, but no presentation source changes were found. '
+                                'Titles, favicons and planning metadata alone are not a redesign. Implement the requested layout, '
+                                'components, styles or scene rendering while preserving working functionality, then rerun verification.')
                 # Each verification attempt uses a fresh isolated browser session.
                 # Synthetic local records and open overlays from an earlier failed
                 # attempt must not leak into the next plan or another user request.
@@ -3668,7 +3695,7 @@ def run_agent(
                     }
                 )
 
-                repair_inspection_count = 0
+                inspection_budget.repair()
                 current_source = initial_source_context(InspectionCache(workspace), known_files, modified_files)
                 if current_source:
                     messages.append({'role': 'system', 'content':
@@ -3683,16 +3710,6 @@ def run_agent(
         # RESERVE THE LAST STEPS FOR MANDATORY VERIFICATION AND REPAIR.
         # The model must not spend this reserve on new exploration after its
         # normal implementation budget has ended.
-        if step > MAX_STEPS and changed_since_build and not implementation_ready and not recovery_waiting_for_model:
-            return {
-                "status": "error",
-                "message": "Implementation did not finish within the step budget. Your partial files are saved; retry to finish the application.",
-                "modifiedFiles": modified_files,
-                "buildPassed": False,
-                "browserVerified": False,
-                "steps": steps_used,
-            }
-
         if (
             step > MAX_STEPS
             and not changed_since_build
@@ -3772,23 +3789,26 @@ def run_agent(
         # ASK AI PROVIDER FOR NEXT ACTION
         # ----------------------------------------------------
 
-        step_tools = tools_for_repair(model_tools, repair_inspection_count) if last_failure_type else model_tools
-        if project_id != PROJECT_ID_DEFAULT and not last_failure_type and not modified_files and pre_edit_read_count >= PRE_EDIT_READ_LIMIT:
-            step_tools = [tool for tool in model_tools if tool['function']['name'] not in {'read_file', 'list_files'}]
+        step_tools = inspection_budget.tools(model_tools)
+        if len(step_tools) != len(model_tools):
             messages.append({'role': 'system', 'content':
-                'Use the existing source and inspection context now. The initial inspection budget is used. '
+                'Use the existing source and inspection context now. The current inspection budget is used. '
                 'Make the necessary implementation edits, or respond without tool calls if the '
                 'original request is already implemented so mandatory verification can proceed.'})
+        handoff_to_checks = False
         try:
 
-            response = provider.generate(
-                messages,
-                step_tools,
-            )
+            with model_request_scope(agent_deadline - (0 if last_failure_type else 60)):
+                response = provider.generate(messages, step_tools)
 
         except Exception as exc:
 
             error_text = str(exc)
+            if isinstance(exc, ModelDeadlineExceeded):
+                if changed_since_build and not recovery_waiting_for_model:
+                    implementation_ready = True
+                    continue
+                return _agent_timeout_result()
             if isinstance(exc, ModelBudgetExceeded):
                 return {'status': 'error', 'message': error_text, 'errorType': 'model_budget',
                         'agent': 'genesys', 'modifiedFiles': modified_files,
@@ -3805,7 +3825,11 @@ def run_agent(
 
             import traceback
 
-            traceback.print_exc()
+            if transient_provider_error(exc):
+                logging.getLogger(__name__).warning('model_provider_unavailable provider=%s type=%s',active_provider_name,type(exc).__name__)
+                report_progress('Continuing the build after a connection timeout')
+            else:
+                traceback.print_exc()
 
             # ------------------------------------------------
             # ORDERED PROVIDER FALLBACK
@@ -3829,14 +3853,24 @@ def run_agent(
                     fallback_messages.append({'role': 'system', 'content':
                         'Continue from existing source context and saved progress. Do not restart inspection. '
                         f'Already modified files: {modified_files}. Finish missing edits, then stop for verification.'})
-                    response = fallback_provider.generate(fallback_messages, step_tools)
+                    with model_request_scope(agent_deadline - (0 if last_failure_type else 60)):
+                        response = fallback_provider.generate(fallback_messages, step_tools)
                     messages = fallback_messages
                     provider = fallback_provider
                     active_provider_name = fallback_name
                     print(f'Provider fallback succeeded: {fallback_name}')
                     break
-                except Exception:
-                    traceback.print_exc()
+                except ModelDeadlineExceeded:
+                    if changed_since_build and not recovery_waiting_for_model:
+                        implementation_ready = True
+                        handoff_to_checks = True
+                        break
+                    return _agent_timeout_result()
+                except Exception as fallback_error:
+                    if transient_provider_error(fallback_error):
+                        logging.getLogger(__name__).warning('model_fallback_unavailable provider=%s type=%s',fallback_name,type(fallback_error).__name__)
+                    else:
+                        traceback.print_exc()
                     print(f'Provider fallback failed: {fallback_name}')
             else:
                 return {'status': 'error', 'message': 'AI providers are temporarily unavailable. Your project files are preserved; please retry.',
@@ -3847,6 +3881,8 @@ def run_agent(
                     'errorType': 'ai_request'}
 
         # ----------------------------------------------------
+        if handoff_to_checks:
+            continue
         if time.monotonic() >= agent_deadline:
             return _agent_timeout_result()
 
@@ -3975,9 +4011,6 @@ def run_agent(
                 )
                 else {}
             )
-            if last_failure_type and tool_name in {'read_file', 'list_files'}:
-                repair_inspection_count += 1
-
             # ----------------------------------------------
             # REPETITION DETECTION
             # ----------------------------------------------
@@ -4018,33 +4051,12 @@ def run_agent(
             inspection_limit_hit = False
             if tool_name not in {tool['function']['name'] for tool in step_tools}:
                 inspection_limit_hit = True
-                result = {'status': 'error', 'error': 'This tool is not available in the current phase. Use edit_file or write_file for the repair, then respond without tool calls for verification.'}
+                result = {'status': 'error', 'error': 'This tool is not available in the current phase. Apply targeted edits using the current evidence, then finish implementation so build and browser verification can run.'}
                 loop_warning = result['error']
-            elif last_failure_type and tool_name in {'read_file', 'list_files'} and repair_inspection_count == 2:
-                loop_warning = 'Prefer targeted line-range reads of affected files, then apply a complete repair. Fresh source remains available; do not repeat unchanged inspection calls.'
-            if not inspection_limit_hit and tool_name == "read_file" and not modified_files and not last_failure_type:
-                pre_edit_read_count += 1
-                if pre_edit_read_count == PRE_EDIT_READ_LIMIT:
-                    loop_warning = (
-                        "The initial inspection budget is used. Stop exploring and "
-                        "make the first implementation change now. You can "
-                        "inspect another file later if the edit requires it."
-                    )
-                elif pre_edit_read_count > PRE_EDIT_READ_LIMIT:
-                    inspection_limit_hit = True
-                    loop_warning = (
-                        "The pre-edit inspection limit has been reached. "
-                        "Use the information already available and make "
-                        "the first implementation change now."
-                    )
-                    result = {
-                        "status": "error",
-                        "error": (
-                            "Pre-edit inspection limit reached. "
-                            "Begin implementation with the files already read."
-                        ),
-                        "tool": tool_name,
-                    }
+            elif tool_name in {'read_file', 'list_files'} and not inspection_budget.inspect():
+                inspection_limit_hit = True
+                loop_warning = 'The inspection budget is used. Apply targeted edits using current source, or finish implementation so build and verification can run.'
+                result = {'status':'error','error':loop_warning,'tool':tool_name}
 
             if inspection_limit_hit:
                 print(
@@ -4117,7 +4129,7 @@ def run_agent(
                 implementation_ready = False
                 # A real edit invalidates previous source observations. Permit
                 # two fresh targeted reads, not endless unchanged inspection.
-                repair_inspection_count = 0
+                inspection_budget.edited()
 
                 # Any file change invalidates the previous
                 # build, preview, and browser verification.

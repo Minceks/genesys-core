@@ -1,5 +1,42 @@
 """Bounded initial source context shared with the model and provider fallbacks."""
 
+class InspectionBudget:
+    """Bound exploration both before and after edits, including provider changes."""
+    def __init__(self):
+        self.count = 0
+        self.has_edits = False
+        self.repairing = False
+
+    @property
+    def limit(self): return 2 if self.has_edits or self.repairing else 4
+
+    def tools(self, tools):
+        if self.count < self.limit: return tools
+        return [tool for tool in tools if tool['function']['name'] not in {'read_file','list_files'}]
+
+    def inspect(self):
+        if self.count >= self.limit: return False
+        self.count += 1
+        return True
+
+    def edited(self):
+        self.has_edits = True
+        self.count = 0
+
+    def repair(self):
+        self.repairing = True
+        self.count = 0
+
+
+def verification_due(step, implementation_limit, changed, ready, repairing, remaining_seconds):
+    return (changed and not ready and not repairing
+            and (step > implementation_limit or remaining_seconds <= 60))
+
+
+def transient_provider_error(error):
+    return isinstance(error, TimeoutError) or type(error).__name__ in {
+        'APITimeoutError','APIConnectionError','ReadTimeout','ConnectTimeout'}
+
 def tools_for_repair(tools, inspections):
     # Permit fresh targeted source after each successful edit, then require
     # implementation or a no-tool response so mandatory verification can run.

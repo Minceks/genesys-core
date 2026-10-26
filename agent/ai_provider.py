@@ -1481,7 +1481,7 @@ class OpenAIProvider(AIProvider):
             raise RuntimeError("OPENAI_API_KEY is missing from backend configuration.")
         from openai import OpenAI
         self.model = model or settings.genesys_openai_model
-        self.client = client or OpenAI(api_key=settings.openai_api_key, timeout=60.0, max_retries=0)
+        self.client = client or OpenAI(api_key=settings.openai_api_key, timeout=90.0, max_retries=0)
 
     def generate_structured(self, messages, schema):
         return self.generate(messages, [], response_schema=schema)
@@ -1509,6 +1509,8 @@ class OpenAIProvider(AIProvider):
             response_format={'type':'json_schema','json_schema':{'name':'visual_design_review','strict':True,'schema':schema}})
         if self.model.startswith(('gpt-5','gpt-6','o3','o4')):
             options['reasoning_effort']='low'
+        from .progress import model_request_timeout
+        options['timeout'] = model_request_timeout(60)
         response=self.client.chat.completions.create(**options)
         record_model_usage(response)
         if not response.choices or response.choices[0].finish_reason!='stop' or not response.choices[0].message.content:
@@ -1516,6 +1518,7 @@ class OpenAIProvider(AIProvider):
         return AIResponse(text=response.choices[0].message.content)
 
     def generate(self, messages, tools, response_schema=None):
+        from .progress import model_request_timeout
         messages = bounded_messages(messages, tools)
         # Strip provider-specific signatures without truncating source context.
         prepared = []
@@ -1533,9 +1536,9 @@ class OpenAIProvider(AIProvider):
                     for call in message['tool_calls']]
             prepared.append(item)
         options = dict(model=self.model, messages=prepared,
+                       timeout=model_request_timeout(120 if response_schema is not None else 90),
                        max_completion_tokens=min(12000, max(2000, int(os.getenv('GENESYS_OUTPUT_TOKEN_LIMIT', '6000')))))
         if response_schema is not None:
-            options['timeout'] = 120.0
             options['response_format'] = {'type': 'json_schema', 'json_schema': {
                 'name': 'browser_verification_plan', 'strict': True, 'schema': response_schema}}
         elif json_response_requested(prepared, tools):
@@ -1549,6 +1552,7 @@ class OpenAIProvider(AIProvider):
         ceiling = min(24000, max(options['max_completion_tokens'],
                       int(os.getenv('GENESYS_OUTPUT_TOKEN_CEILING', '12000'))))
         for attempt in range(2):
+            options['timeout'] = model_request_timeout(120 if response_schema is not None else 90)
             response = self.client.chat.completions.create(**options)
             record_model_usage(response)
             if not response.choices:
