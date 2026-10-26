@@ -188,3 +188,42 @@ def test_repeated_structural_items_keep_mutations_ambiguous():
             assert not page.evaluate('Boolean(window.changed)')
             assert any('ambiguous' in item for item in result['unverifiedCore'])
         finally: browser.close()
+
+
+def test_exact_labelled_panel_scope_resolves_without_global_fallback():
+    from agent.functional_verification import target
+    with sync_playwright() as p:
+        browser = p.chromium.launch()
+        try:
+            page = browser.new_page()
+            spec = {'by':'role','role':'button','name':'Touch','withinText':'Input mode'}
+            page.set_content('''<button onclick="window.wrong=true">Touch</button>
+                <div aria-label="Input mode"><button onclick="window.correct=true">Touch</button></div>''')
+            target(page, spec).click()
+            assert page.evaluate('Boolean(window.correct)')
+            assert not page.evaluate('Boolean(window.wrong)')
+            for markup in (
+                '<button>Touch</button>',
+                '<div aria-label="Input mode"><button>Keyboard</button></div><button>Touch</button>',
+                '<div aria-label="Input mode"><button>Touch</button><button>Touch</button></div>',
+                '<div aria-label="Input mode"><button>Touch</button></div><div aria-label="Input mode"><button>Touch</button></div>',
+                '<div aria-label="Input mode" hidden><button>Touch</button></div><button>Touch</button>',
+            ):
+                page.set_content(markup)
+                with pytest.raises(ValueError, match='could not be uniquely identified'):
+                    target(page, spec)
+        finally:
+            browser.close()
+
+
+def test_exhausted_model_deadline_is_not_retried_as_invalid_json():
+    from agent.progress import ModelDeadlineExceeded
+    from tests.test_verification_plans import Page
+    calls = []
+    def generate(*_):
+        calls.append(True)
+        raise ModelDeadlineExceeded('The model request time budget ended')
+    page = Page()
+    result = verify_functions(page, 'Build a game', SimpleNamespace(generate=generate))
+    assert len(calls) == 1 and page.mutations == 0
+    assert 'time budget ended' in result['unverifiedCore'][0]

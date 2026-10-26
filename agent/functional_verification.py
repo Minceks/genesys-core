@@ -341,6 +341,16 @@ def target(page, spec):
                     break
         if len(matches) == 1:
             return next(iter(matches.values()))
+        if not matches:
+            # A generated panel may expose its exact scope through aria-label
+            # without rendering that label as text. Keep the requested scope;
+            # never fall back to an unrelated page-wide control.
+            labelled = page.get_by_label(text, exact=True)
+            visible = [labelled.nth(i) for i in range(labelled.count()) if labelled.nth(i).is_visible()]
+            if len(visible) == 1:
+                controls = target(visible[0], inner_spec)
+                if controls.count() == 1 and controls.is_visible():
+                    return controls
         raise ValueError('Invalid verification plan: synthetic item control could not be uniquely identified')
     name = re.sub(r'\s+', ' ', str(spec.get('name', ''))).strip()[:200]
     if not name:
@@ -675,7 +685,8 @@ def verify_functions(page, prompt, provider, attempt=0, feedback="", sources=Non
     except Exception as error:
         logging.getLogger(__name__).warning('functional_verification_planning_failed type=%s detail=%s', type(error).__name__, str(error)[:250])
         from .structured_schema import StructuredSchemaError
-        if planning_retry == 0 and not isinstance(error, StructuredSchemaError):
+        from .progress import ModelDeadlineExceeded
+        if planning_retry == 0 and not isinstance(error, (StructuredSchemaError, ModelDeadlineExceeded)) and time.monotonic() < browser_deadline - 5:
             return verify_functions(page, prompt, provider, attempt=attempt, planning_retry=1, validation_retry=validation_retry,
                 feedback='Previous planning response failed validation: '+str(error)[:500]+'. Correct this exact error. Return a complete JSON object following the supplied schema with executable primary workflows. ' + feedback, sources=sources, preverified=preverified, contract=contract, passed_checks=passed_checks, _repair_round=_repair_round)
         # A verifier/provider failure is not evidence of broken application code.
@@ -1170,6 +1181,11 @@ def verify_functions(page, prompt, provider, attempt=0, feedback="", sources=Non
                     })
                 except Exception:
                     pass
+            logging.getLogger(__name__).warning('functional_verification_step_failed check=%s action=%s by=%s role=%s scoped=%s type=%s',
+                name, (step or {}).get('action'), ((step or {}).get('target') or {}).get('by'),
+                ((step or {}).get('target') or {}).get('role'),
+                bool(((step or {}).get('target') or {}).get('withinText') or ((step or {}).get('target') or {}).get('withinRole')),
+                type(error).__name__)
             if 'Invalid' in detail or 'Unsupported' in detail or 'Expected outcome was not asserted' in detail or 'strict mode violation' in detail:
                 core.append(name + ': verification plan could not execute: ' + detail[:250])
             elif 'intercepts pointer events' in detail:
@@ -1201,7 +1217,9 @@ def verify_functions(page, prompt, provider, attempt=0, feedback="", sources=Non
     missing = [name for key, name in requirement_names.items() if key not in covered]
     core.extend('Not verified: ' + name for name in missing)
     logging.getLogger(__name__).info('functional_verification_result %s', json.dumps({'passed':passed, 'issues':issues, 'unverifiedCore':core})[:6000])
-    if (core or issues) and (attempt == 0 or _repair_round == 1) and _repair_round < 2 and plan.get('planner') not in {'observed-local-cart-v1', 'observed-local-workflow-v1', 'observed-local-storefront-v1'}:
+    only_automation_gaps = (bool(automation_unverified) and not issues and len(passed) == len(checks)
+                            and set(requirement_names) - covered <= automation_unverified)
+    if (core or issues) and not only_automation_gaps and time.monotonic() < browser_deadline - 20 and (attempt == 0 or _repair_round == 1) and _repair_round < 2 and plan.get('planner') not in {'observed-local-cart-v1', 'observed-local-workflow-v1', 'observed-local-storefront-v1'}:
         logging.getLogger(__name__).info('functional_verification_repair round=%s max_rounds=2 retained_checks=%s', _repair_round + 1, len(replayable_checks))
         observed_failure = {
             'failedSteps': failure_observations,
@@ -1230,8 +1248,20 @@ def verify_functions(page, prompt, provider, attempt=0, feedback="", sources=Non
             'round': _repair_round + 1, 'method': 'repair_plan_and_reexecute',
             'retainedIndependentChecks': len(replayable_checks),
         })
+        if 'coverage' not in repaired:
+            # A timed-out replan cannot erase already executed browser evidence.
+            repaired.update(status='success', issues=[], executionIssues=issues,
+                            testedInteractions=passed,
+                            coverage={'requirements':requirements, 'passedIds':sorted(covered), 'unverified':missing},
+                            unverified=list(dict.fromkeys(unverified + repaired.get('unverified', []))),
+                            unverifiedCore=list(dict.fromkeys(core + ['Verification execution failed: '+issue for issue in issues]
+                                                              + repaired.get('unverifiedCore', []))))
         return repaired
-    if (issues or core) and plan.get('planner') not in {'observed-local-cart-v1', 'observed-local-workflow-v1', 'observed-local-storefront-v1'}:
+    if (issues or core) and not only_automation_gaps and time.monotonic() >= browser_deadline - 5:
+        core.extend('Verification execution failed: '+issue for issue in issues)
+        issues = []
+        core.append('Verification time budget ended before failure diagnosis; source is preserved.')
+    if (issues or core) and not only_automation_gaps and time.monotonic() < browser_deadline - 5 and plan.get('planner') not in {'observed-local-cart-v1', 'observed-local-workflow-v1', 'observed-local-storefront-v1'}:
         # Failed assertions alone do not establish an app defect. Ask for a
         # separate diagnosis grounded in executed actions and implementation.
         try:

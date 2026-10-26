@@ -285,6 +285,66 @@ def test_contract_browser_scope_cannot_be_dropped_based_on_its_name(page):
     assert result['coverage']['passedIds'] == ['A', 'B']
 
 
+def test_explicit_automation_gap_does_not_repeat_successful_workflows(page):
+    serve(page, '<button onclick="document.querySelector(\'p\').textContent=\'Done\'">Run</button><p>Ready</p>')
+    reqs = [requirement('working'), requirement('full-game-completion')]
+    checks = [check('Real interaction', 'working', [click('Run'), visible('Done')])]
+    matrix = {**claims(checks), 'full-game-completion': {'checkNames': [], 'unverifiedReason': 'A full normal level completion was not exercised.'}}
+    class Provider(StructuredProvider):
+        diagnoses = 0
+        def generate(self, *_):
+            self.diagnoses += 1
+            raise AssertionError('An explicit automation gap needs no application diagnosis')
+    provider = Provider(plan(checks, reqs, matrix))
+    result = verify_functions(page, 'Build an app', provider, contract={'requirements': reqs})
+    assert len(provider.schemas) == 1 and provider.diagnoses == 0
+    assert result['coverage']['passedIds'] == ['working']
+    assert result['unverifiedCore'] and '_verifiedPlan' not in result
+    assert 'verificationRecovery' not in result
+
+
+def test_replanning_deadline_preserves_original_executed_evidence(page):
+    from agent.progress import ModelDeadlineExceeded
+    serve(page, '<p>Ready</p>')
+    reqs = [requirement('working'), requirement('missing-control')]
+    checks = [check('Working observation', 'working', [visible('Ready')]),
+              check('Missing interaction', 'missing-control', [click('Missing button'), visible('Done')])]
+    value = plan(checks, reqs, claims(checks))
+    class Provider:
+        calls = 0
+        def generate_structured(self, *_):
+            self.calls += 1
+            if self.calls > 1:
+                raise ModelDeadlineExceeded('The model request time budget ended')
+            return SimpleNamespace(text=json.dumps(value))
+    provider = Provider()
+    result = verify_functions(page, 'Build an app', provider, contract={'requirements': reqs})
+    assert provider.calls == 2
+    assert result['testedInteractions'] == ['Working observation']
+    assert result['coverage']['passedIds'] == ['working']
+    assert 'missing-control' in {r['id'] for r in result['coverage']['requirements']}
+    assert result['issues'] == []  # A timed-out replan cannot certify an app defect.
+    assert any('Missing interaction' in s for s in result['executionIssues'])
+    assert any('time budget ended' in s for s in result['unverifiedCore'])
+    assert '_verifiedPlan' not in result
+
+
+def test_limited_remaining_time_keeps_failure_incomplete_without_replanning(page):
+    from agent.progress import model_request_scope
+    serve(page, '<p>Ready</p>')
+    reqs = [requirement('missing-control')]
+    checks = [check('Missing interaction', 'missing-control', [click('Missing button'), visible('Done')])]
+    provider = StructuredProvider(plan(checks, reqs, claims(checks)))
+    with model_request_scope(time.monotonic() + 4):
+        result = verify_functions(page, 'Build an app', provider, contract={'requirements': reqs})
+    assert len(provider.schemas) == 1
+    assert result['coverage']['passedIds'] == []
+    assert result['issues'] == []
+    assert any('before failure diagnosis' in s for s in result['unverifiedCore'])
+    assert any('Missing interaction' in s for s in result['unverifiedCore'])
+    assert '_verifiedPlan' not in result
+
+
 def test_twelve_requirements_can_share_a_complete_workflow(page):
     serve(page, '<p>Ready</p>')
     reqs = [requirement(str(i)) for i in range(12)]
