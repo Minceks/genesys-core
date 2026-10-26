@@ -126,7 +126,6 @@ def inspect_reference(url):
     from playwright.sync_api import sync_playwright
     url = reference_url(url)
     public_addresses(urlsplit(url).hostname)
-    started = time.monotonic()
     budget = {'requests':0,'bytes':0,'blocked':0}
     with sync_playwright() as playwright, socket.socket() as network_sink:
         # Browser traffic not fulfilled by our pinned reader must not bypass it
@@ -156,6 +155,8 @@ def inspect_reference(url):
         page.on('dialog',lambda dialog:dialog.dismiss())
         page.on('popup',lambda popup:popup.close())
         try:
+            # Cold browser startup is not resource-fetch time.
+            started = time.monotonic()
             response=page.goto(url,wait_until='domcontentloaded',timeout=20000)
             page.wait_for_timeout(250)
             if not response or response.status>=400:
