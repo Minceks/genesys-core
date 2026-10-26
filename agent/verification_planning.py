@@ -11,7 +11,13 @@ def contract_plan_schema(contract):
     if browser:
         schema['properties']['checks']['minItems']=0
         schema['properties']['checks']['maxItems']=min(12,max(8,len(browser)))
-        schema['properties']['coverage']=obj({r['id']:obj({'checkNames':STRINGS,'unverifiedReason':TEXT}) for r in browser})
+        # Encode the exclusive choice in the provider schema, rather than
+        # asking the model to remember a cross-field constraint in prose.
+        entry={'anyOf':[
+            obj({'checkNames':dict(STRINGS,minItems=1),'unverifiedReason':{'type':'string','enum':['']}}),
+            obj({'checkNames':dict(STRINGS,maxItems=0),'unverifiedReason':TEXT}),
+        ]}
+        schema['properties']['coverage']=obj({r['id']:deepcopy(entry) for r in browser})
         schema['required'].append('coverage')
     return schema
 

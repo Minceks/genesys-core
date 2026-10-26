@@ -640,7 +640,8 @@ def verify_functions(page, prompt, provider, attempt=0, feedback="", sources=Non
             'Do not duplicate outcomes between steps and finalAssertion.') if callable(structured) else ''
         if contract and callable(structured) and trusted_plan is None and _plan_override is None:
             format_instruction += (' Include the required coverage object for EVERY browser ID. Each entry names its exact checks '
-                'and their covers arrays must include that ID. Use an explicit unverifiedReason only when automation truly '
+                'and their covers arrays must include that ID. For planned checks unverifiedReason MUST be the empty string. '
+                'For a limitation checkNames MUST be empty. Use an explicit unverifiedReason only when automation truly '
                 'cannot prove the criterion; do not omit it or invent a passing check. Empty entries are allowed only for '
                 'independently preverified requirements. Visual and external criteria remain separate.')
         raw = generate_plan([{'role':'system','content':PLAN_INSTRUCTIONS + contract_instruction + format_instruction + ('\nRepair the previous verification plan, not app code: '+feedback if feedback else '')},
@@ -676,7 +677,7 @@ def verify_functions(page, prompt, provider, attempt=0, feedback="", sources=Non
         from .structured_schema import StructuredSchemaError
         if planning_retry == 0 and not isinstance(error, StructuredSchemaError):
             return verify_functions(page, prompt, provider, attempt=attempt, planning_retry=1, validation_retry=validation_retry,
-                feedback='Previous planning response was unavailable or invalid JSON. Return one compact complete JSON object under 3000 tokens with executable primary workflows. ' + feedback, sources=sources, preverified=preverified, contract=contract, passed_checks=passed_checks, _repair_round=_repair_round)
+                feedback='Previous planning response failed validation: '+str(error)[:500]+'. Correct this exact error. Return a complete JSON object following the supplied schema with executable primary workflows. ' + feedback, sources=sources, preverified=preverified, contract=contract, passed_checks=passed_checks, _repair_round=_repair_round)
         # A verifier/provider failure is not evidence of broken application code.
         return {'status':'success', 'issues':[], 'testedInteractions':[],
                 'unverified':['Functional verification could not run.'], 'unverifiedCore':['Verification service unavailable: '+str(error)[:250]]}

@@ -107,6 +107,41 @@ def test_bad_coverage_claims_rejected(fault):
     with pytest.raises(ValueError): explicit_coverage(plan(checks, contract['requirements'], matrix), contract)
 
 
+def test_coverage_schema_prevents_planned_and_unverified_conflict():
+    schema = contract_plan_schema({'requirements': [requirement('REDESIGN-BRX-03')]})
+    planned, gap = schema['properties']['coverage']['properties']['REDESIGN-BRX-03']['anyOf']
+    assert planned['properties']['checkNames']['minItems'] == 1
+    assert planned['properties']['unverifiedReason']['enum'] == ['']
+    assert gap['properties']['checkNames']['maxItems'] == 0
+    assert set(planned['required']) == set(gap['required']) == {'checkNames', 'unverifiedReason'}
+    assert planned['additionalProperties'] is gap['additionalProperties'] is False
+
+
+def test_conflicting_coverage_retry_gets_exact_error_and_executes_corrected_plan(page):
+    serve(page, '<button onclick="document.querySelector(\'p\').textContent=\'Done\'">Run</button><p>Ready</p>')
+    reqs = [requirement('REDESIGN-BRX-03')]
+    checks = [check('Real interaction', reqs[0]['id'], [click('Run'), visible('Done')])]
+    class Provider:
+        calls = 0
+        def generate_structured(self, messages, schema):
+            self.calls += 1
+            matrix = claims(checks)
+            if self.calls == 1:
+                matrix[reqs[0]['id']]['unverifiedReason'] = 'Not observed'
+            else:
+                assert 'both planned and unverified: REDESIGN-BRX-03' in messages[0]['content']
+                assert 'Correct this exact error.' in messages[0]['content']
+            value = plan(deepcopy(checks), reqs, matrix)
+            for workflow in value['checks']:
+                workflow['finalAssertion'] = workflow['steps'].pop()
+            return SimpleNamespace(text=json.dumps(value))
+    provider = Provider()
+    result = verify_functions(page, 'Build an app', provider, attempt=1, contract={'requirements': reqs})
+    assert provider.calls == 2
+    assert result['coverage']['passedIds'] == ['REDESIGN-BRX-03'], result
+    assert result['unverifiedCore'] == []
+
+
 @pytest.mark.parametrize('family,first,second', [
     ('store', 'Add item', 'Remove item'), ('booking', 'Choose slot', 'Cancel slot'),
     ('dashboard', 'Apply filter', 'Reset filter'), ('portfolio', 'Open work', 'Return home')])
