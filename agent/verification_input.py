@@ -3,7 +3,7 @@ import math
 import re
 import time
 
-INPUT_ACTIONS = {'press', 'hold', 'pointer', 'wait', 'key'}
+INPUT_ACTIONS = {'press', 'hold', 'pointer', 'wait', 'key', 'tabTo'}
 PAGE_KEYS = ['Tab','Enter','Space','Escape','ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Home','End','PageUp','PageDown']
 KEY = re.compile(r'^(?:[a-zA-Z0-9]|ArrowUp|ArrowDown|ArrowLeft|ArrowRight|Space|Enter|Escape|Tab|Backspace|Delete|Home|End|PageUp|PageDown)$')
 
@@ -89,6 +89,14 @@ def perform_input(page, locator, step):
         page.keyboard.press(step['key']);return
     if locator is None or locator.count() != 1 or not locator.is_visible():
         raise ValueError('Invalid verification plan: real input requires one visible named control')
+    if action == 'tabTo':
+        # Follow real sequential navigation. Never focus the destination with
+        # JavaScript/locator.focus, which would hide broken keyboard access.
+        for _ in range(24):
+            page.keyboard.press('Tab')
+            if locator.evaluate('e => e === document.activeElement'):
+                return
+        raise ValueError('Requested control was not reachable within 24 real Tab presses')
     if action in {'hold', 'press'}:
         # Focus a real accessible control. Never dispatch synthetic events or
         # change application state, clocks, localStorage or simulation globals.

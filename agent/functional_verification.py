@@ -239,8 +239,13 @@ Use separate scoped HUD outputs, not a whole panel containing several numbers.
 Use {"action":"key","key":"Escape"} for a real page-level key or Enter/Space
 on the currently focused control after tab/focused assertions. This preserves
 the existing focus; it does not refocus a hidden or unmounted old Start button.
+To reach a named control by keyboard use {"action":"tabTo","target":{"by":"role","role":"button","name":"Play"}},
+then assert focused and activate with key Enter. tabTo uses at most 24 real Tab
+presses, without programmatic focus. Never guess that one or two Tab presses
+reach a specific control. Use tab only when the requirement specifies one step
+in the focus order. Escape uses key, not press on an old Start button.
 Use press with a named target only when deliberately focusing that visible
-control. For keyboard-navigation checks, use tab, focused, then key; focusing a
+control. For keyboard-navigation checks, use tabTo, focused, then key; focusing a
 different target before each key would invalidate proof of keyboard navigation.
 Use {"action":"emulateMedia","reducedMotion":"reduce","colorScheme":null} to
 exercise the real prefers-reduced-motion query; use no-preference to disable it.
@@ -444,8 +449,10 @@ def placeholder_control_issues(sources):
 
 def observed_control_target(page, spec):
     """Resolve a button by observed name/text and context, never by guessed position."""
-    if not isinstance(spec, dict) or spec.get('by') != 'role' or spec.get('role') != 'button':
+    if not isinstance(spec, dict) or spec.get('by') != 'role' or spec.get('role') not in {'button','link'}:
         return None
+    if spec.get('role') == 'link' and page.get_by_role('link', name=spec.get('name',''), exact=spec.get('exact') is not False).count():
+        return None  # Existing or ambiguous real links keep their semantics.
     observed = page.locator('button,[role="button"]').evaluate_all('''els => els.map((e,i) => {
         const rect=e.getBoundingClientRect(), style=getComputedStyle(e);
         const labelled=(e.getAttribute('aria-labelledby')||'').split(/\\s+/).map(id=>document.getElementById(id)?.textContent||'').join(' ').trim();

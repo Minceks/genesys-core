@@ -345,6 +345,20 @@ def test_limited_remaining_time_keeps_failure_incomplete_without_replanning(page
     assert '_verifiedPlan' not in result
 
 
+def test_tab_to_keyboard_workflow_runs_through_verifier_without_guessing_tab_count(page):
+    serve(page, '''<style>button:focus-visible{outline:3px solid blue}</style>
+        <button>Home</button><button>Levels</button><button>Settings</button>
+        <button onclick="document.querySelector('p').textContent='Playing'">Play</button><p>Ready</p>''')
+    reqs = [requirement('keyboard')]
+    destination = {'by':'role','role':'button','name':'Play','exact':True}
+    checks = [check('Keyboard activation', 'keyboard', [
+        {'action':'tabTo','target':destination}, {'action':'focused','target':destination},
+        {'action':'key','key':'Enter'}, visible('Playing')])]
+    result = verify_functions(page, 'Use keyboard navigation', StructuredProvider(plan(checks,reqs,claims(checks))),attempt=1,contract={'requirements':reqs})
+    assert result['coverage']['passedIds'] == ['keyboard']
+    assert result['unverifiedCore'] == [] and not result['issues']
+
+
 def test_twelve_requirements_can_share_a_complete_workflow(page):
     serve(page, '<p>Ready</p>')
     reqs = [requirement(str(i)) for i in range(12)]

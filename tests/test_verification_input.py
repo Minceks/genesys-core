@@ -32,6 +32,37 @@ def test_wait_budget_applies_to_each_workflow_and_whole_plan():
         validate_input_budget([{'steps':[wait] * 7}] * 4)
 
 
+def test_tab_to_uses_real_tab_navigation_without_forcing_focus():
+    with sync_playwright() as p:
+        browser = p.chromium.launch()
+        try:
+            page = browser.new_page()
+            page.set_content('<button>Home</button><button>Levels</button><button>Settings</button><button>Play</button>')
+            control = page.get_by_role('button', name='Play', exact=True)
+            events = []
+            page.on('console', lambda message: events.append(message.text))
+            page.evaluate("document.addEventListener('keydown',e=>console.log(e.key))")
+            perform_input(page, control, {'action':'tabTo'})
+            assert control.evaluate('e => e === document.activeElement')
+            assert events == ['Tab'] * 4
+            page.set_content('<button>Home</button><button tabindex="-1">Unreachable</button>')
+            with pytest.raises(ValueError, match='24 real Tab'):
+                perform_input(page, page.get_by_role('button', name='Unreachable'), {'action':'tabTo'})
+        finally:
+            browser.close()
+
+
+def test_pointer_schema_rejects_waiting_click_and_missing_drag_destination():
+    from agent.verification_schema import STEP
+    branches = [b['properties'] for b in STEP['anyOf'] if b['properties']['action']['enum'] == ['pointer']]
+    modes = {mode: branch for branch in branches for mode in branch['mode']['enum']}
+    assert set(modes) == {'move','click','hold','drag'}
+    assert modes['click']['durationMs']['enum'] == modes['move']['durationMs']['enum'] == [0]
+    assert modes['hold']['durationMs']['minimum'] == 50
+    assert modes['hold']['endX']['type'] == 'null'
+    assert modes['drag']['endX']['type'] == modes['drag']['endY']['type'] == 'number'
+
+
 def test_held_keys_are_released_when_a_browser_step_fails():
     events = []
     keyboard = SimpleNamespace(down=lambda key: events.append(('down',key)), up=lambda key: events.append(('up',key)))

@@ -227,3 +227,23 @@ def test_exhausted_model_deadline_is_not_retried_as_invalid_json():
     result = verify_functions(page, 'Build a game', SimpleNamespace(generate=generate))
     assert len(calls) == 1 and page.mutations == 0
     assert 'time budget ended' in result['unverifiedCore'][0]
+
+
+def test_button_mislabelled_as_link_resolves_only_exact_unique_observed_control():
+    from agent.functional_verification import observed_control_target
+    with sync_playwright() as p:
+        browser = p.chromium.launch()
+        try:
+            page = browser.new_page()
+            page.set_content('<button aria-label="Open settings">Settings</button>')
+            spec = {'by':'role','role':'link','name':'Settings','exact':True}
+            found = observed_control_target(page, spec)
+            assert found is not None and found.get_attribute('aria-label') == 'Open settings'
+            page.set_content('<button>Settings</button><button>Settings</button>')
+            assert observed_control_target(page, spec) is None
+            page.set_content('<button>Settings for another account</button>')
+            assert observed_control_target(page, spec) is None
+            page.set_content('<a href="#one">Settings</a><a href="#two">Settings</a><button>Settings</button>')
+            assert observed_control_target(page, spec) is None
+        finally:
+            browser.close()
