@@ -7,7 +7,7 @@ import posixpath
 from copy import deepcopy
 
 SPEC_PATH = '.genesys-build-spec.json'
-PLANNING_POLICY_VERSION = 6
+PLANNING_POLICY_VERSION = 7
 logger = logging.getLogger(__name__)
 
 SPEC_SCHEMA = {
@@ -113,7 +113,7 @@ def validate_edit_labels(spec, sources, request):
     return spec
 
 
-def regression_schema():
+def regression_schema(evidence_ids=None):
     schema=deepcopy(SPEC_SCHEMA)
     item=schema['properties']['requirements']['items']
     item['required'].append('sourceEvidence')
@@ -121,6 +121,16 @@ def regression_schema():
         'type':'object','additionalProperties':False,'required':['path','excerpt'],
         'properties':{'path':{'type':'string','minLength':1},
                       'excerpt':{'type':'string','minLength':24,'maxLength':1200}}}]}
+    if evidence_ids is not None:
+        browser=deepcopy(item)
+        browser['properties']['scope']={'type':'string','enum':['browser']}
+        browser['properties']['sourceEvidence']={
+            'type':'object','additionalProperties':False,'required':['referenceId'],
+            'properties':{'referenceId':{'type':'string','enum':list(evidence_ids)}}}
+        other=deepcopy(item)
+        other['properties']['scope']={'type':'string','enum':['visual','external']}
+        other['properties']['sourceEvidence']={'type':'null'}
+        schema['properties']['requirements']['items']={'anyOf':[browser,other]}
     return schema
 
 
@@ -256,20 +266,31 @@ def prepare_build_spec(workspace, prompt, brief, provider):
                           and re.search(r'\b(?:ui|design\w*|style|look|font|colou?r|layout|theme|polish|spacing)\b',prompt,re.I)
                           and not re.search(r'\b(?:add|implement|create|feature|integrat\w*)\b',prompt,re.I)
                           and callable(structured) and any(re.search(r'\b(?:import|function|const)\b|=>|<[A-Za-z]',code) for code in sources.values()))
-    schema = regression_schema() if ground_regressions else SPEC_SCHEMA
+    from .spec_evidence import evidence_catalog, resolve_evidence
+    catalog=evidence_catalog(sources) if ground_regressions else {}
+    ground_regressions=bool(catalog)
+    schema = regression_schema(catalog) if ground_regressions else SPEC_SCHEMA
     if ground_regressions:
-        messages[0]['content'] += (' For each browser regression supply sourceEvidence={path,excerpt}, quoting '
-            '24-1200 exact characters from implementationSources that actually implement the stated behavior. '
-            'Use null for visual/external sourceEvidence. Retrieve existing behavior first and derive acceptance '
-            'from that evidence. Evidence must establish the requested control/state/persistence semantics, '
-            'not merely mention a nearby screen. Do not infer features from design guidance or examples. '
-            'If the source does not implement HUD scale, Reset Progress, URL-addressable scenes or saved '
-            'player positions, those are not regression requirements for a visual edit.')
+        context=json.loads(messages[1]['content'])
+        context.pop('implementationSources',None)
+        context.pop('existingImplementation',None)
+        context['sourceEvidenceOptions']=[{'referenceId':key,**value} for key,value in catalog.items()]
+        messages[1]['content']=json.dumps(context,ensure_ascii=False)
+        messages[0]['content'] += (' For this visual edit, existing source is supplied as sourceEvidenceOptions '
+            'instead of implementationSources. Each option is an exact source window with referenceId, path '
+            'and excerpt. Read these windows to derive existing behavior. For every browser requirement '
+            'return sourceEvidence={referenceId}, selecting the option that actually implements its '
+            'control/state/persistence behavior. Do not copy or rewrite source text in the response. '
+            'Use null for visual/external sourceEvidence. Design suggestions are not user requests. '
+            'Do not invent HUD scale, Reset Progress, URL-addressable scenes or saved player positions '
+            'when the source and user request do not provide them.')
     for attempt in range(3):
         raw = (structured(messages, schema) if callable(structured)
                else provider.generate(messages, [])).text.strip()
         try:
             spec = validate_spec(json.loads(re.sub(r'^```(?:json)?\s*|\s*```$', '', raw)))
+            if ground_regressions:
+                resolve_evidence(spec,catalog)
             if not replacing:
                 request_context=prompt+' '+str(brief.get('originalRequest',''))
                 validate_edit_labels(spec, sources, request_context)
