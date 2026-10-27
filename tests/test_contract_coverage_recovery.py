@@ -395,7 +395,7 @@ def test_legacy_policy_replanned_once_without_silent_contract_rewrite():
         def generate(self, messages, *_):
             self.calls += 1
             assert 'do NOT require a localStorage key' in messages[0]['content']
-            assert json.loads(messages[-1]['content'])['previousSpecification']['requirements'] == reqs
+            assert json.loads(messages[-1]['content'])['previousSpecification'] == {}
             return SimpleNamespace(text=json.dumps({'pages': ['App'], 'requirements': reqs}))
     workspace, provider = Workspace(), Provider()
     result = prepare_build_spec(workspace, prompt, {}, provider)

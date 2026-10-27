@@ -41,7 +41,7 @@ def test_spec_reads_nested_local_sources_without_escaping_src():
             assert path.startswith('src/') and '..' not in path.split('/')
             return {'content':files.get(path,'')}
     assert implementation_sources(Workspace())==files
-    assert PLANNING_POLICY_VERSION==5
+    assert PLANNING_POLICY_VERSION==6
 
 def test_unobserved_selector_does_not_invoke_application_diagnosis():
     import json
@@ -124,4 +124,4 @@ def test_stale_contract_is_not_fed_back_as_authority_on_visual_retry():
             assert context['previousSpecification']=={}
             assert context['implementationSources']['src/App.jsx']=='<button>Quit</button>'
             return SimpleNamespace(text=json.dumps(good))
-    assert prepare_build_spec(Workspace(),prompt,{'buildIntent':'edit-product'},Provider())['planningPolicyVersion']==5
+    assert prepare_build_spec(Workspace(),prompt,{'buildIntent':'edit-product'},Provider())['planningPolicyVersion']==6

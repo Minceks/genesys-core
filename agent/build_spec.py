@@ -4,9 +4,10 @@ import json
 import re
 import logging
 import posixpath
+from copy import deepcopy
 
 SPEC_PATH = '.genesys-build-spec.json'
-PLANNING_POLICY_VERSION = 5
+PLANNING_POLICY_VERSION = 6
 logger = logging.getLogger(__name__)
 
 SPEC_SCHEMA = {
@@ -70,6 +71,12 @@ def validate_spec(spec):
     return spec
 
 
+def validate_current_spec(spec):
+    if not isinstance(spec,dict) or spec.get('planningPolicyVersion')!=PLANNING_POLICY_VERSION:
+        raise ValueError('Saved specification uses an older planning policy; regenerate from existing source')
+    return validate_spec(spec)
+
+
 def same_build_requirements(previous, current):
     return (isinstance(previous, dict) and isinstance(current, dict)
             and previous.get('requirements') == current.get('requirements'))
@@ -103,6 +110,45 @@ def validate_edit_labels(spec, sources, request):
         missing=[label for label in labels if canonical_name(label) not in context]
         if missing:
             raise ValueError(item['id']+': invented control/label '+repr(missing[0])+'. Use the existing source and requested behavior; do not add a feature or rename it to satisfy this contract.')
+    return spec
+
+
+def regression_schema():
+    schema=deepcopy(SPEC_SCHEMA)
+    item=schema['properties']['requirements']['items']
+    item['required'].append('sourceEvidence')
+    item['properties']['sourceEvidence']={'anyOf':[{'type':'null'}, {
+        'type':'object','additionalProperties':False,'required':['path','excerpt'],
+        'properties':{'path':{'type':'string','minLength':1},
+                      'excerpt':{'type':'string','minLength':24,'maxLength':1200}}}]}
+    return schema
+
+
+def validate_regression_evidence(spec,sources,request,require_evidence=False):
+    """Editing an existing product cannot silently introduce new functional scope."""
+    source='\n'.join(sources.values())
+    requested=request.casefold()
+    capabilities=[
+        (r'\bhud\s+(?:size|scale)\b',r'hud.?scale|hud.?size',
+         'HUD scale preference'),
+        (r'\breset\s+(?:saved\s+)?progress(?:ion)?\b',r'reset.?progress|clear.?progress|set(?:Saved)?Progress\s*\(\s*\{',
+         'Reset Progress control'),
+        (r'unique\s+(?:url|hash)|direct\s+entry|(?:url|hash).{0,40}(?:direct|addressable)|addressable\s+views',
+         r'react-router|useNavigate|location\.(?:hash|pathname)|history\.(?:pushState|replaceState)|hashchange|popstate',
+         'addressable views'),
+    ]
+    for item in spec.get('requirements',[]):
+        if item.get('scope')!='browser':continue
+        text=item.get('name','')+' '+item.get('acceptance','')
+        for claim,implementation,label in capabilities:
+            if re.search(claim,text,re.I) and not re.search(claim,requested,re.I) and not re.search(implementation,source,re.I):
+                raise ValueError(item['id']+': unsupported new '+label+' in an existing-product edit; preserve the implemented behavior instead.')
+        if require_evidence:
+            evidence=item.get('sourceEvidence')
+            if not isinstance(evidence,dict):raise ValueError(item['id']+': browser regression needs sourceEvidence with an exact existing path and excerpt')
+            excerpt=evidence.get('excerpt','');path=evidence.get('path')
+            if not isinstance(excerpt,str) or len(excerpt)<24 or len(excerpt)>1200 or excerpt not in sources.get(path,''):
+                raise ValueError(item['id']+': sourceEvidence must quote 24-1200 exact characters from implementationSources')
     return spec
 
 
@@ -206,13 +252,28 @@ def prepare_build_spec(workspace, prompt, brief, provider):
                                                'previousSpecification': {} if replacing or previous.get('planningPolicyVersion') != PLANNING_POLICY_VERSION else previous}, ensure_ascii=False)},
     ]
     structured = getattr(provider, 'generate_structured', None)
+    ground_regressions = (not replacing and brief.get('buildIntent') == 'edit-product'
+                          and re.search(r'\b(?:ui|design\w*|style|look|font|colou?r|layout|theme|polish|spacing)\b',prompt,re.I)
+                          and not re.search(r'\b(?:add|implement|create|feature|integrat\w*)\b',prompt,re.I)
+                          and callable(structured) and any(re.search(r'\b(?:import|function|const)\b|=>|<[A-Za-z]',code) for code in sources.values()))
+    schema = regression_schema() if ground_regressions else SPEC_SCHEMA
+    if ground_regressions:
+        messages[0]['content'] += (' For each browser regression supply sourceEvidence={path,excerpt}, quoting '
+            '24-1200 exact characters from implementationSources that actually implement the stated behavior. '
+            'Use null for visual/external sourceEvidence. Retrieve existing behavior first and derive acceptance '
+            'from that evidence. Evidence must establish the requested control/state/persistence semantics, '
+            'not merely mention a nearby screen. Do not infer features from design guidance or examples. '
+            'If the source does not implement HUD scale, Reset Progress, URL-addressable scenes or saved '
+            'player positions, those are not regression requirements for a visual edit.')
     for attempt in range(3):
-        raw = (structured(messages, SPEC_SCHEMA) if callable(structured)
+        raw = (structured(messages, schema) if callable(structured)
                else provider.generate(messages, [])).text.strip()
         try:
             spec = validate_spec(json.loads(re.sub(r'^```(?:json)?\s*|\s*```$', '', raw)))
             if not replacing:
-                validate_edit_labels(spec, sources, prompt+' '+str(brief.get('originalRequest','')))
+                request_context=prompt+' '+str(brief.get('originalRequest',''))
+                validate_edit_labels(spec, sources, request_context)
+                validate_regression_evidence(spec,sources,request_context,ground_regressions)
             break
         except (ValueError, TypeError) as error:
             reason = str(error)[:300]

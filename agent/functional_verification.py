@@ -24,6 +24,13 @@ Do not invent synonyms for controls. Inspect supplied source for screen transiti
 When acceptance permits alternatives (such as OS OR in-app reduced motion), verify
 one supported alternative; never require both or invent a setting. Do not require
 hidden hooks or localStorage injection for normal gameplay completion.
+For canvas gameplay, numerical enemy positions are not mandatory DOM outputs.
+Use the implemented HUD and resulting level-complete/progress UI as observable
+outcomes of bounded normal play; inspect firing/auto-aim rules in source before
+claiming deterministic hooks or seeds are necessary. Establish onboarding and
+start/countdown states before gameplay actions. Never assert styles of a Start
+control after it has disappeared. Persisted completed-level unlocks do not imply
+persisted live wave, player position, or URL-addressable scenes.
 For a redesign request, verify existing user-facing workflows as regression checks.
 Subjective beauty, 'different UI', visual style and design quality belong to separate
 visual review, never functional requirements or unverifiedCore. Report subjective

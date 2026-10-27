@@ -2027,8 +2027,8 @@ def _run_agent(
             saved_spec = None
             if narrow_edit:
                 try:
-                    from .build_spec import validate_spec
-                    saved_spec = validate_spec(json.loads(workspace.read_file(SPEC_PATH).get('content', '{}')))
+                    from .build_spec import validate_current_spec
+                    saved_spec = validate_current_spec(json.loads(workspace.read_file(SPEC_PATH).get('content', '{}')))
                 except (ValueError, TypeError, AttributeError, FileNotFoundError):
                     narrow_edit = False
             product_brief['buildSpecification'] = saved_spec or prepare_build_spec(workspace, prompt, product_brief, provider)
