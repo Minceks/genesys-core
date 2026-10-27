@@ -11,3 +11,7 @@ The focused-edit reuse route now checks the planning-policy version. Older contr
 No live private-source model diagnostic or full AI build rerun was performed. Regression tests cover source evidence, fabricated excerpts, capability scope, explicit additions, schema limits, policy migration and existing browser verification behavior.
 
 Validation: 157 tests passed against isolated release source. A real configured-model run on a synthetic counter app returned two source-backed browser requirements and two visual requirements; exact excerpts validated and no extra product controls were introduced. The synthetic run included no private project code or actual user request.
+
+The real planner also generated and executed passing mouse and keyboard browser workflows for the synthetic counter (both browser coverage IDs passed). The initial intercepted-host fixture failed reload; a local HTTP fixture corrected that harness issue.
+
+The first Railway rollout exposed a separate cold-start timeout in installed REA CLI --help (15 seconds). The deployment check now allows 45 seconds per attempt and retries a timeout once; missing/invalid help still fails immediately, and complete browser fixture evidence remains mandatory. 39 follow-up CLI/reference/specification tests passed.

@@ -26,14 +26,27 @@ def check_browser_runtime(inspection):
     raise SystemExit('REA browser runtime did not produce verified fixture evidence after two attempts') from failure
 
 
+def check_cli_runtime(command, run=subprocess.run):
+    """Allow a bounded cold Node import, while still validating the installed CLI."""
+    for attempt in range(2):
+        try:
+            result=run(command+['inspect-web-page','--help'],capture_output=True,text=True,timeout=45)
+        except subprocess.TimeoutExpired as error:
+            print(json.dumps({'referenceCliAttempt':attempt+1,'failureType':'TimeoutExpired'}),flush=True)
+            if attempt==1:
+                raise SystemExit('REA web inspection command timed out after two cold-start attempts') from error
+            continue
+        if result.returncode or 'Passively inspect' not in result.stdout:
+            raise SystemExit('REA web inspection command is unavailable')
+        return
+
+
 def main():
     from agent.reference_inspection import rea_command
     command=rea_command()
     if not command:
         raise SystemExit('REA runtime is missing')
-    result=subprocess.run(command+['inspect-web-page','--help'],capture_output=True,text=True,timeout=15)
-    if result.returncode or 'Passively inspect' not in result.stdout:
-        raise SystemExit('REA web inspection command is unavailable')
+    check_cli_runtime(command)
     print(json.dumps({'referenceRuntime':'ready','reaVersion':'6.7.0','webInspectionCommand':True}))
     if '--browser' not in sys.argv:
         return
