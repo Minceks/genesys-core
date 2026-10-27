@@ -2005,7 +2005,13 @@ def _run_agent(
     if project_id != PROJECT_ID_DEFAULT:
         from .product_design import prepare_design
         report_progress('Identifying product type and design direction')
-        product_brief = prepare_design(workspace, prompt)
+        reference_provider=provider
+        if os.getenv('GENESYS_VISUAL_REVIEW_MODEL') or not callable(getattr(reference_provider,'review_images',None)):
+            try:
+                reference_provider=OpenAIProvider(model=os.getenv('GENESYS_VISUAL_REVIEW_MODEL') or None)
+            except RuntimeError:
+                reference_provider=None
+        product_brief = prepare_design(workspace, prompt, reference_provider)
         from .build_intent import replaces_product
         if replaces_product(prompt):
             replacement_project.set(project_id)

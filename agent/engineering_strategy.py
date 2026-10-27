@@ -9,6 +9,12 @@ Use engineeringStrategy and trendIntelligence in the saved brief. Ground any tre
 adaptation in dated relevant evidence and explain why it fits; choose zero when it
 does not. User requirements and explicit references take precedence over trends.
 Current discovery listings are signals, not proof that a visual style is trending.
+Observe actual rendered references through referenceAnalysis.visualUnderstanding.
+Translate its screenshot-grounded implementationPlan into original layout, typography,
+imagery, components and responsive behavior; titles alone are not visual knowledge.
+For game stills learn scene/HUD readability without copying storefront chrome or
+claiming motion, mobile gameplay or mechanics were observed. Review the built result
+against the chosen adaptation while preserving the user's actual product and scope.
 For targeted fixes preserve the product, theme, dependencies and saved data; do not
 redesign or expand scope because research changed. For full products compose an
 original identity and complete the selected end-to-end journey. Prioritize usable

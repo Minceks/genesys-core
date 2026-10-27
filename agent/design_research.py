@@ -14,7 +14,7 @@ REFERENCES = {
     'store': ['https://www.apple.com/store', 'https://www.nike.com/', 'https://www.awwwards.com/websites/e-commerce/'],
     'booking': ['https://calendly.com/', 'https://www.airbnb.com/'],
     'product': ['https://linear.app/', 'https://www.notion.com/', 'https://www.producthunt.com/feed'],
-    'website': ['https://linear.app/', 'https://www.awwwards.com/websites/'],
+    'website': ['https://www.apple.com/', 'https://www.awwwards.com/websites/'],
     'game': ['https://itch.io/games/new-and-popular', STEAM_CHART],
 }
 _cache = {}

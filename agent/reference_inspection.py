@@ -19,11 +19,18 @@ logger = logging.getLogger(__name__)
 ROOT = Path(__file__).resolve().parents[1]
 VERSION = 1
 METRICS_SCRIPT = """() => {
- const visible=e=>{const r=e.getBoundingClientRect();return r.width>0&&r.height>0&&r.top<innerHeight&&r.bottom>0&&getComputedStyle(e).visibility!=='hidden'};
+ const visible=e=>{const r=e.getBoundingClientRect();if(!(r.width>0&&r.height>0&&r.top<innerHeight&&r.bottom>0))return false;
+   for(let p=e;p;p=p.parentElement){const s=getComputedStyle(p);if(s.visibility==='hidden'||s.display==='none'||parseFloat(s.opacity)<.01)return false;}return true;};
  const rect=e=>{const r=e.getBoundingClientRect();return {x:Math.round(r.x),y:Math.round(r.y),width:Math.round(r.width),height:Math.round(r.height)}};
  const heading=document.querySelector('h1');const style=heading&&getComputedStyle(heading);
  const media=[...document.querySelectorAll('img,video,canvas,svg')].filter(visible).slice(0,12).map(e=>({tag:e.tagName.toLowerCase(),...rect(e),loaded:e.tagName==='IMG'?e.complete&&e.naturalWidth>0:true}));
- return {viewport:{width:innerWidth,height:innerHeight},documentWidth:document.documentElement.scrollWidth,
+ const content=[...document.querySelectorAll('h1,h2,p,img,video,canvas,svg,input,textarea')].some(e=>{
+   if(e.closest('nav')||!visible(e))return false;
+   const r=e.getBoundingClientRect();
+   if(e.closest('header')&&['H1','H2','P'].includes(e.tagName)&&r.height<40)return false;
+   return ['IMG','VIDEO','CANVAS','svg'].includes(e.tagName)?r.width>=160&&r.height>=100&&(e.tagName!=='IMG'||e.complete&&e.naturalWidth>0):!!(e.textContent.trim()||e.getAttribute('aria-label')||e.placeholder);
+ });
+ return {viewport:{width:innerWidth,height:innerHeight},renderedContent:content,documentWidth:document.documentElement.scrollWidth,
  title:document.title.slice(0,120),headings:[...document.querySelectorAll('h1,h2')].slice(0,10).map(e=>({level:e.tagName,text:e.textContent.trim().slice(0,100)})),
  primaryHeading:heading?{...rect(heading),fontSize:parseFloat(style.fontSize),fontFamily:style.fontFamily.slice(0,120),lineHeight:style.lineHeight,color:style.color}:null,
  background:getComputedStyle(document.body).backgroundColor,
@@ -165,6 +172,11 @@ def inspect_reference(url):
             for name,width,height in [('desktop',1280,800),('phone',390,844)]:
                 page.set_viewport_size({'width':width,'height':height});page.wait_for_timeout(150)
                 metrics=page.evaluate(METRICS_SCRIPT)
+                if not metrics['renderedContent']:
+                    page.wait_for_timeout(1500)
+                    metrics=page.evaluate(METRICS_SCRIPT)
+                if not metrics['renderedContent']:
+                    raise ValueError('Reference did not render usable design evidence beyond its navigation')
                 metrics['interactionStructure']=page.evaluate(STRUCTURE_SCRIPT)
                 # Challenges are not usable design evidence. Do not bypass them.
                 if re.search(r'just a moment|access denied|verify you are human|attention required',metrics['title'],re.I):
@@ -172,7 +184,13 @@ def inspect_reference(url):
                 if not metrics['headings'] and not metrics['navigation'] and not any(item['loaded'] for item in metrics['media']):
                     raise ValueError('Reference did not render usable design evidence')
                 evidence.append(metrics)
-                png=page.screenshot(type='png',animations='disabled',timeout=4000)
+                from .visual_capture import capture_design_sheet
+                try:
+                    png,samples=capture_design_sheet(page,image_format='png')
+                    metrics['visualSamples']=samples
+                except ValueError:
+                    png=page.screenshot(type='png',animations='disabled',timeout=4000)
+                    metrics['visualSamples']=[{'scrollY':0,'width':width,'height':height}]
                 if len(png)<=2_000_000:captures[name]=png
             session=context.new_cdp_session(page)
             target=session.send('Target.getTargetInfo')['targetInfo']['targetId'];session.detach()
@@ -187,28 +205,52 @@ def inspect_reference(url):
             context.close();browser.close()
 
 
-def prepare_reference(workspace,prompt,brief,previous=None,redesign=False):
+def prepare_reference(workspace,prompt,brief,previous=None,redesign=False,vision_provider=None):
     explicit=requested_references(prompt)
     old=(previous or {}).get('referenceAnalysis')
     if old and not explicit and not redesign:
         return old
     if not explicit and previous and not redesign:
         return None
-    sources=explicit or [item['url'] for item in brief.get('designResearch',{}).get('references',[]) if item.get('status')=='fetched' and not item.get('discoveryOnly')][:1]
-    if not sources or os.getenv('GENESYS_REFERENCE_INSPECTION','1')=='0':
+    from .reference_selection import visual_candidates, live_site_url, inspect_game_frames
+    explicit_game=bool(explicit and re.match(r'^https://store\.steampowered\.com/app/\d+/',explicit[0]))
+    game_media=brief.get('productType')=='game' and (not explicit or explicit_game)
+    sources=explicit or visual_candidates(prompt,brief)
+    if (not sources and not game_media) or os.getenv('GENESYS_REFERENCE_INSPECTION','1')=='0':
         return None
-    url=sources[0]
-    if old and old.get('requestedUrl')==redacted_url(url) and not redesign:
+    url=sources[0] if sources else 'https://store.steampowered.com/charts/mostplayed'
+    if old and old.get('requestedUrl')==redacted_url(url) and not redesign and (not game_media or old.get('evidenceKind')=='gameplay-media'):
         return old
     try:
         from .progress import report_progress
-        report_progress('Inspecting reference layout at desktop and phone sizes')
-        observation,captures=inspect_reference(url)
+        report_progress('Observing public game scene and HUD references' if game_media else 'Observing reference design at desktop and phone sizes')
+        if game_media:
+            observation,captures=inspect_game_frames(brief,source_url=explicit[0] if explicit_game else None)
+        else:
+            failure=None
+            for candidate in sources[:2]:
+                try:
+                    destination=live_site_url(candidate)
+                    observation,captures=inspect_reference(destination)
+                    break
+                except Exception as error:
+                    failure=error
+            else:
+                raise ValueError('No selected public interface could be rendered') from failure
+        from .reference_vision import understand_reference
+        try:
+            observation['visualUnderstanding']=understand_reference(observation,captures,brief.get('productType'),vision_provider)
+        except Exception as error:
+            logger.info('reference_vision_unavailable type=%s',type(error).__name__)
+            observation['visualUnderstanding']={'status':'unavailable','reason':'Screenshot interpretation could not complete; use only measured evidence.'}
         # Existing visual-evidence storage is bounded and owner-access controlled.
         from .visual_evidence import save_review
         stored=save_review(workspace.project_id, {'status':'success','snapshots':observation['viewports'],
             'kind':'reference','scope':observation['scope'],
-            'reference':{'url':observation['url'],'rea':observation['rea']}},captures)
+            'reference':{'url':observation['url'],'rea':observation['rea'],
+                         'evidenceKind':observation.get('evidenceKind','rendered-public-page'),
+                         'captureLabels':observation.get('captureLabels',{}),
+                         'visualUnderstanding':observation['visualUnderstanding']}},captures)
         observation['reviewId']=stored['id']
     except Exception as error:
         logger.info('reference_inspection_unavailable type=%s',type(error).__name__)

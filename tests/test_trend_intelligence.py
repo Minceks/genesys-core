@@ -189,7 +189,8 @@ def test_discovery_galleries_are_not_used_as_the_game_visual_reference(monkeypat
     from agent.reference_inspection import prepare_reference
     monkeypatch.setattr('agent.reference_inspection.inspect_reference',lambda *_:pytest.fail('A game listing is not a playable-scene reference'))
     brief={'designResearch':{'references':[{'url':'https://itch.io/games/new-and-popular','status':'fetched','discoveryOnly':True}]}}
-    assert prepare_reference(SimpleNamespace(),'Create a playable puzzle game',brief) is None
+    reference=prepare_reference(SimpleNamespace(),'Create a playable puzzle game',brief)
+    assert reference is None or reference['status']=='unavailable'
 
 
 def test_strategy_and_evidence_reach_specification_and_review(monkeypatch):

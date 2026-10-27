@@ -429,7 +429,8 @@ class BrowserSession:
                 for viewport in ('desktop','phone'):
                     path=image_path(self.project_id,reference['reviewId'],viewport)
                     if path and path.stat().st_size<=2_000_000:
-                        vision_images.append(('reference-'+viewport,path.read_bytes()))
+                        label=(reference.get('captureLabels') or {}).get(viewport,'reference-'+viewport)
+                        vision_images.append((label,path.read_bytes()))
             result['visualReview'],result['visualPolishRequested']=vision_loop.run(
                 get_workspace(self.project_id).build_fingerprint(),
                 lambda previous:review_screenshots(OpenAIProvider(model=os.getenv('GENESYS_VISUAL_REVIEW_MODEL') or None),

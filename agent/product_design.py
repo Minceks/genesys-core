@@ -73,7 +73,7 @@ def presentation_contract(product):
                 'Use tables/forms where they help; a playable game needs a scene, not a marketing hero.'}
 
 
-def prepare_design(workspace, prompt):
+def prepare_design(workspace, prompt, vision_provider=None):
     from .build_intent import replaces_product
     whole_product = replaces_product(prompt)
     redesign = requests_redesign(prompt) or trend_refresh_requested(prompt)
@@ -184,7 +184,7 @@ def prepare_design(workspace, prompt):
     from .experience_blueprint import experience_blueprint
     brief['experienceBlueprint'] = experience_blueprint(brief)
     from .reference_inspection import prepare_reference
-    reference = prepare_reference(workspace, prompt, brief, previous if retain else None, redesign)
+    reference = prepare_reference(workspace, prompt, brief, previous if retain else None, redesign,vision_provider=vision_provider)
     if reference:
         brief['referenceAnalysis'] = reference
     brief['qualityStandard'] = {

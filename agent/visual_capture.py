@@ -2,7 +2,7 @@
 import base64
 
 
-def capture_design_sheet(page):
+def capture_design_sheet(page, image_format='jpeg'):
     """Keep text readable without sending a very tall page as a tiny thumbnail.
 
     Sample up to three scroll positions without clicking controls or changing routes.
@@ -45,8 +45,10 @@ def capture_design_sheet(page):
         sheet = sheet_context.new_page()
         sheet.set_content('<html><body style="margin:0">' + ''.join(panels) + '</body></html>')
         sheet.locator('img').evaluate_all('(imgs) => Promise.all(imgs.map(img=>img.decode()))')
-        for quality in (70, 45, 25):
-            data = sheet.screenshot(type='jpeg', quality=quality, animations='disabled')
+        for quality in ((70, 45, 25) if image_format=='jpeg' else (None,)):
+            options={'type':image_format,'animations':'disabled'}
+            if quality is not None:options['quality']=quality
+            data = sheet.screenshot(**options)
             if len(data) <= 2_000_000:
                 return data, samples
         raise ValueError('Design contact sheet exceeds bounded image allowance')

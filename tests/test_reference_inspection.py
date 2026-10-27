@@ -137,6 +137,14 @@ def test_blank_script_shell_is_not_reported_as_observed_design(monkeypatch):
         inspection.inspect_reference('https://example.com/')
 
 
+def test_navigation_with_hidden_hero_is_not_usable_visual_evidence(monkeypatch):
+    monkeypatch.setattr(inspection,'public_addresses',lambda _:['93.184.216.34'])
+    html=b'<header><nav><a href="/">Home</a></nav></header><main style="opacity:0"><h1>Unrendered hero</h1></main>'
+    monkeypatch.setattr(inspection,'public_get',lambda *_args,**_kw:(200,{'Content-Type':'text/html'},html))
+    with pytest.raises(ValueError,match='beyond its navigation'):
+        inspection.inspect_reference('https://example.com/')
+
+
 def test_passive_structure_preserves_navigation_and_form_semantics_without_values(monkeypatch):
     html=b'''<html><head><title>Structure</title></head><body><main><h1>Studio</h1>
     <a href="/work?token=secret#private">Work</a><a href="https://other.test/private">Outside</a>
