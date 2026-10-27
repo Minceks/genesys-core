@@ -72,6 +72,7 @@ def diagnosable_failure(failure, sources, initial_text):
     name=spec.get('name','')
     if not isinstance(name,str) or not name.strip():return False
     if failure.get('targetResolved'):return True
+    if step.get('action') not in {'visible','absent'}:return False
     if name in initial_text:return True
     literal=re.compile(r'''["']'''+re.escape(name)+r'''["']|>\s*'''+re.escape(name)+r'''\s*<''')
     return any(isinstance(code,str) and literal.search(code) for code in (sources or {}).values())

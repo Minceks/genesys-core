@@ -622,7 +622,7 @@ def verify_functions(page, prompt, provider, attempt=0, feedback="", sources=Non
                 'unverified': placeholders, 'unverifiedCore': [], 'coverage': {},
                 'scope': 'Explicit placeholder handlers require application repair before verification.'}
     from playwright.sync_api import expect
-    from .progress import model_deadline
+    from .progress import model_deadline, model_request_scope
     browser_deadline=model_deadline.get() or (time.monotonic()+120)
     automation_unverified=set()
     max_checks=min(12,max(8,len([r for r in (contract or {}).get('requirements',[]) if r.get('scope')=='browser'])))
@@ -668,19 +668,21 @@ def verify_functions(page, prompt, provider, attempt=0, feedback="", sources=Non
                 'For a limitation checkNames MUST be empty. Use an explicit unverifiedReason only when automation truly '
                 'cannot prove the criterion; do not omit it or invent a passing check. Empty entries are allowed only for '
                 'independently preverified requirements. Visual and external criteria remain separate.')
-        raw = generate_plan([{'role':'system','content':PLAN_INSTRUCTIONS + contract_instruction + format_instruction + ('\nRepair the previous verification plan, not app code: '+feedback if feedback else '')},
-            {'role':'user','content':json.dumps({'originalRequest':prompt,
-                'preverifiedChecks':list(preverified), 'browserCurrentDate':page.evaluate('new Date().toLocaleDateString("en-CA")'),
-                'landmarks':page.evaluate("""() => [...document.querySelectorAll('nav,header,[role=navigation],[role=region],form')].map(e => ({role:e.getAttribute('role') || ({NAV:'navigation',HEADER:'banner',FORM:'form'}[e.tagName]),name:e.getAttribute('aria-label') || ''}))"""),
-                'buildSpecification':contract,
-                'untrustedRenderedText':snapshot,'untrustedControls':controls,
-                'observedNamedSurfaces': surface_targets(page),
-                'interactiveSurfaces':page.locator('canvas,svg[tabindex],[role=application]').evaluate_all('''els => els.slice(0,12).map(e => ({
-                    tag:e.tagName,name:e.getAttribute('aria-label'),tabIndex:e.tabIndex,
-                    width:e.getBoundingClientRect().width,height:e.getBoundingClientRect().height,
-                    intrinsicWidth:e.width,intrinsicHeight:e.height}))'''),
-                'accessibilitySnapshot': getattr(page.locator('body'), 'aria_snapshot', lambda: '')()[:12000],
-                'untrustedImplementation':sources or {}})}], []).text.strip()
+        # Reserve time for real browser actions and a bounded recovery plan.
+        with model_request_scope(min(browser_deadline - 30, time.monotonic() + (45 if _repair_round else 60))):
+            raw = generate_plan([{'role':'system','content':PLAN_INSTRUCTIONS + contract_instruction + format_instruction + ('\nRepair the previous verification plan, not app code: '+feedback if feedback else '')},
+                {'role':'user','content':json.dumps({'originalRequest':prompt,
+                    'preverifiedChecks':list(preverified), 'browserCurrentDate':page.evaluate('new Date().toLocaleDateString("en-CA")'),
+                    'landmarks':page.evaluate("""() => [...document.querySelectorAll('nav,header,[role=navigation],[role=region],form')].map(e => ({role:e.getAttribute('role') || ({NAV:'navigation',HEADER:'banner',FORM:'form'}[e.tagName]),name:e.getAttribute('aria-label') || ''}))"""),
+                    'buildSpecification':contract,
+                    'untrustedRenderedText':snapshot,'untrustedControls':controls,
+                    'observedNamedSurfaces': surface_targets(page),
+                    'interactiveSurfaces':page.locator('canvas,svg[tabindex],[role=application]').evaluate_all('''els => els.slice(0,12).map(e => ({
+                        tag:e.tagName,name:e.getAttribute('aria-label'),tabIndex:e.tabIndex,
+                        width:e.getBoundingClientRect().width,height:e.getBoundingClientRect().height,
+                        intrinsicWidth:e.width,intrinsicHeight:e.height}))'''),
+                    'accessibilitySnapshot': getattr(page.locator('body'), 'aria_snapshot', lambda: '')()[:12000],
+                    'untrustedImplementation':sources or {}})}], []).text.strip()
         raw = re.sub(r'^```(?:json)?\s*|\s*```$', '', raw)
         plan = json.loads(raw)
         if callable(structured):

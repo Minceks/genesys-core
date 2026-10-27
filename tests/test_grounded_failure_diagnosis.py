@@ -41,7 +41,7 @@ def test_spec_reads_nested_local_sources_without_escaping_src():
             assert path.startswith('src/') and '..' not in path.split('/')
             return {'content':files.get(path,'')}
     assert implementation_sources(Workspace())==files
-    assert PLANNING_POLICY_VERSION==4
+    assert PLANNING_POLICY_VERSION==5
 
 def test_unobserved_selector_does_not_invoke_application_diagnosis():
     import json
@@ -65,3 +65,63 @@ def test_unobserved_selector_does_not_invoke_application_diagnosis():
             assert result['issues']==[] and result['unverifiedCore']
             assert not result['coverage']['passedIds']
         finally:browser.close()
+
+
+def test_edit_contract_rejects_invented_labels_but_allows_requested_new_controls():
+    import pytest
+    from agent.build_spec import validate_edit_labels
+    source={'src/App.jsx':'<button>Quit to menu</button><span>HP</span>'}
+    spec={'requirements':[{'id':'R1','scope':'browser','acceptance':"Click 'Exit to Title' and toggle 'Save Progression'."}]}
+    with pytest.raises(ValueError,match='invented control/label'):
+        validate_edit_labels(spec,source,'Improve the UI')
+    assert validate_edit_labels(spec,source,'Add Exit to Title and Save Progression controls')==spec
+    spec['requirements'][0]['acceptance']="Click 'Quit to menu' and read 'HP'."
+    assert validate_edit_labels(spec,source,'Improve the UI')==spec
+
+def test_planner_reserves_time_for_browser_execution_and_restores_deadline():
+    import json,time
+    from types import SimpleNamespace
+    from playwright.sync_api import sync_playwright
+    from agent.functional_verification import verify_functions
+    from agent.progress import model_deadline,model_request_scope
+    plan={'requirements':[{'id':'R1','name':'Ready state'}],'checks':[{'name':'Ready state','covers':['R1'],'steps':[{'action':'visible','target':{'by':'text','name':'Ready','exact':True}}]}]}
+    class Provider:
+        def generate(self,*_):
+            assert 0 < model_deadline.get()-time.monotonic() <= 60
+            return SimpleNamespace(text=json.dumps(plan))
+    with sync_playwright() as p:
+        browser=p.chromium.launch()
+        try:
+            page=browser.new_page()
+            page.route('https://fixture.test/**',lambda route:route.fulfill(content_type='text/html',body='<p>Ready</p>'))
+            page.goto('https://fixture.test/')
+            outer=time.monotonic()+240
+            with model_request_scope(outer):
+                result=verify_functions(page,'Show Ready',Provider(),attempt=1)
+                assert model_deadline.get()==outer
+            assert result['coverage']['passedIds']==['R1']
+        finally:browser.close()
+
+
+def test_missing_style_target_is_a_selector_failure_even_if_named_in_source():
+    failure={'step':{'action':'style','target':{'name':'Start run'}},'executedActions':2,'error':'element(s) not found','targetResolved':False}
+    assert not diagnosable_failure(failure,{'src/App.jsx':'<button>Start run</button>'},'Start run')
+
+
+def test_stale_contract_is_not_fed_back_as_authority_on_visual_retry():
+    import hashlib,json
+    from types import SimpleNamespace
+    from agent.build_spec import prepare_build_spec
+    prompt='Improve game UI'
+    stale={'version':2,'planningPolicyVersion':4,'requestHash':hashlib.sha256(prompt.encode()).hexdigest(),'requirements':[{'id':'R1','name':'Invented save','scope':'browser','acceptance':"Toggle 'Save Progression'."}]}
+    good={'pages':['Home'],'requirements':[{'id':'R1','name':'Quit','scope':'browser','acceptance':"Click 'Quit' and return home."}],'assetRules':[],'designIntent':'Readable game UI'}
+    class Workspace:
+        def read_file(self,path):return {'content':json.dumps(stale) if path=='.genesys-build-spec.json' else '<button>Quit</button>'}
+        def write_file(self,*_):return {'status':'success'}
+    class Provider:
+        def generate(self,messages,*_):
+            context=json.loads(messages[-1]['content'])
+            assert context['previousSpecification']=={}
+            assert context['implementationSources']['src/App.jsx']=='<button>Quit</button>'
+            return SimpleNamespace(text=json.dumps(good))
+    assert prepare_build_spec(Workspace(),prompt,{'buildIntent':'edit-product'},Provider())['planningPolicyVersion']==5
