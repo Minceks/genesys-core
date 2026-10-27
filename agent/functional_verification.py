@@ -4,6 +4,7 @@ import logging
 import re
 import time
 from urllib.parse import urlsplit, urlunsplit
+from .observed_targets import surface_targets, exact_label_target, diagnosable_failure
 from .verification_schema import READ_ONLY_ATTRIBUTES
 from .verification_input import INPUT_ACTIONS, perform_input, validate_input_budget, validate_number, assert_number
 from .verification_environment import STYLES, validate_media, media_state, emulate_media
@@ -17,6 +18,12 @@ def verification_location(page):
 
 PLAN_INSTRUCTIONS = '''You are a browser verification planner. Derive requirements from the
 original user request, not only from what the implementation happens to provide.
+Use observedNamedSurfaces for exact labels of canvas, groups and panels. An aria-label
+is a by=label target, not visible text; a canvas is not a textbox or an image control.
+Do not invent synonyms for controls. Inspect supplied source for screen transitions.
+When acceptance permits alternatives (such as OS OR in-app reduced motion), verify
+one supported alternative; never require both or invent a setting. Do not require
+hidden hooks or localStorage injection for normal gameplay completion.
 For a redesign request, verify existing user-facing workflows as regression checks.
 Subjective beauty, 'different UI', visual style and design quality belong to separate
 visual review, never functional requirements or unverifiedCore. Report subjective
@@ -667,6 +674,7 @@ def verify_functions(page, prompt, provider, attempt=0, feedback="", sources=Non
                 'landmarks':page.evaluate("""() => [...document.querySelectorAll('nav,header,[role=navigation],[role=region],form')].map(e => ({role:e.getAttribute('role') || ({NAV:'navigation',HEADER:'banner',FORM:'form'}[e.tagName]),name:e.getAttribute('aria-label') || ''}))"""),
                 'buildSpecification':contract,
                 'untrustedRenderedText':snapshot,'untrustedControls':controls,
+                'observedNamedSurfaces': surface_targets(page),
                 'interactiveSurfaces':page.locator('canvas,svg[tabindex],[role=application]').evaluate_all('''els => els.slice(0,12).map(e => ({
                     tag:e.tagName,name:e.getAttribute('aria-label'),tabIndex:e.tabIndex,
                     width:e.getBoundingClientRect().width,height:e.getBoundingClientRect().height,
@@ -942,6 +950,8 @@ def verify_functions(page, prompt, provider, attempt=0, feedback="", sources=Non
             continue
         name = str(check.get('name', 'Requested behavior'))[:180]
         step = None
+        executed_actions=0
+        locator=None
         reload_observations = []
         try:
             if check_index and check.get('independent') is True:
@@ -954,6 +964,7 @@ def verify_functions(page, prompt, provider, attempt=0, feedback="", sources=Non
             asserted = False
             closed_overlay_assertion = None
             for step in steps:
+                locator = None
                 if time.monotonic()>=browser_deadline:
                     raise ValueError('Invalid verification execution: available time budget expired; source is preserved')
                 action = step.get('action')
@@ -974,6 +985,7 @@ def verify_functions(page, prompt, provider, attempt=0, feedback="", sources=Non
                     reload_observations.append({'before': before_reload,
                         'after': {'url': verification_location(page), 'headings': page.locator('h1,h2').all_text_contents()[:8]}})
                     asserted = False
+                    executed_actions+=1
                     continue
                 if action in {'newTabValue', 'newTabText'}:
                     # A new page in the same isolated context shares localStorage,
@@ -1001,6 +1013,7 @@ def verify_functions(page, prompt, provider, attempt=0, feedback="", sources=Non
                     continue
                 if action == 'key':
                     perform_input(page,None,step)
+                    executed_actions+=1
                     asserted=False
                     continue
                 specification = step.get('target')
@@ -1022,8 +1035,14 @@ def verify_functions(page, prompt, provider, attempt=0, feedback="", sources=Non
                     locator = observed_control_target(page, specification) if action in {'click', 'rememberText', 'sameText'} else None
                     if locator is None:
                         raise
+                if locator.count()==0:
+                    correction=exact_label_target(page,specification,action,target)
+                    if correction:
+                        locator,specification=correction
+                        step['target']=specification
                 if action in INPUT_ACTIONS:
                     perform_input(page, locator, step)
+                    executed_actions+=1
                     asserted = False
                     continue
                 if action in {'click', 'rememberText', 'sameText'} and locator.count() != 1:
@@ -1116,6 +1135,7 @@ def verify_functions(page, prompt, provider, attempt=0, feedback="", sources=Non
                             raise ValueError('Keyboard typing checks require a free-form text field; use fill for dates/numbers.')
                         locator.fill('', timeout=3000)
                         locator.press_sequentially(value, delay=10, timeout=10000)
+                        executed_actions += 1
                         expect(locator).to_have_value(value, timeout=3000)
                         expect(locator).to_be_focused(timeout=3000)
                     if action == 'select': locator.select_option(str(step.get('value', ''))[:200], timeout=3000)
@@ -1139,6 +1159,7 @@ def verify_functions(page, prompt, provider, attempt=0, feedback="", sources=Non
                         locator.click(timeout=3000)
                         # Native validation can be the expected outcome of a
                         # negative check; the following assertion decides this.
+                    if action != 'type': executed_actions += 1
                     asserted = False
                     if action == 'click' and container is not None:
                         deadline = time.monotonic() + 3
@@ -1183,6 +1204,9 @@ def verify_functions(page, prompt, provider, attempt=0, feedback="", sources=Non
                 try:
                     failure_observations.append({
                         'check': name, 'step': step, 'error': detail[:400],
+                        'executedActions':executed_actions,
+                        'targetResolved':bool(locator is not None and locator.count()==1),
+                        'namedSurfaces':surface_targets(page),
                         'url': verification_location(page), 'reloadTransitions': reload_observations[-3:],
                         'accessibilitySnapshot': page.locator('body').aria_snapshot()[:5000],
                     })
@@ -1268,7 +1292,11 @@ def verify_functions(page, prompt, provider, attempt=0, feedback="", sources=Non
         core.extend('Verification execution failed: '+issue for issue in issues)
         issues = []
         core.append('Verification time budget ended before failure diagnosis; source is preserved.')
-    if (issues or core) and not only_automation_gaps and time.monotonic() < browser_deadline - 5 and plan.get('planner') not in {'observed-local-cart-v1', 'observed-local-workflow-v1', 'observed-local-storefront-v1'}:
+    diagnosis_grounded=any(diagnosable_failure(f,sources,snapshot) for f in failure_observations) or bool(passed and contract and declared_browser_gaps(plan,contract))
+    if (issues or core) and not diagnosis_grounded and plan.get('planner') not in {'observed-local-cart-v1', 'observed-local-workflow-v1', 'observed-local-storefront-v1'}:
+        core.extend('Verification execution failed: '+issue for issue in issues)
+        issues=[]
+    if (issues or core) and diagnosis_grounded and not only_automation_gaps and time.monotonic() < browser_deadline - 5 and plan.get('planner') not in {'observed-local-cart-v1', 'observed-local-workflow-v1', 'observed-local-storefront-v1'}:
         # Failed assertions alone do not establish an app defect. Ask for a
         # separate diagnosis grounded in executed actions and implementation.
         try:
@@ -1307,6 +1335,12 @@ def verify_functions(page, prompt, provider, attempt=0, feedback="", sources=Non
         else:
             # Uncovered requirements caused by the confirmed app defect should
             # be repaired, rather than returning before the repair loop runs.
+            grounded_checks = {f['check'] for f in failure_observations
+                               if diagnosable_failure(f, sources, snapshot)}
+            ungrounded_issues = [issue for issue in issues
+                                if not any(issue.startswith(name + ': ') for name in grounded_checks)]
+            core.extend('Verification execution failed: ' + issue for issue in ungrounded_issues)
+            issues = [issue for issue in issues if issue not in ungrounded_issues]
             logging.getLogger(__name__).info('confirmed_application_failure %s', str(verdict['evidence'])[:1500])
             if not issues and contract and (set(declared_browser_gaps(plan, contract))-automation_unverified):
                 # The source/DOM diagnosis confirmed a missing requested browser

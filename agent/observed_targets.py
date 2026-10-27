@@ -40,3 +40,38 @@ def active_dialog_target(page, specification, resolve):
         return None
     found = resolve(visible[0], specification)
     return found if found.count() == 1 and found.is_visible() else None
+
+
+def exact_label_target(page, specification, action, resolve):
+    """Correct a planner's method/role only for the exact same named surface."""
+    if not isinstance(specification,dict) or not str(specification.get('name','')).strip():return None
+    if action not in {'visible','tabTo','hold','press','pointer'}:return None
+    candidate=dict(specification,by='label');candidate.pop('role',None)
+    try:found=resolve(page,candidate)
+    except ValueError:return None
+    if found.count()!=1 or not found.is_visible():return None
+    if action!='visible' and found.evaluate("e => e.tagName!=='CANVAS' && e.getAttribute('role')!=='group'"):
+        return None
+    return found,candidate
+
+
+def surface_targets(page):
+    """Live names/methods, including canvas and labelled panels omitted by ARIA trees."""
+    return page.locator('[aria-label]').evaluate_all('''els => els.filter(e=>{
+      const r=e.getBoundingClientRect();return r.width>0&&r.height>0&&!e.closest('[inert],[aria-hidden="true"]');
+    }).slice(0,40).map(e=>({by:'label',name:e.getAttribute('aria-label'),tag:e.tagName.toLowerCase(),role:e.getAttribute('role')}))''')
+
+
+def diagnosable_failure(failure, sources, initial_text):
+    """A guessed/missing locator or capture cannot justify editing application code."""
+    step=failure.get('step') or {};spec=step.get('target') or {}
+    if step.get('action') not in {'type','visible','absent','value','attribute','invalid','sameText','focused','newTabValue','newTabText','number','style'}:
+        return False
+    if failure.get('executedActions',0)<1:return False
+    if any(word in failure.get('error','') for word in ('Invalid verification','Unsupported','strict mode violation')):return False
+    name=spec.get('name','')
+    if not isinstance(name,str) or not name.strip():return False
+    if failure.get('targetResolved'):return True
+    if name in initial_text:return True
+    literal=re.compile(r'''["']'''+re.escape(name)+r'''["']|>\s*'''+re.escape(name)+r'''\s*<''')
+    return any(isinstance(code,str) and literal.search(code) for code in (sources or {}).values())
