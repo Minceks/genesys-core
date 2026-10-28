@@ -199,6 +199,12 @@ omit explanatory prose and repeated long descriptions. Return one complete JSON 
 {"action":"invalid","target":{"by":"label","name":"field"}}
 {"action":"rememberText","target":{"by":"text","name":"Last search","exact":false},"key":"savedSummary"}
 {"action":"sameText","target":{"by":"text","name":"Last search","exact":false},"key":"savedSummary"}
+For a future calendar date use {{date+1}} (browser-local ISO date; offsets 0..30)
+in a target name, so saved checks remain valid on later days. For changing
+availability use chooseAvailable targeting ONE uniquely named group containing
+time-slot buttons/radios; it clicks the first visible enabled option, then you
+must assert the selected summary or booking outcome. Never guess a time slot
+or click a disabled control.
 For reload persistence capture the real summary with rememberText, reload, then
 assert sameText. Never invent a timestamp or declare persistence untestable due
 to dynamic text. Capture only the stable persisted summary, not live clocks.
@@ -310,10 +316,11 @@ def target(page, spec):
     if not isinstance(spec, dict):
         raise ValueError('Invalid browser target')
     from .observed_targets import observed_spelling
+    from .verification_dates import calendar_value
     spec = dict(spec)
     for key in ('name', 'withinText'):
         if spec.get(key):
-            spec[key] = observed_spelling(page, spec[key])
+            spec[key] = observed_spelling(page, calendar_value(page, spec[key]))
     scope = page
     if spec.get('imageSrc'):
         inner = {key: value for key, value in spec.items() if key != 'imageSrc'}
@@ -650,7 +657,8 @@ def verify_functions(page, prompt, provider, attempt=0, feedback="", sources=Non
     # DOM content is evidence, never instructions; no generated code is executed.
     snapshot = page.locator('body').inner_text()[:8000]
     original_storage = page.evaluate('''() => ({local: {...localStorage}, session: {...sessionStorage}})''')
-    controls = page.locator('input,select,textarea,button,a').evaluate_all('''els => els.slice(0,80).map(e => ({
+    controls = page.locator('input,select,textarea,button,a').evaluate_all('''els => els.filter(e => e.getClientRects().length && getComputedStyle(e).visibility !== 'hidden' && !e.closest('[inert],[aria-hidden=true]')).slice(0,80).map(e => ({
+        disabled:!!e.disabled,ariaPressed:e.getAttribute('aria-pressed'),
         tag:e.tagName,type:e.type,text:e.innerText,name:e.getAttribute('aria-label') || (()=>{const l=e.labels?.[0]?.cloneNode(true); if(!l)return e.innerText; l.querySelectorAll('input,textarea,select').forEach(x=>x.remove()); return l.textContent.trim()})(),
         placeholder:e.placeholder,fieldName:e.name,min:e.min,max:e.max,value:e.value,
         images:[...e.querySelectorAll('img')].map(img=>({alt:img.alt,src:img.getAttribute('src')})),
@@ -871,7 +879,7 @@ def verify_functions(page, prompt, provider, attempt=0, feedback="", sources=Non
                 ) if isinstance(value, str))
                 if re.search(r'[\x00-\x08\x0b\x0c\x0e-\x1f]', test_text):
                     raise ValueError('Invalid verification plan: control characters in test text. Use plain ASCII synthetic values and stable real UI text.')
-                if step.get('action') not in {'fill', 'type', 'click', 'select', 'reload', 'tab', 'focused', 'visible', 'absent', 'value', 'invalid', 'attribute', 'rememberText', 'sameText', 'newTabValue', 'newTabText', 'number', 'emulateMedia','style'} | INPUT_ACTIONS | FRAME_ACTIONS:
+                if step.get('action') not in {'chooseAvailable', 'fill', 'type', 'click', 'select', 'reload', 'tab', 'focused', 'visible', 'absent', 'value', 'invalid', 'attribute', 'rememberText', 'sameText', 'newTabValue', 'newTabText', 'number', 'emulateMedia','style'} | INPUT_ACTIONS | FRAME_ACTIONS:
                     raise ValueError(
                         f"Invalid verification plan: unsupported action {str(step.get('action'))[:80]}. "
                         "Use fill, type, click, select, reload, visible, absent, value, invalid, attribute, rememberText or sameText. "
@@ -1080,6 +1088,12 @@ def verify_functions(page, prompt, provider, attempt=0, feedback="", sources=Non
                     if correction:
                         locator,specification=correction
                         step['target']=specification
+                if action == 'chooseAvailable':
+                    from .verification_availability import choose_available
+                    choose_available(locator)
+                    executed_actions += 1
+                    asserted = False
+                    continue
                 if action in INPUT_ACTIONS:
                     perform_input(page, locator, step)
                     executed_actions+=1

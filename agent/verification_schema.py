@@ -20,7 +20,7 @@ TARGET_FIELDS = {'name': TEXT, 'exact': {'type': 'boolean'},
                  'withinText': {'type': ['string', 'null']}, 'withinRole': {'anyOf': [ref('scope'), {'type': 'null'}]}}
 TARGET = {'anyOf': [obj({'by': {'type': 'string', 'enum': ['role']},
     'role': {'type': 'string', 'enum': ['button', 'link', 'heading', 'img', 'dialog', 'alertdialog',
-        'alert', 'status', 'navigation', 'banner', 'region', 'form', 'article', 'group', 'list',
+        'alert', 'status', 'navigation', 'banner', 'region', 'form', 'article', 'group', 'radiogroup', 'list',
         'listitem', 'row', 'textbox', 'spinbutton', 'combobox', 'checkbox', 'radio', 'option']},
     **TARGET_FIELDS, 'name': NONEMPTY}), obj({'by': {'type': 'string', 'enum': ['label', 'text', 'placeholder', 'field']}, **TARGET_FIELDS, 'name': NONEMPTY})]}
 
@@ -47,7 +47,7 @@ ASSERTION = {'anyOf': [step(['frameChanged'],threshold={'type':'number','minimum
                        step(['number'], comparison={'type':'string','enum':['gt','gte','lt','lte','eq']}, value={'type':'number'}),
                        step(['sameText'], key=NONEMPTY), step(['attribute'],
                        attribute={'type': 'string', 'enum': READ_ONLY_ATTRIBUTES}, value=TEXT)]}
-STEP = {'anyOf': [*ASSERTION['anyOf'], step(['fill', 'type', 'select'], value=TEXT),
+STEP = {'anyOf': [step(['chooseAvailable']), *ASSERTION['anyOf'], step(['fill', 'type', 'select'], value=TEXT),
                    obj({'action':{'type':'string','enum':['emulateMedia']},
                         'reducedMotion':{'type':['string','null'],'enum':['reduce','no-preference',None]},
                         'colorScheme':{'type':['string','null'],'enum':['light','dark',None]}}),

@@ -34,6 +34,11 @@ def verification_scopes(spec):
     spec = json.loads(json.dumps(spec))
     for item in spec.get('requirements', []):
         acceptance = item.get('acceptance', '')
+        if (item.get('scope') == 'external'
+                and re.search(r'\b(?:creates?|saves?|records?)\s+(?:a\s+|the\s+)?local\s+(?:demo\s+)?(?:reservation|booking|order)\b', acceptance, re.I)
+                and re.search(r'\b(?:reload|persist|local.only)\b', acceptance, re.I)
+                and not re.search(r'\b(?:real payment|external provider|redirects? to)\b', acceptance, re.I)):
+            item['scope'] = 'browser'
         if (item.get('scope') == 'browser'
                 and re.search(r'\bexternal\s+(?:payment|order.processing)\b', acceptance, re.I)
                 and re.search(r'\b(?:is redirected to|redirects? to|real payment)\b', acceptance, re.I)):
