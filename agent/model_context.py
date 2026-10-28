@@ -77,7 +77,7 @@ def bounded_messages(messages, tools, limit=None):
     model_request_timeout(120)
     # Token estimates include schemas and envelope overhead. Provider tokenizers
     # differ; retain a conservative margin rather than claiming billing accuracy.
-    cap = min(48000, max(2000, int(os.getenv('GENESYS_INPUT_TOKEN_LIMIT', '24000'))))
+    cap = min(48000, max(2000, int(os.getenv('GENESYS_INPUT_TOKEN_LIMIT', '48000'))))
     if limit is not None:
         cap = min(cap, limit)
     enc = encoding()

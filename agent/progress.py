@@ -6,6 +6,7 @@ import time
 
 progress_callback = ContextVar("genesys_progress_callback", default=None)
 model_deadline = ContextVar('genesys_model_deadline', default=None)
+REVIEW_RESERVE_SECONDS = 180
 
 
 class ModelDeadlineExceeded(RuntimeError):
@@ -31,7 +32,7 @@ def model_request_timeout(default):
 
 def execution_timeout(configured, background=False):
     if background:
-        return min(900, max(60, int(os.getenv('GENESYS_BACKGROUND_TIMEOUT_SECONDS', '600'))))
+        return min(900, max(60, int(os.getenv('GENESYS_BACKGROUND_TIMEOUT_SECONDS', '900'))))
     return min(configured, 240)
 
 
@@ -39,3 +40,10 @@ def report_progress(stage: str) -> None:
     callback = progress_callback.get()
     if callback is not None:
         callback(stage)
+
+
+def draft_stage_deadline(deadline):
+    """Initial drafts cannot spend the compilation, repair and review reserve."""
+    now = time.monotonic()
+    reserve = min(300, max(120, (deadline-now)*.4))
+    return min(now+360, deadline-reserve)

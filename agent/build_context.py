@@ -29,8 +29,9 @@ class InspectionBudget:
 
 
 def verification_due(step, implementation_limit, changed, ready, repairing, remaining_seconds):
+    from .progress import REVIEW_RESERVE_SECONDS
     return (changed and not ready and not repairing
-            and (step > implementation_limit or remaining_seconds <= 60))
+            and (step > implementation_limit or remaining_seconds <= REVIEW_RESERVE_SECONDS))
 
 
 def transient_provider_error(error):

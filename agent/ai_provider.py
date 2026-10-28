@@ -1,5 +1,6 @@
 from .user_allowance import record as record_model_usage
 import json
+import logging
 import os
 import re
 import time
@@ -1507,12 +1508,12 @@ class OpenAIProvider(AIProvider):
         bounded_messages([{'role':'system','content':instruction},{'role':'user','content':parts[0]['text']}],[])
         reserve_model_budget(6000*len(images))
         options=dict(model=self.model,messages=[{'role':'system','content':instruction},{'role':'user','content':parts}],
-            max_completion_tokens=2400,timeout=60,
+            max_completion_tokens=6000,timeout=90,
             response_format={'type':'json_schema','json_schema':{'name':'visual_design_review','strict':True,'schema':schema}})
         if self.model.startswith(('gpt-5','gpt-6','o3','o4')):
-            options['reasoning_effort']='low'
+            options['reasoning_effort']=os.getenv('GENESYS_REVIEW_REASONING_EFFORT','medium')
         from .progress import model_request_timeout
-        options['timeout'] = model_request_timeout(60)
+        options['timeout'] = model_request_timeout(90)
         response=self.client.chat.completions.create(**options)
         record_model_usage(response)
         if not response.choices or response.choices[0].finish_reason!='stop' or not response.choices[0].message.content:
@@ -1540,29 +1541,41 @@ class OpenAIProvider(AIProvider):
                                  'arguments': call['function']['arguments']}}
                     for call in message['tool_calls']]
             prepared.append(item)
-        options = dict(model=self.model, messages=prepared,
-                       timeout=model_request_timeout(120 if response_schema is not None else 90),
-                       max_completion_tokens=min(12000, max(2000, int(os.getenv('GENESYS_OUTPUT_TOKEN_LIMIT', '6000')))))
+        # Full product drafts/reviews use the stronger design tier. Keep tool
+        # execution and constrained verification planning on their compatible tier.
+        design_stage = (not tools and response_schema is None and prepared
+                        and prepared[0]['role'] == 'system'
+                        and str(prepared[0]['content']).startswith('DEFAULT BUILD STANDARD:'))
+        request_model = os.getenv('GENESYS_DESIGN_MODEL', 'gpt-5.4') if design_stage else self.model
+        options = dict(model=request_model, messages=prepared,
+                       timeout=model_request_timeout(120 if response_schema is not None else 180),
+                       max_completion_tokens=min(24000, max(2000, int(os.getenv('GENESYS_OUTPUT_TOKEN_LIMIT', '12000')))))
         if response_schema is not None:
             options['response_format'] = {'type': 'json_schema', 'json_schema': {
                 'name': 'browser_verification_plan', 'strict': True, 'schema': response_schema}}
         elif json_response_requested(prepared, tools):
             options['response_format'] = {'type': 'json_object'}
-        if self.model.startswith(('gpt-5', 'gpt-6', 'o3', 'o4')):
-            options['reasoning_effort'] = 'low'
+        if request_model.startswith(('gpt-5', 'gpt-6', 'o3', 'o4')):
+            options['reasoning_effort'] = os.getenv('GENESYS_REASONING_EFFORT','medium')
         if tools:
             options.update(tools=tools, tool_choice='auto', parallel_tool_calls=True)
         # A length limit is recoverable. Discard the incomplete response,
         # then regenerate a smaller atomic edit with a bounded larger allowance.
         ceiling = min(24000, max(options['max_completion_tokens'],
-                      int(os.getenv('GENESYS_OUTPUT_TOKEN_CEILING', '12000'))))
+                      int(os.getenv('GENESYS_OUTPUT_TOKEN_CEILING', '24000'))))
         for attempt in range(2):
-            options['timeout'] = model_request_timeout(120 if response_schema is not None else 90)
+            options['timeout'] = model_request_timeout(120 if response_schema is not None else 180)
+            logging.getLogger(__name__).info(
+                'openai_request phase=%s model=%s reasoning=%s output_limit=%s timeout_seconds=%.1f',
+                'design' if design_stage else 'verification' if response_schema is not None else 'tools' if tools else 'text',
+                request_model, options.get('reasoning_effort','default'), options['max_completion_tokens'], options['timeout'])
             response = self.client.chat.completions.create(**options)
             record_model_usage(response)
             if not response.choices:
                 raise RuntimeError('OpenAI returned no completion.')
             choice = response.choices[0]
+            logging.getLogger(__name__).info('openai_response model=%s finish_reason=%s completion_tokens=%s',
+                request_model, choice.finish_reason, getattr(getattr(response,'usage',None),'completion_tokens',None))
             if choice.finish_reason != 'length':
                 break
             if attempt == 1:

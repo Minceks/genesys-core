@@ -52,8 +52,8 @@ def normalize_owned_files(files, paths):
 def review_draft(files, plan, source, provider):
     if not files or any(not isinstance(code,str) or not code.strip() for code in files.values()):
         raise ValueError('Draft review requires complete nonempty source files')
-    if sum(len(code) for code in files.values()) > 48000:
-        raise ValueError('Draft exceeds complete review context; use normal build flow')
+    # The token-aware protected-source budget below decides review capacity.
+    # A character cutoff discarded substantial completed designs before review.
     try:
         context = json.loads(source)
         brief = context.get('designBrief') or {}
@@ -125,6 +125,11 @@ def review_draft(files, plan, source, provider):
         ], []).text)
     except CompleteSourceContextExceeded as error:
         raise DraftReviewFailed(files,[str(error)]) from error
+    except Exception as error:
+        raise DraftReviewFailed(files, [
+            'Complete draft review did not finish ('+type(error).__name__+
+            '). Preserve these completed files and finish their integration and review; do not restart from a scaffold.'
+        ]) from error
     repairs = verdict.get('files', {})
     if verdict.get('valid') is False and isinstance(verdict.get('issues'), list):
         raise DraftReviewFailed(files, verdict['issues'])
@@ -244,7 +249,20 @@ def draft_project(prompt, source, provider_for, deadline):
         logic = pool.submit(copy_context().run, worker, os.getenv('GENESYS_PARALLEL_LOGIC_PROVIDER', 'openai'), ['src/projectLogic.js'],
             'Implement the exact shared logic interface, state, validation and requested actions. '
             'Preserve reload persistence using the supplied usePersistentState hook. No JSX or CSS.')
-        files = {**ui.result(), **logic.result()}
+        files, failures = {}, []
+        for future in (ui, logic):
+            try:
+                files.update(future.result())
+            except Exception as error:
+                failures.append(type(error).__name__)
+        if failures:
+            missing = sorted({'src/App.jsx','src/styles.css','src/projectLogic.js'} - set(files))
+            if files:
+                raise DraftReviewFailed(files, [
+                    'One draft worker did not finish ('+', '.join(failures)+'). Complete missing files: '+
+                    ', '.join(missing)+'. Preserve the completed modules and their shared interface.'
+                ])
+            raise RuntimeError('Draft workers did not complete: '+', '.join(failures))
     # Review both completed drafts together. Separate workers cannot discover
     # payload/export/return mismatches by reading only their own assigned file.
     files = review_draft(files, plan, source, provider_for('openai'))

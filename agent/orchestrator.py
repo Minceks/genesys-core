@@ -1,6 +1,6 @@
 from __future__ import annotations
 from .progress import (report_progress, progress_callback, execution_timeout,
-                       model_request_scope, model_deadline, ModelDeadlineExceeded)
+                       model_request_scope, model_deadline, ModelDeadlineExceeded, REVIEW_RESERVE_SECONDS)
 from .build_metrics import record_repair
 from .model_context import text_safe, ModelBudgetExceeded
 
@@ -2534,7 +2534,10 @@ def _run_agent(
                 shared_source = json.dumps({'projectControls': project_controls, 'designBrief': product_brief,
                     'designGuidance': project_design_guidance(project_id, (product_brief or {}).get('productType')),
                     'files': starter_files}, ensure_ascii=False)
-                drafts = draft_project(prompt, shared_source, provider_for, agent_deadline)
+                from .progress import draft_stage_deadline
+                draft_deadline = draft_stage_deadline(agent_deadline)
+                with model_request_scope(draft_deadline):
+                    drafts = draft_project(prompt, shared_source, provider_for, draft_deadline)
                 if drafts:
                     for path, content in drafts.items():
                         result = workspace.write_file(path, content)
@@ -3819,7 +3822,7 @@ def _run_agent(
         handoff_to_checks = False
         try:
 
-            with model_request_scope(agent_deadline - (0 if last_failure_type else 60)):
+            with model_request_scope(agent_deadline - (0 if last_failure_type else REVIEW_RESERVE_SECONDS)):
                 response = provider.generate(messages, step_tools)
 
         except Exception as exc:
@@ -3874,7 +3877,7 @@ def _run_agent(
                     fallback_messages.append({'role': 'system', 'content':
                         'Continue from existing source context and saved progress. Do not restart inspection. '
                         f'Already modified files: {modified_files}. Finish missing edits, then stop for verification.'})
-                    with model_request_scope(agent_deadline - (0 if last_failure_type else 60)):
+                    with model_request_scope(agent_deadline - (0 if last_failure_type else REVIEW_RESERVE_SECONDS)):
                         response = fallback_provider.generate(fallback_messages, step_tools)
                     messages = fallback_messages
                     provider = fallback_provider

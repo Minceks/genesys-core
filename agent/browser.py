@@ -406,7 +406,7 @@ class BrowserSession:
         details = {label:evidence.details[label] for label,_ in images}
         return vision_loop.run(get_workspace(self.project_id).build_fingerprint(),
             lambda previous: review_screenshots(
-                OpenAIProvider(model=os.getenv('GENESYS_VISUAL_REVIEW_MODEL') or None),
+                OpenAIProvider(model=os.getenv('GENESYS_VISUAL_REVIEW_MODEL') or 'gpt-5.4'),
                 design_brief or {}, images, previous, capture_details=details))
 
     @browser_thread
@@ -458,7 +458,7 @@ class BrowserSession:
                         vision_images.append((label,path.read_bytes()))
             result['visualReview'],result['visualPolishRequested']=vision_loop.run(
                 get_workspace(self.project_id).build_fingerprint(),
-                lambda previous:review_screenshots(OpenAIProvider(model=os.getenv('GENESYS_VISUAL_REVIEW_MODEL') or None),
+                lambda previous:review_screenshots(OpenAIProvider(model=os.getenv('GENESYS_VISUAL_REVIEW_MODEL') or 'gpt-5.4'),
                     design_brief or {},vision_images,previous,capture_details=capture_details))
             if not result['visualPolishRequested'] and result['visualReview']['status']!='ready':
                 result.setdefault('suggestions',[]).append('Screenshot review: '+result['visualReview']['summary'])
