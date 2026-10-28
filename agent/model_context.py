@@ -50,6 +50,28 @@ def reserve_model_budget(tokens):
         db.execute('INSERT INTO model_allowance VALUES(?,?) ON CONFLICT(day) DO UPDATE SET reserved=excluded.reserved', (day, used+tokens))
 
 
+class CompleteSourceContextExceeded(ValueError):
+    """Do not ask a model to review a truncated source payload."""
+
+
+def complete_source_context(messages, protected, allowance, count):
+    messages=[dict(message) for message in messages]
+    for index in protected:
+        payload=json.loads(messages[index]['content'])
+        if not isinstance(payload.get('files'),dict) or not payload['files']:
+            raise CompleteSourceContextExceeded('Complete source review requires nonempty files')
+        design=payload.get('design')
+        if isinstance(design,dict):
+            for key in sorted(list(design),key=lambda key:count(design[key]),reverse=True):
+                if count(messages)<=allowance:break
+                design.pop(key)
+                payload.setdefault('omittedDesignFields',[]).append(key)
+                messages[index]['content']=json.dumps(payload,ensure_ascii=False)
+    if count(messages)>allowance:
+        raise CompleteSourceContextExceeded('Complete draft source and interfaces exceed the configured context budget; source was not truncated or sent for review')
+    return messages
+
+
 def bounded_messages(messages, tools, limit=None):
     from .progress import model_request_timeout
     model_request_timeout(120)
@@ -62,12 +84,17 @@ def bounded_messages(messages, tools, limit=None):
     def count(value):
         return len(enc.encode(json.dumps(value, ensure_ascii=False, default=str), disallowed_special=()))
     safe = text_safe(messages)
+    protected=[i for i,message in enumerate(safe) if message.pop('_preserve_complete_source',False)]
     allowance = cap - count(tools) - 512
     if allowance < 512:
         raise ValueError('Tool schemas exceed the configured model input budget.')
     if count(safe) <= allowance:
         reserve_model_budget(2 * (count(safe) + count(tools) + 512 + 24000))
         return safe
+    if protected:
+        result=complete_source_context(safe,protected,allowance,count)
+        reserve_model_budget(2 * (count(result) + count(tools) + 512 + 24000))
+        return result
     # Convert executed tool history to text to avoid orphaned function-call IDs.
     flat = []
     for message in safe:

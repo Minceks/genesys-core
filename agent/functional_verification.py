@@ -676,7 +676,7 @@ def verify_functions(page, prompt, provider, attempt=0, feedback="", sources=Non
                 'cannot prove the criterion; do not omit it or invent a passing check. Empty entries are allowed only for '
                 'independently preverified requirements. Visual and external criteria remain separate.')
         # Reserve time for real browser actions and a bounded recovery plan.
-        with model_request_scope(min(browser_deadline - 30, time.monotonic() + (45 if _repair_round else 60))):
+        with model_request_scope(min(browser_deadline - 30, time.monotonic() + (90 if _repair_round else 60))):
             raw = generate_plan([{'role':'system','content':PLAN_INSTRUCTIONS + contract_instruction + format_instruction + ('\nRepair the previous verification plan, not app code: '+feedback if feedback else '')},
                 {'role':'user','content':json.dumps({'originalRequest':prompt,
                     'preverifiedChecks':list(preverified), 'browserCurrentDate':page.evaluate('new Date().toLocaleDateString("en-CA")'),
@@ -710,7 +710,8 @@ def verify_functions(page, prompt, provider, attempt=0, feedback="", sources=Non
         logging.getLogger(__name__).warning('functional_verification_planning_failed type=%s detail=%s', type(error).__name__, str(error)[:250])
         from .structured_schema import StructuredSchemaError
         from .progress import ModelDeadlineExceeded
-        if planning_retry == 0 and not isinstance(error, (StructuredSchemaError, ModelDeadlineExceeded)) and time.monotonic() < browser_deadline - 5:
+        repair_timeout = _repair_round > 0 and (isinstance(error,TimeoutError) or 'timeout' in type(error).__name__.lower())
+        if planning_retry == 0 and not repair_timeout and not isinstance(error, (StructuredSchemaError, ModelDeadlineExceeded)) and time.monotonic() < browser_deadline - 5:
             return verify_functions(page, prompt, provider, attempt=attempt, planning_retry=1, validation_retry=validation_retry,
                 feedback='Previous planning response failed validation: '+str(error)[:500]+'. Correct this exact error. Return a complete JSON object following the supplied schema with executable primary workflows. ' + feedback, sources=sources, preverified=preverified, contract=contract, passed_checks=passed_checks, _repair_round=_repair_round)
         # A verifier/provider failure is not evidence of broken application code.
