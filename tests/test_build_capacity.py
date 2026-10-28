@@ -97,6 +97,7 @@ def test_full_design_tier_is_separate_from_tool_execution_and_schema_planning(mo
     messages=[{'role':'system','content':'DEFAULT BUILD STANDARD: Build a complete product.'}]
     provider.generate(messages,[])
     assert create.call_args.kwargs['model']=='gpt-5.4'
+    assert create.call_args.kwargs['max_completion_tokens']==24000
     provider.generate(messages,[{'type':'function','function':{'name':'save','parameters':{'type':'object'}}}])
     assert create.call_args.kwargs['model']=='gpt-5-mini'
     provider.generate_structured(messages,{'type':'object','properties':{},'required':[],'additionalProperties':False})

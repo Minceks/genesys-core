@@ -1550,6 +1550,8 @@ class OpenAIProvider(AIProvider):
         options = dict(model=request_model, messages=prepared,
                        timeout=model_request_timeout(120 if response_schema is not None else 240 if design_stage else 180),
                        max_completion_tokens=min(24000, max(2000, int(os.getenv('GENESYS_OUTPUT_TOKEN_LIMIT', '12000')))))
+        if design_stage:
+            options['max_completion_tokens'] = min(24000, max(2000, int(os.getenv('GENESYS_DESIGN_OUTPUT_TOKEN_LIMIT','24000'))))
         if response_schema is not None:
             options['response_format'] = {'type': 'json_schema', 'json_schema': {
                 'name': 'browser_verification_plan', 'strict': True, 'schema': response_schema}}

@@ -12,3 +12,6 @@ Regression validation: 56 relevant tests passed, followed by 11 focused API-prof
 
 
 The first stronger-model canary exposed a combined JSX/stylesheet generation timeout. The follow-up splits JSX, CSS and logic into three independently owned outputs, tied to an explicit class/layout contract, and allows up to 240 seconds for a design-tier response within the stage deadline. Partial outputs and post-review integration failures retain their source. Regression validation for this split and its budget/retention rules: 39 tests passed. The split-model canary records real request model/phase/limits in non-sensitive logs and saves partial results locally if it cannot finish.
+
+
+The split-model canary confirmed an actual 12,000-token length finish during a substantial draft. Full design-tier responses therefore now start with a bounded 24,000-token allowance, avoiding an expensive 12,000-token discard/regeneration cycle. Ordinary tool responses retain their 12,000-token initial allowance. This is capacity, not a required response length; generation still stops naturally when complete.
