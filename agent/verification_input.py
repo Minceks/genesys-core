@@ -67,15 +67,19 @@ def input_duration(step):
 
 def validate_input_budget(checks):
     total = 0
+    has_canvas = False
     for check in checks:
         if not isinstance(check, dict) or not isinstance(check.get('steps'), list):
             raise ValueError('Invalid verification plan structure')
         duration = sum(input_duration(step) for step in check.get('steps', []) if isinstance(step, dict))
-        if duration > 15000:
-            raise ValueError('Invalid verification plan: input wait budget exceeds 15 seconds per workflow')
+        actions={step.get('action') for step in check.get('steps',[]) if isinstance(step,dict)}
+        canvas_flow='rememberFrame' in actions and bool(actions & {'frameChanged','frameStable'})
+        has_canvas=has_canvas or canvas_flow
+        if duration > (30000 if canvas_flow else 15000):
+            raise ValueError('Invalid verification plan: input wait budget exceeds '+('30' if canvas_flow else '15')+' seconds per workflow')
         total += duration
-    if total > 45000:
-        raise ValueError('Invalid verification plan: total input wait budget exceeds 45 seconds')
+    if total > (60000 if has_canvas else 45000):
+        raise ValueError('Invalid verification plan: total input wait budget exceeds '+('60' if has_canvas else '45')+' seconds')
 
 
 def perform_input(page, locator, step):
@@ -87,6 +91,12 @@ def perform_input(page, locator, step):
         # Preserve the focus established by Tab or a real UI action. Escape
         # listeners may live on the document after the start control unmounts.
         page.keyboard.press(step['key']);return
+    def reached():
+        if action!='hold' or not step.get('untilVisible'):return False
+        from .functional_verification import target
+        destination=target(page,step['untilVisible'])
+        return any(destination.nth(i).is_visible() for i in range(destination.count()))
+    if reached():return
     if locator is None or locator.count() != 1 or not locator.is_visible():
         raise ValueError('Invalid verification plan: real input requires one visible named control')
     if action == 'tabTo':
@@ -100,8 +110,12 @@ def perform_input(page, locator, step):
     if action in {'hold', 'press'}:
         # Focus a real accessible control. Never dispatch synthetic events or
         # change application state, clocks, localStorage or simulation globals.
-        locator.focus(timeout=3000)
+        try:locator.focus(timeout=3000)
+        except Exception:
+            if reached():return
+            raise
         if not locator.evaluate('e => e === document.activeElement'):
+            if reached():return
             raise ValueError('Requested keyboard control cannot receive focus')
         keys = [step['key']] if action == 'press' else step['keys']
         keys = [' ' if key == 'Space' else key for key in keys]
@@ -111,7 +125,11 @@ def perform_input(page, locator, step):
         try:
             for key in keys:
                 page.keyboard.down(key); held.append(key)
-            page.wait_for_timeout(step['durationMs'])
+            if step.get('untilVisible'):
+                end=time.monotonic()+step['durationMs']/1000
+                while time.monotonic()<end and not reached():
+                    page.wait_for_timeout(min(100,max(1,(end-time.monotonic())*1000)))
+            else:page.wait_for_timeout(step['durationMs'])
         finally:
             for key in reversed(held): page.keyboard.up(key)
         return

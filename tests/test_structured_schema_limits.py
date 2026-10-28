@@ -8,7 +8,7 @@ import pytest
 from agent.ai_provider import OpenAIProvider
 from agent.structured_schema import StructuredSchemaError, schema_size, validate_schema_limits
 from agent.verification_planning import contract_plan_schema
-from agent.verification_schema import PLAN_SCHEMA, SCOPE, TARGET, VISIBILITY_TARGET, DESTINATION_TARGET, obj
+from agent.verification_schema import FRAME_REGION, PLAN_SCHEMA, SCOPE, TARGET, VISIBILITY_TARGET, DESTINATION_TARGET, obj
 
 
 def walk(value):
@@ -72,7 +72,7 @@ def test_base_and_all_supported_contract_sizes_remain_under_provider_limits(coun
 
 
 def test_shared_targets_preserve_scope_names_and_action_safety():
-    assert PLAN_SCHEMA['$defs'] == {'scope': SCOPE, 'target': TARGET,
+    assert PLAN_SCHEMA['$defs'] == {'frameRegion':FRAME_REGION, 'scope': SCOPE, 'target': TARGET,
                                     'visibilityTarget': VISIBILITY_TARGET, 'destinationTarget': DESTINATION_TARGET}
     full = expanded(PLAN_SCHEMA, PLAN_SCHEMA)
     check = full['properties']['checks']['items']

@@ -40,7 +40,7 @@ FAMILY_FINISH = {
     'application': ('Task and state clarity',
         'Compose around the actual task canvas, contextual controls and useful results; design populated, selected, empty and recovery states instead of decorating a generic form.'),
     'game': ('Scene and feedback',
-        'Use coherent genre-specific scene art, clear silhouettes, legible HUD and visible interaction feedback; preserve play space and usable phone controls.'),
+        'Review actual in-play frames, not only the title screen. Use coherent genre-specific art and readable character silhouettes for character-driven games; respect explicitly abstract/puzzle styles. Keep one legible HUD, clear hit/movement feedback and usable phone controls. Requested skills need real effects and ready/cooldown states; requested upgrade builds must change gameplay. Compilation and a decorative canvas do not establish game quality.'),
 }
 
 

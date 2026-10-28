@@ -39,7 +39,10 @@ def step(actions, target=None, **properties):
     return obj({'action': {'type': 'string', 'enum': actions}, 'target': ref('target') if target is None else target, **properties})
 
 
-ASSERTION = {'anyOf': [step(['visible', 'absent'], target=ref('visibilityTarget')), step(['invalid', 'focused']), step(['value', 'newTabValue', 'newTabText'], value=TEXT),
+FRAME_REGION=obj({key:{'type':'number','minimum':.05 if key in {'width','height'} else 0,'maximum':1 if key in {'width','height'} else .95} for key in ('x','y','width','height')})
+FRAME_FIELDS={'key':dict(NONEMPTY,maxLength=80),'region':{'anyOf':[ref('frameRegion'),{'type':'null'}]}}
+
+ASSERTION = {'anyOf': [step(['frameChanged'],threshold={'type':'number','minimum':0,'maximum':1},**FRAME_FIELDS), step(['frameStable'],threshold={'type':'number','minimum':0,'maximum':.001},**FRAME_FIELDS), step(['visible', 'absent'], target=ref('visibilityTarget')), step(['invalid', 'focused']), step(['value', 'newTabValue', 'newTabText'], value=TEXT),
                        step(['style'], property={'type':'string','enum':STYLES}, value=TEXT),
                        step(['number'], comparison={'type':'string','enum':['gt','gte','lt','lte','eq']}, value={'type':'number'}),
                        step(['sameText'], key=NONEMPTY), step(['attribute'],
@@ -51,7 +54,7 @@ STEP = {'anyOf': [*ASSERTION['anyOf'], step(['fill', 'type', 'select'], value=TE
                    step(['click'], unlessVisible={'anyOf': [ref('destinationTarget'), {'type': 'null'}]}),
                    step(['press'], key=NONEMPTY), step(['tabTo']),
                    obj({'action':{'type':'string','enum':['key']},'key':{'type':'string','enum':PAGE_KEYS}}),
-                   step(['hold'], keys={'type': 'array', 'minItems': 1, 'maxItems': 3, 'items': NONEMPTY},
+                   step(['hold'], untilVisible={'anyOf':[ref('target'),{'type':'null'}]}, keys={'type': 'array', 'minItems': 1, 'maxItems': 3, 'items': NONEMPTY},
                         durationMs={'type': 'integer', 'minimum': 50, 'maximum': 3000}),
                    *[step(['pointer'], mode={'type': 'string', 'enum': modes},
                         durationMs=duration,
@@ -64,7 +67,7 @@ STEP = {'anyOf': [*ASSERTION['anyOf'], step(['fill', 'type', 'select'], value=TE
                      ]],
                    obj({'action': {'type': 'string', 'enum': ['wait']},
                         'durationMs': {'type': 'integer', 'minimum': 50, 'maximum': 2000}}),
-                   step(['rememberText'], key=NONEMPTY), obj({'action': {'type': 'string', 'enum': ['reload', 'tab']}})]}
+                   step(['rememberFrame'],**FRAME_FIELDS), step(['rememberText'], key=NONEMPTY), obj({'action': {'type': 'string', 'enum': ['reload', 'tab']}})]}
 PLAN_SCHEMA = obj({
     'checks': {'type': 'array', 'minItems': 1, 'maxItems': 8, 'items': obj({
         'name': NONEMPTY, 'covers': dict(STRINGS, minItems=1), 'independent': {'type': 'boolean'},
@@ -73,7 +76,7 @@ PLAN_SCHEMA = obj({
     'unverified': STRINGS, 'unverifiedCore': STRINGS,
     'coreRequestEvidence': {'type': 'array', 'items': obj({'requirement': NONEMPTY, 'requestQuote': NONEMPTY})},
 })
-PLAN_SCHEMA['$defs'] = {'scope': SCOPE, 'target': TARGET,
+PLAN_SCHEMA['$defs'] = {'frameRegion':FRAME_REGION, 'scope': SCOPE, 'target': TARGET,
                         'visibilityTarget': VISIBILITY_TARGET, 'destinationTarget': DESTINATION_TARGET}
 
 

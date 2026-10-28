@@ -31,16 +31,25 @@ PATTERNS = {
     'store': ['Editorial product storytelling and useful discovery', 'Clear detail, comparison and buying decisions where relevant', 'Continuous saved basket and honest checkout handoffs'],
     'dashboard': ['Task-led data density and progressive drill-down', 'Contextual filters, meaningful visualizations and record detail', 'Readable empty, loading, error and populated states'],
     'app': ['A focused primary workflow with progressive disclosure', 'Contextual actions and reliable saved state', 'Fast feedback and deliberate mobile navigation'],
-    'game': ['A readable genre-specific world and immediate playable feedback', 'Legible HUD, onboarding and keyboard/touch controls', 'A coherent core loop, pause/restart and truthful saved progression'],
+    'game': ['A finished genre-coherent scene; respect abstract/puzzle styles, but use recognizable characters and environment art for character-driven games instead of collision-marker circles', 'A satisfying genre-appropriate loop; action games need hit feedback, fair damage windows, distinct level layouts and a complete win/loss/retry flow', 'One simulation owner, source-grounded HUD/API wiring, canvas initialized after mount, and real keyboard/touch gameplay audits', 'A readable genre-specific world and immediate playable feedback', 'Legible HUD, onboarding and keyboard/touch controls', 'A coherent core loop, pause/restart and truthful saved progression'],
 }
 
 
 def engineering_strategy(brief, prompt, trends):
     from .design_strategy import requests_redesign
     from .trend_intelligence import trend_refresh_requested
+    game_requests=[]
+    request_text=prompt+' '+str(brief.get('originalRequest',''))
+    if brief.get('productType')=='game':
+        import re
+        if re.search(r'\b(?:skill|skills|abilit\w*)\b',request_text,re.I):
+            game_requests.append('Implement requested skills as real player actions with visible cooldowns, keyboard and touch bindings, and gameplay effects; decorative buttons do not satisfy the request.')
+        if re.search(r'\b(?:shoot\w*|zombie|combat)\b',request_text,re.I):
+            game_requests.append('Provide responsive movement and shooting together, readable enemy silhouettes, projectile/hit/death feedback and fair damage windows; exercise normal combat through rendered input.')
     targeted = brief.get('buildIntent') == 'edit-product' and not (requests_redesign(prompt) or trend_refresh_requested(prompt))
     return {'version':1,'role':'Senior product engineer and lead interface designer',
             'mode':'preserve-and-repair' if targeted else 'design-and-build',
+            'requestedGameMechanics':game_requests,
             'objective':str(brief.get('originalRequest') or prompt)[:1200],'currentRequest':prompt[:1200],
             'trendEvidenceStatus':trends.get('status','curated-fallback'),
             'candidatePatterns':[{'pattern':item,'basis':'Curated product-fit recommendation; not a measured popularity claim.'}

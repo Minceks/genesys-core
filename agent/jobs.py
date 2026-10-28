@@ -23,7 +23,9 @@ def saved_build_retry(previous, prompt):
     result = previous.get('result') or {}
     # Compilation does not establish implementation completeness. Missing
     # controls, failed persistence and interrupted editing need implementation.
-    if result.get('buildPassed') and result.get('browserVerified'):
+    report=result.get('verification') or {}
+    verification_only=(result.get('errorType')=='verification_incomplete' and not report.get('failed') and bool(report.get('incomplete')))
+    if result.get('buildPassed') and (result.get('browserVerified') or verification_only):
         return result.get('buildFingerprint') or 'rebuild-saved-project'
     return None
 

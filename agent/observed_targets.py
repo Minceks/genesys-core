@@ -65,7 +65,7 @@ def surface_targets(page):
 def diagnosable_failure(failure, sources, initial_text):
     """A guessed/missing locator or capture cannot justify editing application code."""
     step=failure.get('step') or {};spec=step.get('target') or {}
-    if step.get('action') not in {'type','visible','absent','value','attribute','invalid','sameText','focused','newTabValue','newTabText','number','style'}:
+    if step.get('action') not in {'frameChanged','frameStable','type','visible','absent','value','attribute','invalid','sameText','focused','newTabValue','newTabText','number','style'}:
         return False
     if failure.get('executedActions',0)<1:return False
     if any(word in failure.get('error','') for word in ('Invalid verification','Unsupported','strict mode violation')):return False

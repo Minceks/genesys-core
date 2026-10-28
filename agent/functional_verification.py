@@ -5,6 +5,7 @@ import re
 import time
 from urllib.parse import urlsplit, urlunsplit
 from .observed_targets import surface_targets, exact_label_target, diagnosable_failure
+from .verification_frames import FRAME_ACTIONS, validate_frame, perform_frame
 from .verification_schema import READ_ONLY_ATTRIBUTES
 from .verification_input import INPUT_ACTIONS, perform_input, validate_input_budget, validate_number, assert_number
 from .verification_environment import STYLES, validate_media, media_state, emulate_media
@@ -24,6 +25,18 @@ Do not invent synonyms for controls. Inspect supplied source for screen transiti
 When acceptance permits alternatives (such as OS OR in-app reduced motion), verify
 one supported alternative; never require both or invent a setting. Do not require
 hidden hooks or localStorage injection for normal gameplay completion.
+Canvas pixels can be checked without game hooks: rememberFrame captures a 64x64
+read-only sample, frameChanged asserts rendered change, frameStable asserts frozen
+rendering. Give each a key and the SAME normalized region {x,y,width,height} (or null
+for the full canvas). Comparisons use threshold as a fraction of changed pixels,
+e.g. .001. Capture, hold a movement key, release, then frameChanged to verify actual
+painted movement; combine this with HUD/state outcomes. For pause, capture AFTER
+pausing, wait, then frameStable. Do not compare different routes or canvas regions.
+These checks are scoped pixel evidence, not an aesthetic or whole-game proof.
+A hold step may include untilVisible (a named target, or null): release held keys
+when that outcome appears, and skip further holds if it is already visible. Use
+this for real level-complete dialogs so input never continues into an inert scene.
+Always assert the resulting outcome after bounded input; stopping alone is not proof.
 For canvas gameplay, numerical enemy positions are not mandatory DOM outputs.
 Use the implemented HUD and resulting level-complete/progress UI as observable
 outcomes of bounded normal play; inspect firing/auto-aim rules in source before
@@ -238,8 +251,9 @@ positions. Use implementation and observed geometry to choose valid inputs.
 For pointer mode=hold, durationMs holds the pointer down; for mode=drag it holds
 at the endpoint before release, supporting a real joystick. Use 0 for click/move.
 {"action":"wait","durationMs":500} allows a bounded real-time transition.
-Hold is at most 3000ms, wait at most 2000ms; total wait/hold budget is 15000ms
-per workflow and 45000ms per plan. Only unmodified letters/digits, arrows, Space,
+Hold is at most 3000ms, wait at most 2000ms; wait/hold budget is 15000ms
+per workflow and 45000ms per plan. Workflows that capture and compare canvas frames
+may use 30000ms, with a 60000ms total plan limit. Only unmodified letters/digits, arrows, Space,
 Enter, Escape and navigation keys are allowed. No OS shortcuts. Always assert a
 real resulting HUD/state outcome, not merely the presence of a canvas. A few
 shots do not prove an entire level or player death; if a long or unpredictable
@@ -857,12 +871,21 @@ def verify_functions(page, prompt, provider, attempt=0, feedback="", sources=Non
                 ) if isinstance(value, str))
                 if re.search(r'[\x00-\x08\x0b\x0c\x0e-\x1f]', test_text):
                     raise ValueError('Invalid verification plan: control characters in test text. Use plain ASCII synthetic values and stable real UI text.')
-                if step.get('action') not in {'fill', 'type', 'click', 'select', 'reload', 'tab', 'focused', 'visible', 'absent', 'value', 'invalid', 'attribute', 'rememberText', 'sameText', 'newTabValue', 'newTabText', 'number', 'emulateMedia','style'} | INPUT_ACTIONS:
+                if step.get('action') not in {'fill', 'type', 'click', 'select', 'reload', 'tab', 'focused', 'visible', 'absent', 'value', 'invalid', 'attribute', 'rememberText', 'sameText', 'newTabValue', 'newTabText', 'number', 'emulateMedia','style'} | INPUT_ACTIONS | FRAME_ACTIONS:
                     raise ValueError(
                         f"Invalid verification plan: unsupported action {str(step.get('action'))[:80]}. "
                         "Use fill, type, click, select, reload, visible, absent, value, invalid, attribute, rememberText or sameText. "
                         "withinText and withinRole belong inside target, never in action."
                     )
+                if step.get('untilVisible') is not None:
+                    condition=step['untilVisible']
+                    if step.get('action')!='hold' or not isinstance(condition,dict) or not str(condition.get('name','')).strip():
+                        raise ValueError('Invalid verification plan: untilVisible requires hold and a named outcome target')
+                if step.get('action') in FRAME_ACTIONS:
+                    validate_frame(step)
+                    frame_key=('frame',step['key'])
+                    if step['action']=='rememberFrame':captured_keys.add(frame_key)
+                    elif frame_key not in captured_keys:raise ValueError('Invalid verification plan: capture frame before comparison')
                 if step.get('action')=='emulateMedia':validate_media(step)
                 if step.get('action')=='style' and step.get('property') not in STYLES:
                     raise ValueError('Invalid verification plan: unsupported read-only style property')
@@ -908,7 +931,7 @@ def verify_functions(page, prompt, provider, attempt=0, feedback="", sources=Non
             closing_cleanup = (final.get('action') == 'click'
                                and re.match(r'^(close\b|cancel$)', str((final.get('target') or {}).get('name', '')), re.I)
                                and any(item.get('action') in {'visible', 'absent', 'value', 'attribute', 'invalid', 'sameText'} for item in steps[:-1]))
-            if final.get('action') not in {'visible', 'absent', 'value', 'attribute', 'invalid', 'sameText', 'focused', 'newTabValue', 'newTabText', 'number','style'} and not closing_cleanup:
+            if final.get('action') not in {'frameChanged','frameStable','visible', 'absent', 'value', 'attribute', 'invalid', 'sameText', 'focused', 'newTabValue', 'newTabText', 'number','style'} and not closing_cleanup:
                 raise ValueError('Invalid verification plan: missing final outcome assertion')
         if contract:
             planned_ids = {key for check in checks for key in check['covers']}
@@ -951,6 +974,7 @@ def verify_functions(page, prompt, provider, attempt=0, feedback="", sources=Non
             route.continue_()
     page.route('**/*', guard)
     remembered_text = {}
+    remembered_frames = {}
     failed_checks = set()
     interrupted = False
     original_media=None
@@ -968,6 +992,7 @@ def verify_functions(page, prompt, provider, attempt=0, feedback="", sources=Non
                 if original_media is not None:page.emulate_media(**original_media)
                 restore_verification_state(page, original_storage)
                 remembered_text = {}
+                remembered_frames = {}
             steps = check.get('steps')
             if not isinstance(steps, list) or not 1 <= len(steps) <= 24:
                 raise ValueError('Invalid steps')
@@ -1026,6 +1051,11 @@ def verify_functions(page, prompt, provider, attempt=0, feedback="", sources=Non
                     executed_actions+=1
                     asserted=False
                     continue
+                if action=='hold' and step.get('untilVisible'):
+                    outcome=target(page,step['untilVisible'])
+                    if any(outcome.nth(i).is_visible() for i in range(outcome.count())):
+                        asserted=False
+                        continue
                 specification = step.get('target')
                 if isinstance(specification, dict):
                     specification = dict(specification)
@@ -1063,6 +1093,9 @@ def verify_functions(page, prompt, provider, attempt=0, feedback="", sources=Non
                     resolved = observed_control_target(page, specification)
                     if locator.count() != 1 and resolved is not None:
                         locator = resolved
+                if action in FRAME_ACTIONS:
+                    asserted=perform_frame(locator,step,remembered_frames)
+                    continue
                 if action in {'rememberText', 'sameText'}:
                     key = step.get('key')
                     if not isinstance(key, str) or not key.strip() or locator.count() != 1:
