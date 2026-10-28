@@ -30,6 +30,8 @@ def verification_report(quality, content, specification=None):
         'coverage': content.get('coverage', {}),
         **({'referenceComparison':quality['referenceComparison']} if quality.get('referenceComparison') else {}),
         **({'visualReview':quality['visualReview']} if quality.get('visualReview') else {}),
+        **({'workflowVisualReview':quality['workflowVisualReview']} if quality.get('workflowVisualReview') else {}),
+        **({'workflowDesignEvidence':content['workflowDesignEvidence']} if content.get('workflowDesignEvidence') else {}),
     }
 
 

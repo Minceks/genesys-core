@@ -7,7 +7,9 @@ def design_execution(brief):
     references = brief.get('layoutReferences', {}).get('examples') or []
     reference = references[0] if references else {}
     visual = brief.get('visualSystem') or {}
+    from .delivery_playbook import delivery_playbook
     execution = {
+        'deliveryPlaybook': delivery_playbook(brief),
         'qualityContract': design_quality_contract(brief),
         'compositionBrief': composition_brief(brief.get('productType', 'website')),
         'artAndMotion': motion_direction(brief),

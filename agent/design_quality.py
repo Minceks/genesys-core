@@ -1,5 +1,6 @@
 """Shared product-aware design criteria for generation and screenshot review."""
 from .engineering_strategy import SENIOR_ENGINEERING_STANDARD
+from .delivery_playbook import DELIVERY_STANDARD
 
 
 BUILD_STANDARD = '''DEFAULT BUILD STANDARD: PREMIUM UI, USEFUL FUNCTIONS, SOLID ENGINEERING
@@ -20,7 +21,7 @@ remains unverified. Respect explicit minimal/text-led requests; quality is not f
 '''
 
 
-BUILD_STANDARD += '\n' + SENIOR_ENGINEERING_STANDARD
+BUILD_STANDARD += '\n' + SENIOR_ENGINEERING_STANDARD + '\n' + DELIVERY_STANDARD
 
 FAMILY_FINISH = {
     'business': ('Brand and service story',

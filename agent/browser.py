@@ -320,7 +320,7 @@ class BrowserSession:
     # ========================================================
 
     @browser_thread
-    def content_checks(self, prompt, provider, preverified=()) -> dict[str, Any]:
+    def content_checks(self, prompt, provider, preverified=(), capture_workflows=False) -> dict[str, Any]:
         page = self.start()
         workspace = get_workspace(self.project_id)
         sources = {}
@@ -371,7 +371,17 @@ class BrowserSession:
                 provider = SavedPlanProvider(plan, provider)
         except Exception:
             logging.getLogger(__name__).info('verified_plan_cache_unavailable')
-        result = verify_functions(page, prompt, provider, sources=sources, preverified=preverified, contract=contract)
+        from .workflow_quality import WorkflowEvidence
+        evidence = WorkflowEvidence() if capture_workflows else None
+        self._workflow_evidence = evidence
+        result = verify_functions(page, prompt, provider, sources=sources, preverified=preverified, contract=contract,
+                                  _on_workflow=evidence.capture if evidence else None)
+        if evidence:
+            result['workflowDesignEvidence'] = evidence.summary()
+            if evidence.issues:
+                result['issues'] = list(dict.fromkeys(result.get('issues', []) + evidence.issues))
+                result['status'] = 'error'
+                result.pop('_verifiedPlan', None)
         verified_plan = result.pop('_verifiedPlan', None)
         if verified_plan and fingerprint:
             try:
@@ -383,6 +393,21 @@ class BrowserSession:
             except Exception:
                 logging.getLogger(__name__).warning('verified_plan_cache_write_failed', exc_info=True)
         return result
+
+    @browser_thread
+    def review_workflow_design(self, design_brief, vision_loop):
+        evidence = getattr(self, '_workflow_evidence', None)
+        if not evidence or not evidence.images:
+            return {'status':'unavailable', 'summary':'No workflow screenshots were captured; workflow design remains unreviewed.', 'findings':[]}, False
+        from .visual_review import review_screenshots
+        from .ai_provider import OpenAIProvider
+        import os
+        images = evidence.images[-4:]
+        details = {label:evidence.details[label] for label,_ in images}
+        return vision_loop.run(get_workspace(self.project_id).build_fingerprint(),
+            lambda previous: review_screenshots(
+                OpenAIProvider(model=os.getenv('GENESYS_VISUAL_REVIEW_MODEL') or None),
+                design_brief or {}, images, previous, capture_details=details))
 
     @browser_thread
     def visual_quality(self, *, allow_unstyled=False, require_images=False, public_website=False, reference=None, vision_loop=None, design_brief=None) -> dict[str, Any]:

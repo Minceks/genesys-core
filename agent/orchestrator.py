@@ -2583,6 +2583,7 @@ def _run_agent(
 
     from .visual_review import VisualPolishLoop, VisualPolishNeeded
     visual_polish = VisualPolishLoop()
+    workflow_polish = VisualPolishLoop()
     for step in range(1, TOTAL_MAX_STEPS + 1):
 
         steps_used = step
@@ -3470,7 +3471,19 @@ def _run_agent(
                         visual_checks.append('Desktop and phone: rendered content, headline hierarchy and no horizontal overflow (not subjective aesthetic quality).')
                         if all(item.get('brandVisual') and item.get('favicon') for item in quality.get('snapshots', [])):
                             visual_checks.append('Visible header logo and configured favicon.')
-                    content_result = get_browser(project_id).content_checks(prompt, provider, preverified=visual_checks)
+                    workflow_review_enabled = not narrow_edit and os.getenv('GENESYS_VISUAL_REVIEW','1')!='0'
+                    content_result = get_browser(project_id).content_checks(prompt, provider, preverified=visual_checks,
+                        capture_workflows=workflow_review_enabled)
+                    if workflow_review_enabled and content_result.get('status') == 'success' and not content_result.get('unverifiedCore'):
+                        report_progress('Reviewing the working product on desktop and phone')
+                        workflow_review, needs_polish = get_browser(project_id).review_workflow_design(product_brief, workflow_polish)
+                        quality['workflowVisualReview'] = workflow_review
+                        if needs_polish:
+                            raise VisualPolishNeeded(json.dumps(workflow_review, ensure_ascii=False))
+                        from .workflow_quality import remaining_design_blockers
+                        content_result.setdefault('unverifiedCore', []).extend(remaining_design_blockers(workflow_review))
+                        if workflow_review.get('status') != 'ready':
+                            quality.setdefault('suggestions', []).append('Workflow screenshot review: '+workflow_review.get('summary','Not completed.'))
                     from .verification_report import verification_report
                     verification = verification_report(quality, content_result,
                         (product_brief or {}).get('buildSpecification'))

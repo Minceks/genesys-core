@@ -640,7 +640,7 @@ def declared_browser_gaps(plan, contract):
     return gaps
 
 
-def verify_functions(page, prompt, provider, attempt=0, feedback="", sources=None, preverified=(), planning_retry=0, contract=None, validation_retry=0, passed_checks=(), _repair_round=0, _plan_override=None):
+def verify_functions(page, prompt, provider, attempt=0, feedback="", sources=None, preverified=(), planning_retry=0, contract=None, validation_retry=0, passed_checks=(), _repair_round=0, _plan_override=None, _on_workflow=None):
     if contract:
         from .build_spec import verification_scopes
         contract = verification_scopes(contract)
@@ -735,7 +735,7 @@ def verify_functions(page, prompt, provider, attempt=0, feedback="", sources=Non
         repair_timeout = _repair_round > 0 and (isinstance(error,TimeoutError) or 'timeout' in type(error).__name__.lower())
         if planning_retry == 0 and not repair_timeout and not isinstance(error, (StructuredSchemaError, ModelDeadlineExceeded)) and time.monotonic() < browser_deadline - 5:
             return verify_functions(page, prompt, provider, attempt=attempt, planning_retry=1, validation_retry=validation_retry,
-                feedback='Previous planning response failed validation: '+str(error)[:500]+'. Correct this exact error. Return a complete JSON object following the supplied schema with executable primary workflows. ' + feedback, sources=sources, preverified=preverified, contract=contract, passed_checks=passed_checks, _repair_round=_repair_round)
+                feedback='Previous planning response failed validation: '+str(error)[:500]+'. Correct this exact error. Return a complete JSON object following the supplied schema with executable primary workflows. ' + feedback, sources=sources, preverified=preverified, contract=contract, passed_checks=passed_checks, _repair_round=_repair_round, _on_workflow=_on_workflow)
         # A verifier/provider failure is not evidence of broken application code.
         return {'status':'success', 'issues':[], 'testedInteractions':[],
                 'unverified':['Functional verification could not run.'], 'unverifiedCore':['Verification service unavailable: '+str(error)[:250]]}
@@ -802,7 +802,7 @@ def verify_functions(page, prompt, provider, attempt=0, feedback="", sources=Non
     ) or len({item['id'] for item in requirements}) != len(requirements):
         if (attempt == 0 or _repair_round > 0) and validation_retry == 0:
             return verify_functions(page, prompt, provider, attempt=attempt, validation_retry=1,
-                feedback='Return a complete requirements array and covers IDs on each check.', sources=sources, preverified=preverified, contract=contract, passed_checks=passed_checks, _repair_round=_repair_round)
+                feedback='Return a complete requirements array and covers IDs on each check.', sources=sources, preverified=preverified, contract=contract, passed_checks=passed_checks, _repair_round=_repair_round, _on_workflow=_on_workflow)
         return {'status':'success', 'issues':[], 'testedInteractions':[], 'unverified':[],
                 'unverifiedCore':['Requirement coverage could not be established.']}
     if core and not contract:
@@ -958,7 +958,7 @@ def verify_functions(page, prompt, provider, attempt=0, feedback="", sources=Non
                         repaired=plan
                     return verify_functions(page,prompt,provider,attempt=attempt,feedback=feedback,sources=sources,
                         preverified=preverified,planning_retry=planning_retry,contract=contract,validation_retry=validation_retry+1,
-                        passed_checks=passed_checks,_repair_round=_repair_round,_plan_override=repaired)
+                        passed_checks=passed_checks,_repair_round=_repair_round,_plan_override=repaired, _on_workflow=_on_workflow)
                 raise ValueError('Invalid verification plan: missing executable checks for browser requirements '
                                  + ', '.join(sorted(omitted)) + '. Preserve these requirements and add complete workflows; do not omit them.')
     except ValueError as error:
@@ -970,7 +970,7 @@ def verify_functions(page, prompt, provider, attempt=0, feedback="", sources=Non
             return verify_functions(page, prompt, provider, attempt=attempt, validation_retry=validation_retry + 1,
                 feedback=str(error) + '\nPrevious plan to repair (preserve requirements and coverage): '
                 + json.dumps(plan), sources=sources, preverified=preverified, contract=contract, passed_checks=passed_checks, _repair_round=_repair_round,
-                planning_retry=planning_retry)
+                planning_retry=planning_retry, _on_workflow=_on_workflow)
         return {'status':'success', 'issues':[], 'testedInteractions':[], 'unverified':[str(error)], 'unverifiedCore':[str(error)]}
     passed, issues = [], []
     replayable_checks = []
@@ -1234,6 +1234,8 @@ def verify_functions(page, prompt, provider, attempt=0, feedback="", sources=Non
                     raise ValueError('Unsupported browser action')
             if not asserted:
                 raise ValueError('Expected outcome was not asserted after the action')
+            if _on_workflow is not None:
+                _on_workflow(page, name)
             passed.append(name)
             if check.get('independent') is True:
                 replayable_checks.append(check)
@@ -1331,7 +1333,7 @@ def verify_functions(page, prompt, provider, attempt=0, feedback="", sources=Non
                 + '\nChecks that passed and will be replayed verbatim: ' + json.dumps(passed)
                 + '\nUntrusted observation before restoration: ' + json.dumps(observed_failure, ensure_ascii=False)[:22000],
             sources=sources, preverified=preverified, contract=contract,
-            passed_checks=replayable_checks, _repair_round=_repair_round + 1)
+            passed_checks=replayable_checks, _repair_round=_repair_round + 1, _on_workflow=_on_workflow)
         repaired.setdefault('verificationRecovery', []).insert(0, {
             'round': _repair_round + 1, 'method': 'repair_plan_and_reexecute',
             'retainedIndependentChecks': len(replayable_checks),
