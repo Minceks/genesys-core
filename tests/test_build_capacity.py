@@ -34,12 +34,12 @@ def test_explicit_effort_and_output_settings_are_honored(monkeypatch):
 
 def test_draft_budget_reserves_real_time_for_build_repair_and_review(monkeypatch):
     monkeypatch.setattr('agent.progress.time.monotonic',lambda:100)
-    assert draft_stage_deadline(1000)==460
+    assert draft_stage_deadline(1000)==520
     assert draft_stage_deadline(400)==280
     assert draft_stage_deadline(150)<150
     with model_request_scope(1000):
         with model_request_scope(draft_stage_deadline(1000)):
-            assert model_request_timeout(900)==360
+            assert model_request_timeout(900)==420
         assert model_request_timeout(900)==900
 
 
@@ -78,7 +78,9 @@ def test_one_worker_timeout_preserves_the_other_workers_completed_modules():
         if 'Plan a React user application' in instruction:
             return SimpleNamespace(text=json.dumps({'interface':'useProjectLogic returns score', 'requirements':['Play']}))
         if 'Build the responsive UI.' in instruction:
-            return SimpleNamespace(text=json.dumps({'files':{'src/App.jsx':'export default function App(){return <main>Finished UI</main>}', 'src/styles.css':'main {color:olive}'}}))
+            return SimpleNamespace(text=json.dumps({'files':{'src/App.jsx':'export default function App(){return <main>Finished UI</main>}'}}))
+        if 'Required files: src/styles.css' in instruction:
+            return SimpleNamespace(text=json.dumps({'files':{'src/styles.css':'main {color:olive}'}}))
         raise TimeoutError('Synthetic logic worker timeout')
     with pytest.raises(DraftReviewFailed) as caught:
         draft_project('Synthetic game','{}',lambda _:SimpleNamespace(generate=generate),time.monotonic()+120)

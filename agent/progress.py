@@ -46,4 +46,4 @@ def draft_stage_deadline(deadline):
     """Initial drafts cannot spend the compilation, repair and review reserve."""
     now = time.monotonic()
     reserve = min(300, max(120, (deadline-now)*.4))
-    return min(now+360, deadline-reserve)
+    return min(now+420, deadline-reserve)

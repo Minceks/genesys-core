@@ -155,6 +155,7 @@ def draft_project(prompt, source, provider_for, deadline):
         'Also include designDecision: {"direction":"chosen composition", "reason":"audience and task fit", '
         '"signature":"one distinctive visual detail", "mobile":"intentional phone composition"}. '
         'Add concrete typography, palette, spacing and heroGeometry strings to designDecision. '
+        'Include styleInterface: exact class names, view hierarchy, component states and responsive transformations shared by the JSX and CSS workers. '
         'Apply engineeringStrategy: compare two practical approaches, choose maintainable boundaries, '
         'and record trendAdaptation in designDecision with zero to three relevant ideas, source/date '
         'or curated basis, user benefit and rejected mismatches. User scope, genre and preferences win. '
@@ -213,10 +214,12 @@ def draft_project(prompt, source, provider_for, deadline):
             raise ValueError('Worker returned invalid source')
         return files
     # Workers create drafts in memory. They cannot concurrently modify the sandbox.
-    with ThreadPoolExecutor(max_workers=2, thread_name_prefix='genesys-builder') as pool:
-        ui = pool.submit(copy_context().run, worker, 'openai', ['src/App.jsx','src/styles.css'],
+    with ThreadPoolExecutor(max_workers=3, thread_name_prefix='genesys-builder') as pool:
+        ui = pool.submit(copy_context().run, worker, 'openai', ['src/App.jsx'],
             'Build the responsive UI. Import logic from ./projectLogic and styles from ./styles.css. '
-            'Use a static named import of the shared hook and call it unconditionally at component top level. '
+            'Use static named imports of the exact shared exports. If the contract uses a React hook, call it unconditionally at component top level. '
+            'For canvas games initialize the shared engine after canvas mount and keep a single simulation owner; do not reimplement simulation or run duplicate animation loops in App. '
+            'Use the exact styleInterface class names and view hierarchy; a separate worker owns all page CSS. '
             'Never duplicate logic with fallback hooks, stubs or no-op actions. Never dynamically swap hooks. '
             'Render every requested action result, including quiz questions, answers and scores when applicable. '
             'Map form fields to the exact shared action payload keys. Populate dependent dropdowns '
@@ -249,8 +252,13 @@ def draft_project(prompt, source, provider_for, deadline):
         logic = pool.submit(copy_context().run, worker, os.getenv('GENESYS_PARALLEL_LOGIC_PROVIDER', 'openai'), ['src/projectLogic.js'],
             'Implement the exact shared logic interface, state, validation and requested actions. '
             'Preserve reload persistence using the supplied usePersistentState hook. No JSX or CSS.')
+        styles = pool.submit(copy_context().run, worker, 'openai', ['src/styles.css'],
+            'Implement the complete responsive stylesheet using the shared styleInterface class names and view hierarchy. '
+            'Honor the exact designDecision type scale, colors, spacing, art treatment and component states. '
+            'Provide deliberate desktop and phone compositions, readable focus/disabled/selected/result states, '
+            'safe grid/flex sizing and space for fixed navigation. Respect reduced motion. No JSX or application logic.')
         files, failures = {}, []
-        for future in (ui, logic):
+        for future in (ui, logic, styles):
             try:
                 files.update(future.result())
             except Exception as error:
@@ -268,13 +276,13 @@ def draft_project(prompt, source, provider_for, deadline):
     files = review_draft(files, plan, source, provider_for('openai'))
     app = files['src/App.jsx']
     if 'import(' in app and 'projectLogic' in app:
-        raise ValueError('UI must statically connect the shared logic module')
+        raise DraftReviewFailed(files, ['UI must statically connect the shared logic module'])
     if any(name in app for name in ('stubUseProjectLogic', 'stubUse', 'window.alert(', 'window.confirm(', 'window.prompt(')):
-        raise ValueError('UI draft contains fallback logic or blocked browser dialogs')
+        raise DraftReviewFailed(files, ['UI draft contains fallback logic or blocked browser dialogs'])
     if re.search(r'\b(?:alert|confirm|prompt)\s*\(', app):
-        raise ValueError('UI must use visible in-page feedback and confirmation')
+        raise DraftReviewFailed(files, ['UI must use visible in-page feedback and confirmation'])
     if re.search(r'\bfunction\s+useProjectLogic\b|\b(?:const|let)\s+useProjectLogic\s*=', app):
-        raise ValueError('UI must use the shared hook rather than duplicate it')
+        raise DraftReviewFailed(files, ['UI must use the shared hook rather than duplicate it'])
     if time.monotonic() >= deadline:
         return None
     logger.info('parallel_drafts_ready duration_seconds=%.1f files=%d', time.monotonic()-started, len(files))

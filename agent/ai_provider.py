@@ -1548,7 +1548,7 @@ class OpenAIProvider(AIProvider):
                         and str(prepared[0]['content']).startswith('DEFAULT BUILD STANDARD:'))
         request_model = os.getenv('GENESYS_DESIGN_MODEL', 'gpt-5.4') if design_stage else self.model
         options = dict(model=request_model, messages=prepared,
-                       timeout=model_request_timeout(120 if response_schema is not None else 180),
+                       timeout=model_request_timeout(120 if response_schema is not None else 240 if design_stage else 180),
                        max_completion_tokens=min(24000, max(2000, int(os.getenv('GENESYS_OUTPUT_TOKEN_LIMIT', '12000')))))
         if response_schema is not None:
             options['response_format'] = {'type': 'json_schema', 'json_schema': {
@@ -1564,7 +1564,7 @@ class OpenAIProvider(AIProvider):
         ceiling = min(24000, max(options['max_completion_tokens'],
                       int(os.getenv('GENESYS_OUTPUT_TOKEN_CEILING', '24000'))))
         for attempt in range(2):
-            options['timeout'] = model_request_timeout(120 if response_schema is not None else 180)
+            options['timeout'] = model_request_timeout(120 if response_schema is not None else 240 if design_stage else 180)
             logging.getLogger(__name__).info(
                 'openai_request phase=%s model=%s reasoning=%s output_limit=%s timeout_seconds=%.1f',
                 'design' if design_stage else 'verification' if response_schema is not None else 'tools' if tools else 'text',

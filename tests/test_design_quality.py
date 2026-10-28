@@ -144,12 +144,13 @@ def test_parallel_planner_both_workers_and_reviewer_receive_delivery_standard(mo
         elif 'Review the complete React UI and logic draft' in instruction:
             value = {'valid': True, 'issues': [], 'files': {}}
         elif 'Required files: src/App.jsx' in instruction:
-            value = {'files': {'src/App.jsx': 'export default function App(){return <main>Tasks</main>}',
-                               'src/styles.css': 'main {max-width:60rem;margin:auto} '}}
+            value = {'files': {'src/App.jsx': 'export default function App(){return <main>Tasks</main>}'}}
+        elif 'Required files: src/styles.css' in instruction:
+            value = {'files': {'src/styles.css': 'main {max-width:60rem;margin:auto} '}}
         else:
             value = {'files': {'src/projectLogic.js': 'export function useProjectLogic(){return {tasks:[]}}'}}
         return SimpleNamespace(text=json.dumps(value))
     monkeypatch.setenv('GENESYS_PARALLEL_LOGIC_PROVIDER', 'openai')
     files = draft_project('Build a task app', '{}', lambda _: SimpleNamespace(generate=generate), time.monotonic() + 120)
-    assert len(calls) == 4
+    assert len(calls) == 5
     assert set(files) == {'src/App.jsx', 'src/styles.css', 'src/projectLogic.js'}
