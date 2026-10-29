@@ -42,7 +42,7 @@ def step(actions, target=None, **properties):
 FRAME_REGION=obj({key:{'type':'number','minimum':.05 if key in {'width','height'} else 0,'maximum':1 if key in {'width','height'} else .95} for key in ('x','y','width','height')})
 FRAME_FIELDS={'key':dict(NONEMPTY,maxLength=80),'region':{'anyOf':[ref('frameRegion'),{'type':'null'}]}}
 
-ASSERTION = {'anyOf': [step(['frameChanged'],threshold={'type':'number','minimum':0,'maximum':1},**FRAME_FIELDS), step(['frameStable'],threshold={'type':'number','minimum':0,'maximum':.001},**FRAME_FIELDS), step(['visible', 'absent'], target=ref('visibilityTarget')), step(['invalid', 'focused']), step(['value', 'newTabValue', 'newTabText'], value=TEXT),
+ASSERTION = {'anyOf': [step(['frameChanged'],threshold={'type':'number','minimum':0,'maximum':1},**FRAME_FIELDS), step(['frameStable'],threshold={'type':'number','minimum':0,'maximum':.001},**FRAME_FIELDS), step(['visible', 'absent'], target=ref('visibilityTarget')), step(['invalid', 'focused', 'checked', 'unchecked']), step(['value', 'newTabValue', 'newTabText'], value=TEXT),
                        step(['style'], property={'type':'string','enum':STYLES}, value=TEXT),
                        step(['number'], comparison={'type':'string','enum':['gt','gte','lt','lte','eq']}, value={'type':'number'}),
                        step(['sameText'], key=NONEMPTY), step(['attribute'],
@@ -67,7 +67,7 @@ STEP = {'anyOf': [step(['chooseAvailable']), *ASSERTION['anyOf'], step(['fill', 
                      ]],
                    obj({'action': {'type': 'string', 'enum': ['wait']},
                         'durationMs': {'type': 'integer', 'minimum': 50, 'maximum': 2000}}),
-                   step(['rememberFrame'],**FRAME_FIELDS), step(['rememberText'], key=NONEMPTY), obj({'action': {'type': 'string', 'enum': ['reload', 'tab']}})]}
+                   step(['rememberFrame'],**FRAME_FIELDS), step(['rememberText'], key=NONEMPTY), obj({'action': {'type': 'string', 'enum': ['reload', 'tab', 'back']}})]}
 PLAN_SCHEMA = obj({
     'checks': {'type': 'array', 'minItems': 1, 'maxItems': 8, 'items': obj({
         'name': NONEMPTY, 'covers': dict(STRINGS, minItems=1), 'independent': {'type': 'boolean'},

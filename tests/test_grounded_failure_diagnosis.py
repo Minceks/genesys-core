@@ -87,7 +87,7 @@ def test_planner_reserves_time_for_browser_execution_and_restores_deadline():
     plan={'requirements':[{'id':'R1','name':'Ready state'}],'checks':[{'name':'Ready state','covers':['R1'],'steps':[{'action':'visible','target':{'by':'text','name':'Ready','exact':True}}]}]}
     class Provider:
         def generate(self,*_):
-            assert 0 < model_deadline.get()-time.monotonic() <= 60
+            assert 0 < model_deadline.get()-time.monotonic() <= 90
             return SimpleNamespace(text=json.dumps(plan))
     with sync_playwright() as p:
         browser=p.chromium.launch()

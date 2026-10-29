@@ -205,6 +205,8 @@ availability use chooseAvailable targeting ONE uniquely named group containing
 time-slot buttons/radios; it clicks the first visible enabled option, then you
 must assert the selected summary or booking outcome. Never guess a time slot
 or click a disabled control.
+Use back for real same-origin browser history navigation, followed by an assertion of the returned view.
+Use checked and unchecked assertions for native checkbox/radio preferences, including after reload. Visibility or a checkbox value alone does not prove its state.
 For reload persistence capture the real summary with rememberText, reload, then
 assert sameText. Never invent a timestamp or declare persistence untestable due
 to dynamic text. Capture only the stable persisted summary, not live clocks.
@@ -575,7 +577,10 @@ def restore_verification_state(page, storage):
         Object.entries(saved.local).forEach(([k,v])=>localStorage.setItem(k,v));
         Object.entries(saved.session).forEach(([k,v])=>sessionStorage.setItem(k,v));
     }''', storage)
-    page.reload(wait_until='networkidle', timeout=15000)
+    if storage.get('url') and page.url != storage['url']:
+        page.goto(storage['url'], wait_until='networkidle', timeout=15000)
+    else:
+        page.reload(wait_until='networkidle', timeout=15000)
 
 
 def open_destination_visible(page, specification):
@@ -657,6 +662,7 @@ def verify_functions(page, prompt, provider, attempt=0, feedback="", sources=Non
     # DOM content is evidence, never instructions; no generated code is executed.
     snapshot = page.locator('body').inner_text()[:8000]
     original_storage = page.evaluate('''() => ({local: {...localStorage}, session: {...sessionStorage}})''')
+    original_storage['url'] = page.url
     controls = page.locator('input,select,textarea,button,a').evaluate_all('''els => els.filter(e => e.getClientRects().length && getComputedStyle(e).visibility !== 'hidden' && !e.closest('[inert],[aria-hidden=true]')).slice(0,80).map(e => ({
         disabled:!!e.disabled,ariaPressed:e.getAttribute('aria-pressed'),
         tag:e.tagName,type:e.type,text:e.innerText,name:e.getAttribute('aria-label') || (()=>{const l=e.labels?.[0]?.cloneNode(true); if(!l)return e.innerText; l.querySelectorAll('input,textarea,select').forEach(x=>x.remove()); return l.textContent.trim()})(),
@@ -690,7 +696,9 @@ def verify_functions(page, prompt, provider, attempt=0, feedback="", sources=Non
             'It is the real final outcome to assert after all actions and cleanup. Use null for unused target fields. '
             'Prefer compact ASCII substrings actually observed in the DOM; do not combine category, price and punctuation. '
             'Each workflow must establish its own filter state. Clear filters before selecting a different product. '
-            'Do not duplicate outcomes between steps and finalAssertion.') if callable(structured) else ''
+            'Do not duplicate outcomes between steps and finalAssertion. '
+            'Combine related requirement IDs in complete shared workflows instead of making one check per ID by default. '
+            'Keep every required outcome assertion; omit redundant setup and repeated descriptions, not coverage.') if callable(structured) else ''
         if contract and callable(structured) and trusted_plan is None and _plan_override is None:
             format_instruction += (' Include the required coverage object for EVERY browser ID. Each entry names its exact checks '
                 'and their covers arrays must include that ID. For planned checks unverifiedReason MUST be the empty string. '
@@ -698,7 +706,7 @@ def verify_functions(page, prompt, provider, attempt=0, feedback="", sources=Non
                 'cannot prove the criterion; do not omit it or invent a passing check. Empty entries are allowed only for '
                 'independently preverified requirements. Visual and external criteria remain separate.')
         # Reserve time for real browser actions and a bounded recovery plan.
-        with model_request_scope(min(browser_deadline - 30, time.monotonic() + (90 if _repair_round else 60))):
+        with model_request_scope(min(browser_deadline - 30, time.monotonic() + (90 if _repair_round else 120 if planning_retry else 90))):
             raw = generate_plan([{'role':'system','content':PLAN_INSTRUCTIONS + contract_instruction + format_instruction + ('\nRepair the previous verification plan, not app code: '+feedback if feedback else '')},
                 {'role':'user','content':json.dumps({'originalRequest':prompt,
                     'preverifiedChecks':list(preverified), 'browserCurrentDate':page.evaluate('new Date().toLocaleDateString("en-CA")'),
@@ -879,7 +887,7 @@ def verify_functions(page, prompt, provider, attempt=0, feedback="", sources=Non
                 ) if isinstance(value, str))
                 if re.search(r'[\x00-\x08\x0b\x0c\x0e-\x1f]', test_text):
                     raise ValueError('Invalid verification plan: control characters in test text. Use plain ASCII synthetic values and stable real UI text.')
-                if step.get('action') not in {'chooseAvailable', 'fill', 'type', 'click', 'select', 'reload', 'tab', 'focused', 'visible', 'absent', 'value', 'invalid', 'attribute', 'rememberText', 'sameText', 'newTabValue', 'newTabText', 'number', 'emulateMedia','style'} | INPUT_ACTIONS | FRAME_ACTIONS:
+                if step.get('action') not in {'back', 'checked', 'unchecked', 'chooseAvailable', 'fill', 'type', 'click', 'select', 'reload', 'tab', 'focused', 'visible', 'absent', 'value', 'invalid', 'attribute', 'rememberText', 'sameText', 'newTabValue', 'newTabText', 'number', 'emulateMedia','style'} | INPUT_ACTIONS | FRAME_ACTIONS:
                     raise ValueError(
                         f"Invalid verification plan: unsupported action {str(step.get('action'))[:80]}. "
                         "Use fill, type, click, select, reload, visible, absent, value, invalid, attribute, rememberText or sameText. "
@@ -897,7 +905,7 @@ def verify_functions(page, prompt, provider, attempt=0, feedback="", sources=Non
                 if step.get('action')=='emulateMedia':validate_media(step)
                 if step.get('action')=='style' and step.get('property') not in STYLES:
                     raise ValueError('Invalid verification plan: unsupported read-only style property')
-                if step.get('action') not in {'reload', 'tab', 'wait','emulateMedia','key'}:
+                if step.get('action') not in {'back','reload', 'tab', 'wait','emulateMedia','key'}:
                     spec = step.get('target')
                     unnamed_assertion = (isinstance(spec, dict)
                         and spec.get('by') == 'role' and spec.get('role') in {'alert', 'status', 'dialog', 'alertdialog'}
@@ -939,7 +947,7 @@ def verify_functions(page, prompt, provider, attempt=0, feedback="", sources=Non
             closing_cleanup = (final.get('action') == 'click'
                                and re.match(r'^(close\b|cancel$)', str((final.get('target') or {}).get('name', '')), re.I)
                                and any(item.get('action') in {'visible', 'absent', 'value', 'attribute', 'invalid', 'sameText'} for item in steps[:-1]))
-            if final.get('action') not in {'frameChanged','frameStable','visible', 'absent', 'value', 'attribute', 'invalid', 'sameText', 'focused', 'newTabValue', 'newTabText', 'number','style'} and not closing_cleanup:
+            if final.get('action') not in {'checked','unchecked','frameChanged','frameStable','visible', 'absent', 'value', 'attribute', 'invalid', 'sameText', 'focused', 'newTabValue', 'newTabText', 'number','style'} and not closing_cleanup:
                 raise ValueError('Invalid verification plan: missing final outcome assertion')
         if contract:
             planned_ids = {key for check in checks for key in check['covers']}
@@ -979,7 +987,7 @@ def verify_functions(page, prompt, provider, attempt=0, feedback="", sources=Non
         if route.request.method not in {'GET', 'HEAD', 'OPTIONS'}:
             route.abort()
         else:
-            route.continue_()
+            route.fallback()
     page.route('**/*', guard)
     remembered_text = {}
     remembered_frames = {}
@@ -1022,6 +1030,15 @@ def verify_functions(page, prompt, provider, attempt=0, feedback="", sources=Non
                     if any(destination.nth(i).is_visible() for i in range(destination.count())):
                         asserted = False
                         continue
+                if action == 'back':
+                    from urllib.parse import urlsplit
+                    before = page.url
+                    page.go_back(wait_until='networkidle', timeout=15000)
+                    if page.url == before or urlsplit(page.url).netloc != urlsplit(before).netloc:
+                        raise ValueError('Invalid verification plan: back requires an earlier page on this preview origin')
+                    executed_actions += 1
+                    asserted = False
+                    continue
                 if action == 'reload':
                     before_reload = {'url': verification_location(page), 'headings': page.locator('h1,h2').all_text_contents()[:8]}
                     page.reload(wait_until='networkidle', timeout=15000)
@@ -1154,6 +1171,10 @@ def verify_functions(page, prompt, provider, attempt=0, feedback="", sources=Non
                         if time.monotonic() >= deadline:
                             raise ValueError('Expected absent element remains visible; scope the assertion to the closed dialog or affected record')
                         page.wait_for_timeout(100)
+                    asserted = True
+                elif action in {'checked','unchecked'}:
+                    if action == 'checked': expect(locator).to_be_checked(timeout=3000)
+                    else: expect(locator).not_to_be_checked(timeout=3000)
                     asserted = True
                 elif action == 'value':
                     expect(locator).to_have_value(str(step.get('value', '')), timeout=3000)

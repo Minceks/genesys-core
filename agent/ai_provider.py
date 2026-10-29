@@ -1546,19 +1546,24 @@ class OpenAIProvider(AIProvider):
         design_stage = (not tools and response_schema is None and prepared
                         and prepared[0]['role'] == 'system'
                         and str(prepared[0]['content']).startswith('DEFAULT BUILD STANDARD:'))
+        verification_stage = bool(not tools and prepared and str(prepared[0]['content']).startswith('You are a browser verification planner.'))
         request_model = os.getenv('GENESYS_DESIGN_MODEL', 'gpt-5.4') if design_stage else self.model
+        if verification_stage:
+            request_model = os.getenv('GENESYS_VERIFICATION_MODEL') or 'gpt-5.4'
         options = dict(model=request_model, messages=prepared,
                        timeout=model_request_timeout(120 if response_schema is not None else 240 if design_stage else 180),
                        max_completion_tokens=min(24000, max(2000, int(os.getenv('GENESYS_OUTPUT_TOKEN_LIMIT', '12000')))))
         if design_stage:
             options['max_completion_tokens'] = min(24000, max(2000, int(os.getenv('GENESYS_DESIGN_OUTPUT_TOKEN_LIMIT','24000'))))
+        if verification_stage:
+            options['max_completion_tokens'] = min(12000, max(2000, int(os.getenv('GENESYS_VERIFICATION_OUTPUT_TOKEN_LIMIT','8000'))))
         if response_schema is not None:
             options['response_format'] = {'type': 'json_schema', 'json_schema': {
                 'name': 'browser_verification_plan', 'strict': True, 'schema': response_schema}}
         elif json_response_requested(prepared, tools):
             options['response_format'] = {'type': 'json_object'}
         if request_model.startswith(('gpt-5', 'gpt-6', 'o3', 'o4')):
-            options['reasoning_effort'] = os.getenv('GENESYS_REASONING_EFFORT','medium')
+            options['reasoning_effort'] = (os.getenv('GENESYS_VERIFICATION_REASONING_EFFORT','low') if verification_stage else os.getenv('GENESYS_REASONING_EFFORT','medium'))
         if tools:
             options.update(tools=tools, tool_choice='auto', parallel_tool_calls=True)
         # A length limit is recoverable. Discard the incomplete response,
