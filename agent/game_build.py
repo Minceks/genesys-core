@@ -159,25 +159,50 @@ def game_delivery_blockers(brief, review):
     return []
 
 
+def renderer_region(source):
+    """Recognize the foundation's rendering boundary; unknown engines stay owned."""
+    start=source.find('\n  function actor(')
+    end=source.find('\n  function point(',start+1)
+    if start<0 or end<=start or '\n  function render()' not in source[start:end]:return None
+    return start,end
+
+
+def validate_renderer_patch(before,after):
+    import difflib
+    original=renderer_region(before);updated=renderer_region(after)
+    if (not original or not updated or before[:original[0]]!=after[:updated[0]]
+            or before[original[1]:]!=after[updated[1]:]):
+        raise ValueError('Visual polish may only change the owned actor/render section')
+    # Rendering can update its camera projection and canvas, never gameplay state.
+    added='\n'.join(line[1:] for line in difflib.ndiff(before.splitlines(),after.splitlines()) if line.startswith('+ '))
+    state=r'(?:player|p|input|enemies|spawn|bullets|loadout|mode|score|kills|wave|level|health|cooldown|dashTime|pulseTime|worldTime|stains|particles|shake|flash)'
+    if (re.search(r'\b'+state+r'\s*(?:\.[A-Za-z_$][\w$]*|\[[^\]\n]+\])*\s*(?:[+*/%-]?=(?!=)|\+\+|--)',added)
+            or re.search(r'\b(?:step|hud|modeTo|setInput|onEvent|spawnWave|reset|localStorage|sessionStorage|eval|Function|setInterval|setTimeout|requestAnimationFrame)\s*[.(]',added)
+            or re.search(r'\b'+state+r'\.(?:push|pop|splice|shift|unshift|sort|reverse)\s*\(',added)):
+        raise ValueError('Visual polish cannot mutate simulation or install hidden behavior')
+
+
 def polish_game(workspace, feedback, provider):
     """A focused source-aware model edit; never restart the full conversation."""
     from .parallel_build import parsed
     sources={}
-    for path in ('src/styles.css','src/gameDesign.js'):
+    for path in ('src/styles.css','src/gameDesign.js','src/projectLogic.js'):
         try:
             content=workspace.read_file(path).get('content','')
+            if path=='src/projectLogic.js' and not renderer_region(content):continue
             if content:sources[path]=content
-        except (ValueError,FileNotFoundError,TypeError,AttributeError):pass
+        except (ValueError,FileNotFoundError,KeyError,TypeError,AttributeError):pass
     if not sources:raise ValueError('No game presentation source is available for polish')
     response=parsed(provider.generate([
         {'role':'system','content':
          'DEFAULT BUILD STANDARD: GAME TARGETED POLISH. You are repairing a complete tested game. '
          'Apply only the concrete screenshot findings using the supplied complete presentation files. '
-         'Return JSON {"edits":[{"path":"src/styles.css or src/gameDesign.js","old":"exact unique substring","new":"replacement"}]}. '
+         'Return JSON {"edits":[{"path":"src/styles.css or src/gameDesign.js or src/projectLogic.js","old":"exact unique substring","new":"replacement"}]}. '
          'At most six small edits. Preserve controls, states, data keys, simulation, mechanics, art, '
          'brand and scope. Correct unsupported setting copy rather than inventing weather or biomes. '
          'Never add test hooks, fake state or new dependencies. Do not hide requested actions or results. Responsive adaptation may replace desktop-only keyboard legends with readable touch guidance while preserving all game controls. '
-         'For CSS prefer a small appended override: old must be the empty string and new the complete scoped CSS. For gameDesign.js replace exact unique source text. Do not rewrite entire files. No commentary.'},
+         'The supplied projectLogic.js permits changes ONLY inside actor() and render(), ending before point(). Fix actor silhouettes, visual scale and camera zoom here when findings require it; CSS cannot change canvas art. Keep actors recognizable and distinguish actual enemies from offscreen directional indicators. Keep viewport-to-world view.z consistent with rendered zoom. Do not change simulation variables, damage, collisions, spawning, HUD callbacks, input, RAF or storage. '
+         'For CSS prefer a small appended override: old must be the empty string and new the complete scoped CSS. For JS replace exact unique source text. Do not rewrite entire files. No commentary.'},
         {'role':'user','_preserve_complete_source':True,'content':json.dumps({'feedback':str(feedback),'files':sources})}
     ],[]).text)
     edits=response.get('edits')
@@ -193,6 +218,8 @@ def polish_game(workspace, feedback, provider):
                 or proposed[path].count(old)!=1):raise ValueError('Game polish needs a unique, focused source replacement')
         proposed[path]=proposed[path].replace(old,new,1)
     changed=[path for path in sources if proposed[path]!=sources[path]]
+    if 'src/projectLogic.js' in changed:
+        validate_renderer_patch(sources['src/projectLogic.js'],proposed['src/projectLogic.js'])
     if 'src/gameDesign.js' in changed:
         def config(code):
             return json.loads(re.sub(r'^export\s+const\s+GAME_DESIGN\s*=\s*','',code).strip().removesuffix(';'))

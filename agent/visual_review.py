@@ -69,7 +69,7 @@ def review_screenshots(provider,brief,images,previous=None,*,capture_details=Non
     workflow = any(isinstance(v,dict) and 'workflow' in v for v in (capture_details or {}).values())
     phase = 'workflow' if workflow else 'entry'
     if (brief.get('productType') == 'game'
-            and re.search(r'\b(zombie|shooter|shooting|survival|combat)\b', str(brief.get('originalRequest','')), re.I)):
+            and re.search(r'\b(zombies?|shooter|shooting|survival|combat)\b', str(brief.get('originalRequest','')), re.I)):
         from pathlib import Path
         filename = 'action-survival-play.png' if workflow else 'action-survival-menu.png'
         benchmark = Path(__file__).with_name('benchmarks') / filename
@@ -90,7 +90,10 @@ def review_screenshots(provider,brief,images,previous=None,*,capture_details=Non
         context['product'] = {'productType':'game','request':brief.get('originalRequest',''),
                               'designPolicy':brief.get('designPolicy',{}),
                               'scope':'Judge captured entry as entry and checked action as action. Preserve the actual user request and accepted original art treatment.'}
-    raw=provider.review_images(INSTRUCTION,context,images,SCHEMA).text
+    import copy
+    schema=copy.deepcopy(SCHEMA)
+    schema['properties']['findings']['items']['properties']['screenshot']['enum']=sorted(label for label in labels if label.startswith('generated-'))
+    raw=provider.review_images(INSTRUCTION,context,images,schema).text
     value=json.loads(raw)
     if not isinstance(value,dict) or value.get('assessment') not in {'ready','needs_polish'} or not isinstance(value.get('summary'),str):
         raise ValueError('Invalid visual assessment')

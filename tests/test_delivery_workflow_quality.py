@@ -81,6 +81,18 @@ def test_failed_capture_does_not_invent_an_application_defect_or_pass():
     assert not evidence.images and not evidence.issues and evidence.unavailable
 
 
+def test_later_real_combat_replaces_early_action_within_the_image_budget():
+    page=Mock();page.viewport_size={'width':1000,'height':900}
+    page.evaluate.side_effect=lambda script:False if 'scrollWidth' in script else {'x':0,'y':0,'blockedControls':[]}
+    page.screenshot.return_value=b'actual-capture'
+    evidence=WorkflowEvidence()
+    for name in ['Menu','Rendered action frame: Early movement','Paused outcome','Rendered action frame: Real dual-touch combat']:
+        evidence.capture(page,name)
+    assert len(evidence.images)==6
+    action=[v for v in evidence.details.values() if v['kind']=='action-frame']
+    assert len(action)==2 and all(v['workflow'].endswith('Real dual-touch combat') for v in action)
+
+
 def test_workflow_review_stays_within_provider_image_budget_and_preserves_metadata(monkeypatch):
     from agent import browser as module
     from agent.visual_review import VisualPolishLoop

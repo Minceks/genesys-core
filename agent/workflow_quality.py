@@ -37,19 +37,27 @@ REACHABILITY_SCRIPT = '''() => {
 
 
 class WorkflowEvidence:
-    """Sample three checked states at two widths; no clicks, routes or state injection."""
+    """Retain three checked states at two widths; no clicks, routes or state injection."""
     def __init__(self):
         self.images = []
         self.details = {}
         self.issues = []
         self.unavailable = []
         self.states = 0
+        self.action_samples = 0
 
     def capture(self, page, name):
         action_frame = name.startswith('Rendered action frame: ')
-        has_action_frame = any(v.get('kind') == 'action-frame' for v in self.details.values())
-        if self.states >= 3 and (not action_frame or has_action_frame):
-            return
+        if action_frame and self.action_samples >= 3:return
+        if self.states >= 3:
+            if not action_frame:return
+            # Later checked combat is more representative than an early movement
+            # frame with distant enemies. Keep it without growing the image budget.
+            discard={key for key,value in self.details.items() if value.get('kind')=='action-frame'}
+            if not discard:discard={key for key,_ in self.images[:2]}
+            self.images=[item for item in self.images if item[0] not in discard]
+            self.details={key:value for key,value in self.details.items() if key not in discard}
+        if action_frame:self.action_samples += 1
         self.states += 1
         viewport = None
         scroll = None
@@ -89,4 +97,4 @@ class WorkflowEvidence:
 
     def summary(self):
         return {'capturedViews':self.details, 'limitations':self.unavailable,
-                'scope':'At most three real checked workflow states, sampled at desktop and phone widths; not exhaustive route or behavior coverage.'}
+                'scope':'Retains at most three real checked workflow states, sampled at desktop and phone widths; not exhaustive route or behavior coverage.'}

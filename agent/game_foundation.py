@@ -34,7 +34,7 @@ def survival_foundation_fits(prompt, brief):
     if (brief or {}).get('productType') != 'game':
         return False
     text=prompt.casefold()
-    if re.search(r'\b(3d|fps|first.person|third.person|platformer|puzzle|chess|card|racing|multiplayer|online|endless.only|minimal|prototype|isometric|strategy|rts|narrative|story|loot|pickups|procedural|inventory|crafting|snow|snowy|frozen|forest|desert|underwater|space|boss|bosses|grenades|rocket|sniper|grapple|building|shop|purchases|platforms)\b',text):
+    if re.search(r'\b(3d|fps|first.person|third.person|platformer|puzzle|chess|card|racing|multiplayer|online|endless.only|minimal|prototype|isometric|strategy|rts|narrative|story|tower.defen[cs]e|turn.based|clicker|idle|text.adventure|loot|pickups|procedural|inventory|crafting|snow|snowy|frozen|forest|desert|underwater|space|boss|bosses|grenades|rocket|sniper|grapple|building|shop|purchases|platforms)\b',text):
         return False
     if re.search(r'\b\d+\s+(zombies|enemies|waves)\b',text):
         return False
@@ -42,7 +42,7 @@ def survival_foundation_fits(prompt, brief):
         return False
     if re.search(r'\b([1-46-9]|one|two|three|four|six|seven|eight|nine)\s+(levels|sectors)\b',text):
         return False
-    return bool(re.search(r'\bzombie\b',text))
+    return bool(re.search(r'\bzombies?\b',text))
 
 
 def validate_survival_design(value):

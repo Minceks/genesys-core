@@ -83,6 +83,7 @@ def test_opening_game_review_accepts_scroll_sample_lists_without_mistaking_them_
     def review(instruction,context,images,schema):
         assert len(images)==3 and images[-1][0]=='reference-accepted-action-game-entry'
         assert context['reviewPhase']=='entry'
+        assert set(schema['properties']['findings']['items']['properties']['screenshot']['enum'])=={'generated-desktop','generated-phone'}
         return SimpleNamespace(text='{"assessment":"ready","summary":"Opening composition reviewed","findings":[]}')
     result=review_screenshots(SimpleNamespace(review_images=review),{'productType':'game','originalRequest':'Zombie survival'},
         [('generated-desktop',b'fixture'),('generated-phone',b'fixture')],
@@ -194,3 +195,30 @@ def test_visual_copy_repairs_preserve_saved_data_and_encounter_mechanics():
     with pytest.raises(ValueError,match='balance'):
         polish_game(Workspace(),'Only visual polish',provider('"dashCooldown": 4.5','"dashCooldown": 0'))
     assert files==before
+
+
+def test_visual_renderer_repairs_can_fix_art_and_camera_but_not_simulation():
+    from agent.game_build import validate_renderer_patch
+    from pathlib import Path
+    source=(Path(__file__).parents[1]/'agent/game_foundations/survival/projectLogic.js').read_text()
+    validate_renderer_patch(source,source.replace('(rect.width < 680 ? 1.12 : 1)','(rect.width < 680 ? 1.3 : 1)'))
+    validate_renderer_patch(source,source.replace('ctx.scale(size, size);','ctx.scale(size * 1.2, size * 1.2);'))
+    with pytest.raises(ValueError,match='owned actor/render'):
+        validate_renderer_patch(source,source.replace('player.hp--;','player.hp = 100;'))
+    with pytest.raises(ValueError,match='simulation'):
+        validate_renderer_patch(source,source.replace('ctx.scale(size, size);','player.hp = 100; ctx.scale(size, size);'))
+
+
+def test_focused_polisher_can_apply_an_agent_authored_camera_repair():
+    from agent.game_build import polish_game
+    from pathlib import Path
+    files={'src/styles.css':'main{min-height:100vh}', 'src/projectLogic.js':
+        (Path(__file__).parents[1]/'agent/game_foundations/survival/projectLogic.js').read_text()}
+    class Workspace:
+        def read_file(self,path):return {'content':files.get(path,'')}
+        def write_file(self,path,content):files[path]=content;return {'status':'success'}
+    def generate(messages,*_):
+        assert json.loads(messages[1]['content'])['files']['src/projectLogic.js']==files['src/projectLogic.js']
+        return SimpleNamespace(text=json.dumps({'edits':[{'path':'src/projectLogic.js','old':'(rect.width < 680 ? 1.12 : 1)','new':'(rect.width < 680 ? 1.3 : 1)'}]}))
+    assert polish_game(Workspace(),'Phone combat is too small',SimpleNamespace(generate=generate))==['src/projectLogic.js']
+    assert '(rect.width < 680 ? 1.3 : 1)' in files['src/projectLogic.js']

@@ -3505,7 +3505,7 @@ def _run_agent(
                     verification = verification_report(quality, content_result,
                         (product_brief or {}).get('buildSpecification'))
                     if quality['status'] == 'success' and content_result.get('unverifiedCore') and not content_result.get('issues'):
-                        return {"status":"error", "message":"The build is saved, but core function checks could not finish. Retry verification or report the problem.",
+                        return {"status":"error", "message":"The build is saved, but required verification did not finish. See the verification report for unresolved checks.",
                             "buildPassed":True, "browserVerified":False, "errorType":"verification_incomplete",
                             "verification":verification, "modifiedFiles":list(modified_files), "requestType":"build",
                             "previewStarted":preview_started, "previewUrl":preview_url}

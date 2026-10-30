@@ -20,8 +20,9 @@ def design():
 
 def test_foundation_is_selected_only_for_compatible_new_game_requests():
     assert survival_foundation_fits('Build a zombie wave survival game',{'productType':'game'})
-    for request in ['Zombie first person shooter','Zombie puzzle','Zombie wave multiplayer','Zombie wave shooter with three levels','Zombie wave without skills']:
+    for request in ['Zombie tower defense','Zombie turn based game','Zombie idle game','Zombie first person shooter','Zombie puzzle','Zombie wave multiplayer','Zombie wave shooter with three levels','Zombie wave without skills']:
         assert not survival_foundation_fits(request,{'productType':'game'})
+    assert survival_foundation_fits('Build a game with zombies and shooting',{'productType':'game'})
     assert not survival_foundation_fits('Zombie wave game',{'productType':'app'})
 
 
