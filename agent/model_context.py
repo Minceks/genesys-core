@@ -48,6 +48,24 @@ def reserve_model_budget(tokens):
         if used + tokens > limit:
             raise ModelBudgetExceeded('Daily model allowance reached. Saved project files are preserved; please return after the UTC daily reset.')
         db.execute('INSERT INTO model_allowance VALUES(?,?) ON CONFLICT(day) DO UPDATE SET reserved=excluded.reserved', (day, used+tokens))
+    return {'day':day,'tokens':tokens,'settled':False}
+
+
+def reconcile_model_budget(reservation, actual_tokens):
+    # Refund only this completed request's known excess; never alter historical
+    # reservations or refund a timeout whose provider usage is unknown.
+    if (not isinstance(reservation,dict) or reservation.get('settled')
+            or type(actual_tokens) is not int or actual_tokens<0):return
+    with connection() as db:
+        db.execute('UPDATE model_allowance SET reserved=max(0,reserved+?) WHERE day=?',
+                   (actual_tokens-reservation['tokens'],reservation['day']))
+    reservation['settled']=True
+
+
+class BudgetedMessages(list):
+    def __init__(self,messages,reservation):
+        super().__init__(messages);self.budget_reservation=reservation
+
 
 
 class CompleteSourceContextExceeded(ValueError):
@@ -72,7 +90,7 @@ def complete_source_context(messages, protected, allowance, count):
     return messages
 
 
-def bounded_messages(messages, tools, limit=None):
+def bounded_messages(messages, tools, limit=None, *, output_limit=24000, attempts=2):
     from .progress import model_request_timeout
     model_request_timeout(120)
     # Token estimates include schemas and envelope overhead. Provider tokenizers
@@ -89,12 +107,12 @@ def bounded_messages(messages, tools, limit=None):
     if allowance < 512:
         raise ValueError('Tool schemas exceed the configured model input budget.')
     if count(safe) <= allowance:
-        reserve_model_budget(2 * (count(safe) + count(tools) + 512 + 24000))
-        return safe
+        reservation=reserve_model_budget(attempts * (count(safe) + count(tools) + 512 + output_limit))
+        return BudgetedMessages(safe,reservation)
     if protected:
         result=complete_source_context(safe,protected,allowance,count)
-        reserve_model_budget(2 * (count(result) + count(tools) + 512 + 24000))
-        return result
+        reservation=reserve_model_budget(attempts * (count(result) + count(tools) + 512 + output_limit))
+        return BudgetedMessages(result,reservation)
     # Convert executed tool history to text to avoid orphaned function-call IDs.
     flat = []
     for message in safe:
@@ -136,5 +154,5 @@ def bounded_messages(messages, tools, limit=None):
     result = [kept[index] for index in sorted(kept)]
     if count(result) > allowance:
         raise ValueError('Unable to fit context into the configured input budget.')
-    reserve_model_budget(2 * (count(result) + count(tools) + 512 + 24000))
-    return result
+    reservation=reserve_model_budget(attempts * (count(result) + count(tools) + 512 + output_limit))
+    return BudgetedMessages(result,reservation)

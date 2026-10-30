@@ -162,6 +162,12 @@ class BrowserSession:
                 "Daytona preview did not return a URL."
             )
 
+        from .preview_proxy import publish_preview
+        from .preview_access import PreviewAccessBlocked, check_preview_document
+        try:
+            url = publish_preview(url, self.project_id)
+        except Exception as error:
+            raise PreviewAccessBlocked('The configured preview router is unavailable; application source is preserved.') from error
         self.playwright = sync_playwright().start()
 
         try:
@@ -200,6 +206,7 @@ class BrowserSession:
                 timeout=30000,
             )
 
+            check_preview_document(self.page)
             return self.page
 
         except Exception:
@@ -374,8 +381,12 @@ class BrowserSession:
         from .workflow_quality import WorkflowEvidence
         evidence = WorkflowEvidence() if capture_workflows else None
         self._workflow_evidence = evidence
-        result = verify_functions(page, prompt, provider, sources=sources, preverified=preverified, contract=contract,
-                                  _on_workflow=evidence.capture if evidence else None)
+        from .game_playtests import supports_contract, verify_foundation
+        if supports_contract(contract):
+            result = verify_foundation(page, prompt, provider, contract, sources, preverified, evidence.capture if evidence else None)
+        else:
+            result = verify_functions(page, prompt, provider, sources=sources, preverified=preverified, contract=contract,
+                                      _on_workflow=evidence.capture if evidence else None)
         if evidence:
             result['workflowDesignEvidence'] = evidence.summary()
             if evidence.issues:
@@ -403,6 +414,13 @@ class BrowserSession:
         from .ai_provider import OpenAIProvider
         import os
         images = evidence.images[-4:]
+        if (design_brief or {}).get('productType') == 'game':
+            action = [image for image in evidence.images if evidence.details[image[0]].get('kind') == 'action-frame']
+            # Keep actual rendered action evidence even if later checks end on menus/settings.
+            if not action and self.page is not None and self.page.locator('canvas').count():
+                return {'status':'unavailable', 'summary':'Canvas game has no checked rendered-action frames. Run a real movement/play workflow with frameChanged before approving game finish.', 'findings':[]}, False
+            if action:
+                images = action[:2] + [image for image in images if image[0] not in {a[0] for a in action[:2]}][-2:]
         details = {label:evidence.details[label] for label,_ in images}
         return vision_loop.run(get_workspace(self.project_id).build_fingerprint(),
             lambda previous: review_screenshots(

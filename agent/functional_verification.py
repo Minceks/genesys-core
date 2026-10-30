@@ -29,6 +29,10 @@ Canvas pixels can be checked without game hooks: rememberFrame captures a 64x64
 read-only sample, frameChanged asserts rendered change, frameStable asserts frozen
 rendering. Give each a key and the SAME normalized region {x,y,width,height} (or null
 for the full canvas). Comparisons use threshold as a fraction of changed pixels,
+For canvas action games include a real in-play input workflow with rememberFrame and
+frameChanged, plus observable gameplay outcomes. Do not finish every check on menus:
+active action frames are required for the separate game art/HUD review. Decorative
+idle drift is not movement or shooting evidence.
 e.g. .001. Capture, hold a movement key, release, then frameChanged to verify actual
 painted movement; combine this with HUD/state outcomes. For pause, capture AFTER
 pausing, wait, then frameStable. Do not compare different routes or canvas regions.
@@ -1126,6 +1130,8 @@ def verify_functions(page, prompt, provider, attempt=0, feedback="", sources=Non
                         locator = resolved
                 if action in FRAME_ACTIONS:
                     asserted=perform_frame(locator,step,remembered_frames)
+                    if action == 'frameChanged' and asserted and _on_workflow is not None:
+                        _on_workflow(page, 'Rendered action frame: '+name)
                     continue
                 if action in {'rememberText', 'sameText'}:
                     key = step.get('key')

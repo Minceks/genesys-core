@@ -171,6 +171,15 @@ def prepare_build_spec(workspace, prompt, brief, provider):
     request_hash = hashlib.sha256(prompt.encode()).hexdigest()
     replacing = brief.get('buildIntent') in {'replace-product', 'new-product'}
     previous = {}
+    from .game_foundation import survival_foundation_fits
+    if survival_foundation_fits(prompt, brief):
+        starter = workspace.read_file('src/App.jsx').get('content','')
+        if replacing or 'Your project is ready' in starter:
+            from .game_playtests import foundation_contract
+            spec = foundation_contract(prompt)
+            saved = workspace.write_file(SPEC_PATH,json.dumps(spec,ensure_ascii=False,indent=2))
+            if saved.get('status') != 'success':raise RuntimeError('Could not persist foundation game contract')
+            return spec
     try:
         previous = json.loads(workspace.read_file(SPEC_PATH).get('content', '{}'))
         if (previous.get('version') == 2 and previous.get('requestHash') == request_hash and previous.get('requirements')

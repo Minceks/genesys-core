@@ -1,0 +1,775 @@
+{
+  "requirements": [
+    {
+      "id": "r1-start-game-loads-level-1",
+      "name": "Deployment and keyboard start"
+    },
+    {
+      "id": "r2-player-movement-and-shoot",
+      "name": "Responsive movement and firing"
+    },
+    {
+      "id": "r3-wave-clear-progression",
+      "name": "Waves, upgrades and sector completion"
+    },
+    {
+      "id": "r4-pause-and-restart-flow",
+      "name": "Pause, resume and restart"
+    },
+    {
+      "id": "r5-persist-progress-setting",
+      "name": "Saved sector progression and reset"
+    },
+    {
+      "id": "r6-level-navigation-buttons",
+      "name": "Next sector and replay"
+    },
+    {
+      "id": "r7-reduced-motion",
+      "name": "Reduced motion and accessible controls"
+    },
+    {
+      "id": "r8-active-skills-and-builds",
+      "name": "Active skills and upgrade builds"
+    }
+  ],
+  "checks": [
+    {
+      "name": "Keyboard deployment and real browser return",
+      "covers": [
+        "r1-start-game-loads-level-1"
+      ],
+      "independent": true,
+      "steps": [
+        {
+          "action": "press",
+          "target": {
+            "by": "role",
+            "role": "button",
+            "name": "Start game",
+            "exact": true
+          },
+          "key": "Enter"
+        },
+        {
+          "action": "number",
+          "target": {
+            "by": "label",
+            "name": "Health",
+            "exact": true
+          },
+          "comparison": "eq",
+          "value": 5
+        },
+        {
+          "action": "back"
+        },
+        {
+          "action": "visible",
+          "target": {
+            "by": "role",
+            "role": "button",
+            "name": "Start game",
+            "exact": true
+          }
+        }
+      ]
+    },
+    {
+      "name": "Real movement, skills and frozen pause",
+      "covers": [
+        "r1-start-game-loads-level-1",
+        "r2-player-movement-and-shoot",
+        "r4-pause-and-restart-flow",
+        "r8-active-skills-and-builds"
+      ],
+      "independent": true,
+      "steps": [
+        {
+          "action": "click",
+          "target": {
+            "by": "role",
+            "name": "Start game",
+            "exact": true,
+            "role": "button"
+          }
+        },
+        {
+          "action": "rememberFrame",
+          "target": {
+            "by": "label",
+            "name": "Playfield canvas",
+            "exact": true
+          },
+          "key": "moving"
+        },
+        {
+          "action": "hold",
+          "target": {
+            "by": "label",
+            "name": "Playfield canvas",
+            "exact": true
+          },
+          "keys": [
+            "d"
+          ],
+          "durationMs": 300
+        },
+        {
+          "action": "frameChanged",
+          "target": {
+            "by": "label",
+            "name": "Playfield canvas",
+            "exact": true
+          },
+          "key": "moving",
+          "threshold": 0.001
+        },
+        {
+          "action": "press",
+          "target": {
+            "by": "label",
+            "name": "Playfield canvas",
+            "exact": true
+          },
+          "key": "e"
+        },
+        {
+          "action": "number",
+          "target": {
+            "by": "label",
+            "name": "Dash cooldown",
+            "exact": true
+          },
+          "comparison": "gt",
+          "value": 0
+        },
+        {
+          "action": "press",
+          "target": {
+            "by": "label",
+            "name": "Playfield canvas",
+            "exact": true
+          },
+          "key": "q"
+        },
+        {
+          "action": "number",
+          "target": {
+            "by": "label",
+            "name": "Pulse cooldown",
+            "exact": true
+          },
+          "comparison": "gt",
+          "value": 0
+        },
+        {
+          "action": "click",
+          "target": {
+            "by": "role",
+            "name": "Pause game",
+            "exact": true,
+            "role": "button"
+          }
+        },
+        {
+          "action": "wait",
+          "durationMs": 100
+        },
+        {
+          "action": "rememberFrame",
+          "target": {
+            "by": "label",
+            "name": "Playfield canvas",
+            "exact": true
+          },
+          "key": "paused"
+        },
+        {
+          "action": "wait",
+          "durationMs": 600
+        },
+        {
+          "action": "frameStable",
+          "target": {
+            "by": "label",
+            "name": "Playfield canvas",
+            "exact": true
+          },
+          "key": "paused",
+          "threshold": 0
+        },
+        {
+          "action": "click",
+          "target": {
+            "by": "role",
+            "name": "Resume game",
+            "exact": true,
+            "role": "button"
+          }
+        },
+        {
+          "action": "click",
+          "target": {
+            "by": "role",
+            "role": "button",
+            "name": "Pause game",
+            "exact": true
+          }
+        },
+        {
+          "action": "click",
+          "target": {
+            "by": "role",
+            "role": "button",
+            "name": "Restart level",
+            "exact": true
+          }
+        },
+        {
+          "action": "click",
+          "target": {
+            "by": "role",
+            "role": "button",
+            "name": "Dash skill",
+            "exact": true
+          }
+        },
+        {
+          "action": "number",
+          "target": {
+            "by": "label",
+            "name": "Dash cooldown",
+            "exact": true
+          },
+          "comparison": "gt",
+          "value": 0
+        },
+        {
+          "action": "click",
+          "target": {
+            "by": "role",
+            "role": "button",
+            "name": "Pulse skill",
+            "exact": true
+          }
+        },
+        {
+          "action": "number",
+          "target": {
+            "by": "label",
+            "name": "Pulse cooldown",
+            "exact": true
+          },
+          "comparison": "gt",
+          "value": 0
+        },
+        {
+          "action": "number",
+          "target": {
+            "by": "label",
+            "name": "Health",
+            "exact": true
+          },
+          "comparison": "gt",
+          "value": 0
+        }
+      ]
+    },
+    {
+      "name": "Normal combat, upgrade, sector completion and next-level restart",
+      "covers": [
+        "r2-player-movement-and-shoot",
+        "r3-wave-clear-progression",
+        "r4-pause-and-restart-flow",
+        "r6-level-navigation-buttons",
+        "r8-active-skills-and-builds"
+      ],
+      "independent": true,
+      "steps": [
+        {
+          "action": "click",
+          "target": {
+            "by": "role",
+            "name": "Start game",
+            "exact": true,
+            "role": "button"
+          }
+        },
+        {
+          "action": "rememberFrame",
+          "target": {
+            "by": "label",
+            "name": "Playfield canvas",
+            "exact": true
+          },
+          "key": "combat"
+        },
+        {
+          "action": "hold",
+          "target": {
+            "by": "label",
+            "name": "Playfield canvas",
+            "exact": true
+          },
+          "keys": [
+            "Space"
+          ],
+          "durationMs": 3000,
+          "untilVisible": {
+            "by": "role",
+            "name": "Choose your edge",
+            "exact": true,
+            "role": "dialog"
+          }
+        },
+        {
+          "action": "hold",
+          "target": {
+            "by": "label",
+            "name": "Playfield canvas",
+            "exact": true
+          },
+          "keys": [
+            "Space"
+          ],
+          "durationMs": 3000,
+          "untilVisible": {
+            "by": "role",
+            "name": "Choose your edge",
+            "exact": true,
+            "role": "dialog"
+          }
+        },
+        {
+          "action": "hold",
+          "target": {
+            "by": "label",
+            "name": "Playfield canvas",
+            "exact": true
+          },
+          "keys": [
+            "Space"
+          ],
+          "durationMs": 3000,
+          "untilVisible": {
+            "by": "role",
+            "name": "Choose your edge",
+            "exact": true,
+            "role": "dialog"
+          }
+        },
+        {
+          "action": "hold",
+          "target": {
+            "by": "label",
+            "name": "Playfield canvas",
+            "exact": true
+          },
+          "keys": [
+            "Space"
+          ],
+          "durationMs": 3000,
+          "untilVisible": {
+            "by": "role",
+            "name": "Choose your edge",
+            "exact": true,
+            "role": "dialog"
+          }
+        },
+        {
+          "action": "hold",
+          "target": {
+            "by": "label",
+            "name": "Playfield canvas",
+            "exact": true
+          },
+          "keys": [
+            "Space"
+          ],
+          "durationMs": 3000,
+          "untilVisible": {
+            "by": "role",
+            "name": "Choose your edge",
+            "exact": true,
+            "role": "dialog"
+          }
+        },
+        {
+          "action": "click",
+          "target": {
+            "by": "role",
+            "name": "Choose Rapid Fire",
+            "exact": true,
+            "role": "button"
+          }
+        },
+        {
+          "action": "number",
+          "target": {
+            "by": "label",
+            "name": "Fire rate multiplier",
+            "exact": true
+          },
+          "comparison": "gt",
+          "value": 1
+        },
+        {
+          "action": "hold",
+          "target": {
+            "by": "label",
+            "name": "Playfield canvas",
+            "exact": true
+          },
+          "keys": [
+            "Space"
+          ],
+          "durationMs": 3000,
+          "untilVisible": {
+            "by": "role",
+            "name": "Sector secured",
+            "exact": true,
+            "role": "dialog"
+          }
+        },
+        {
+          "action": "hold",
+          "target": {
+            "by": "label",
+            "name": "Playfield canvas",
+            "exact": true
+          },
+          "keys": [
+            "Space"
+          ],
+          "durationMs": 3000,
+          "untilVisible": {
+            "by": "role",
+            "name": "Sector secured",
+            "exact": true,
+            "role": "dialog"
+          }
+        },
+        {
+          "action": "hold",
+          "target": {
+            "by": "label",
+            "name": "Playfield canvas",
+            "exact": true
+          },
+          "keys": [
+            "Space"
+          ],
+          "durationMs": 3000,
+          "untilVisible": {
+            "by": "role",
+            "name": "Sector secured",
+            "exact": true,
+            "role": "dialog"
+          }
+        },
+        {
+          "action": "hold",
+          "target": {
+            "by": "label",
+            "name": "Playfield canvas",
+            "exact": true
+          },
+          "keys": [
+            "Space"
+          ],
+          "durationMs": 3000,
+          "untilVisible": {
+            "by": "role",
+            "name": "Sector secured",
+            "exact": true,
+            "role": "dialog"
+          }
+        },
+        {
+          "action": "hold",
+          "target": {
+            "by": "label",
+            "name": "Playfield canvas",
+            "exact": true
+          },
+          "keys": [
+            "Space"
+          ],
+          "durationMs": 3000,
+          "untilVisible": {
+            "by": "role",
+            "name": "Sector secured",
+            "exact": true,
+            "role": "dialog"
+          }
+        },
+        {
+          "action": "visible",
+          "target": {
+            "by": "role",
+            "name": "Sector secured",
+            "exact": true,
+            "role": "dialog"
+          }
+        },
+        {
+          "action": "frameChanged",
+          "target": {
+            "by": "label",
+            "name": "Playfield canvas",
+            "exact": true
+          },
+          "key": "combat",
+          "threshold": 0.001
+        },
+        {
+          "action": "number",
+          "target": {
+            "by": "label",
+            "name": "Score",
+            "exact": true
+          },
+          "comparison": "gt",
+          "value": 0
+        },
+        {
+          "action": "click",
+          "target": {
+            "by": "role",
+            "name": "Next level",
+            "exact": true,
+            "role": "button"
+          }
+        },
+        {
+          "action": "number",
+          "target": {
+            "by": "label",
+            "name": "Level number",
+            "exact": true
+          },
+          "comparison": "eq",
+          "value": 2
+        },
+        {
+          "action": "click",
+          "target": {
+            "by": "role",
+            "name": "Pause game",
+            "exact": true,
+            "role": "button"
+          }
+        },
+        {
+          "action": "click",
+          "target": {
+            "by": "role",
+            "name": "Restart level",
+            "exact": true,
+            "role": "button"
+          }
+        },
+        {
+          "action": "number",
+          "target": {
+            "by": "label",
+            "name": "Level number",
+            "exact": true
+          },
+          "comparison": "eq",
+          "value": 2
+        },
+        {
+          "action": "number",
+          "target": {
+            "by": "label",
+            "name": "Wave number",
+            "exact": true
+          },
+          "comparison": "eq",
+          "value": 1
+        }
+      ]
+    },
+    {
+      "name": "Saved progression reload and preference reversal",
+      "covers": [
+        "r1-start-game-loads-level-1",
+        "r5-persist-progress-setting"
+      ],
+      "steps": [
+        {
+          "action": "click",
+          "target": {
+            "by": "role",
+            "name": "Pause game",
+            "exact": true,
+            "role": "button"
+          }
+        },
+        {
+          "action": "click",
+          "target": {
+            "by": "role",
+            "name": "Return to menu",
+            "exact": true,
+            "role": "button"
+          }
+        },
+        {
+          "action": "reload"
+        },
+        {
+          "action": "click",
+          "target": {
+            "by": "role",
+            "name": "Start game",
+            "exact": true,
+            "role": "button"
+          }
+        },
+        {
+          "action": "number",
+          "target": {
+            "by": "label",
+            "name": "Level number",
+            "exact": true
+          },
+          "comparison": "eq",
+          "value": 2
+        },
+        {
+          "action": "click",
+          "target": {
+            "by": "role",
+            "name": "Open settings",
+            "exact": true,
+            "role": "button"
+          }
+        },
+        {
+          "action": "click",
+          "target": {
+            "by": "role",
+            "name": "Persist Progress",
+            "exact": true,
+            "role": "checkbox"
+          }
+        },
+        {
+          "action": "click",
+          "target": {
+            "by": "role",
+            "name": "Return to field",
+            "exact": true,
+            "role": "button"
+          }
+        },
+        {
+          "action": "click",
+          "target": {
+            "by": "role",
+            "name": "Return to menu",
+            "exact": true,
+            "role": "button"
+          }
+        },
+        {
+          "action": "click",
+          "target": {
+            "by": "role",
+            "name": "Start game",
+            "exact": true,
+            "role": "button"
+          }
+        },
+        {
+          "action": "number",
+          "target": {
+            "by": "label",
+            "name": "Level number",
+            "exact": true
+          },
+          "comparison": "eq",
+          "value": 1
+        }
+      ]
+    },
+    {
+      "name": "OS reduced motion and real keyboard deployment",
+      "covers": [
+        "r1-start-game-loads-level-1",
+        "r7-reduced-motion"
+      ],
+      "independent": true,
+      "steps": [
+        {
+          "action": "emulateMedia",
+          "reducedMotion": "reduce"
+        },
+        {
+          "action": "wait",
+          "durationMs": 150
+        },
+        {
+          "action": "rememberFrame",
+          "target": {
+            "by": "label",
+            "name": "Playfield canvas",
+            "exact": true
+          },
+          "key": "reduced"
+        },
+        {
+          "action": "wait",
+          "durationMs": 500
+        },
+        {
+          "action": "frameStable",
+          "target": {
+            "by": "label",
+            "name": "Playfield canvas",
+            "exact": true
+          },
+          "key": "reduced",
+          "threshold": 0
+        },
+        {
+          "action": "tabTo",
+          "target": {
+            "by": "role",
+            "name": "Start game",
+            "exact": true,
+            "role": "button"
+          }
+        },
+        {
+          "action": "focused",
+          "target": {
+            "by": "role",
+            "name": "Start game",
+            "exact": true,
+            "role": "button"
+          }
+        },
+        {
+          "action": "key",
+          "key": "Enter"
+        },
+        {
+          "action": "number",
+          "target": {
+            "by": "label",
+            "name": "Level number",
+            "exact": true
+          },
+          "comparison": "eq",
+          "value": 1
+        }
+      ]
+    }
+  ],
+  "unverified": [],
+  "unverifiedCore": []
+}

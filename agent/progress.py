@@ -42,8 +42,10 @@ def report_progress(stage: str) -> None:
         callback(stage)
 
 
-def draft_stage_deadline(deadline):
+def draft_stage_deadline(deadline, *, game=False):
     """Initial drafts cannot spend the compilation, repair and review reserve."""
     now = time.monotonic()
+    if game:
+        return min(now+540, deadline-min(240, max(120, (deadline-now)*.3)))
     reserve = min(300, max(120, (deadline-now)*.4))
     return min(now+420, deadline-reserve)

@@ -146,6 +146,9 @@ def review_draft(files, plan, source, provider):
 
 
 def draft_project(prompt, source, provider_for, deadline):
+    from .game_build import is_game_source, draft_game
+    if is_game_source(source):
+        return draft_game(prompt, source, provider_for, deadline)
     started = time.monotonic()
     if deadline - started < 100:
         return None

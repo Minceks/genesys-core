@@ -1505,8 +1505,13 @@ class OpenAIProvider(AIProvider):
             parts += [{'type':'text','text':label}, {'type':'image_url','image_url':{
                 'url':'data:'+mime+';base64,'+base64.b64encode(data).decode('ascii'),'detail':'high'}}]
         # Reserve text and a conservative image allowance through existing budgets.
-        bounded_messages([{'role':'system','content':instruction},{'role':'user','content':parts[0]['text']}],[])
-        reserve_model_budget(6000*len(images))
+        text_budget=bounded_messages([{'role':'system','content':instruction},{'role':'user','content':parts[0]['text']}],[],output_limit=6000,attempts=1)
+        try:
+            image_budget=reserve_model_budget(6000*len(images))
+        except Exception:
+            from .model_context import reconcile_model_budget
+            reconcile_model_budget(getattr(text_budget,'budget_reservation',None),0)
+            raise
         options=dict(model=self.model,messages=[{'role':'system','content':instruction},{'role':'user','content':parts}],
             max_completion_tokens=6000,timeout=90,
             response_format={'type':'json_schema','json_schema':{'name':'visual_design_review','strict':True,'schema':schema}})
@@ -1515,6 +1520,13 @@ class OpenAIProvider(AIProvider):
         from .progress import model_request_timeout
         options['timeout'] = model_request_timeout(90)
         response=self.client.chat.completions.create(**options)
+        from .model_context import reconcile_model_budget
+        actual=getattr(getattr(response,'usage',None),'total_tokens',None)
+        text_reservation=getattr(text_budget,'budget_reservation',None)
+        if type(actual) is int:
+            text_used=min(actual,text_reservation['tokens']) if text_reservation else 0
+            reconcile_model_budget(text_reservation,text_used)
+            reconcile_model_budget(image_budget,actual-text_used)
         record_model_usage(response)
         if not response.choices or response.choices[0].finish_reason!='stop' or not response.choices[0].message.content:
             raise RuntimeError('Visual review did not return a complete assessment')
@@ -1525,7 +1537,10 @@ class OpenAIProvider(AIProvider):
         if response_schema is not None:
             from .structured_schema import validate_schema_limits
             validate_schema_limits(response_schema)
-        messages = bounded_messages(messages, tools)
+        game_polish = bool(not tools and messages and 'GAME TARGETED POLISH.' in str(messages[0].get('content','')))
+        game_plan_input = bool(not tools and messages and 'GAME PRODUCTION PLAN.' in str(messages[0].get('content','')))
+        messages = (bounded_messages(messages, tools, output_limit=8000, attempts=1 if game_polish else 2) if game_polish or game_plan_input else bounded_messages(messages, tools))
+        budget_reservation = getattr(messages,'budget_reservation',None)
         # Strip provider-specific signatures without truncating source context.
         prepared = []
         for message in messages:
@@ -1543,7 +1558,7 @@ class OpenAIProvider(AIProvider):
             prepared.append(item)
         # Full product drafts/reviews use the stronger design tier. Keep tool
         # execution and constrained verification planning on their compatible tier.
-        design_stage = (not tools and response_schema is None and prepared
+        design_stage = (not tools and (response_schema is None or (prepared and 'GAME FOUNDATION DESIGN.' in str(prepared[0]['content']))) and prepared
                         and prepared[0]['role'] == 'system'
                         and str(prepared[0]['content']).startswith('DEFAULT BUILD STANDARD:'))
         verification_stage = bool(not tools and prepared and str(prepared[0]['content']).startswith('You are a browser verification planner.'))
@@ -1555,6 +1570,9 @@ class OpenAIProvider(AIProvider):
                        max_completion_tokens=min(24000, max(2000, int(os.getenv('GENESYS_OUTPUT_TOKEN_LIMIT', '12000')))))
         if design_stage:
             options['max_completion_tokens'] = min(24000, max(2000, int(os.getenv('GENESYS_DESIGN_OUTPUT_TOKEN_LIMIT','24000'))))
+        game_planning = bool(design_stage and 'GAME PRODUCTION PLAN.' in str(prepared[0]['content']))
+        if game_planning or game_polish:
+            options['max_completion_tokens'] = 8000
         if verification_stage:
             options['max_completion_tokens'] = min(12000, max(2000, int(os.getenv('GENESYS_VERIFICATION_OUTPUT_TOKEN_LIMIT','8000'))))
         if response_schema is not None:
@@ -1564,19 +1582,23 @@ class OpenAIProvider(AIProvider):
             options['response_format'] = {'type': 'json_object'}
         if request_model.startswith(('gpt-5', 'gpt-6', 'o3', 'o4')):
             options['reasoning_effort'] = (os.getenv('GENESYS_VERIFICATION_REASONING_EFFORT','low') if verification_stage else os.getenv('GENESYS_REASONING_EFFORT','medium'))
+        if (game_planning or game_polish) and request_model.startswith(('gpt-5', 'gpt-6', 'o3', 'o4')):
+            options['reasoning_effort'] = 'low'
         if tools:
             options.update(tools=tools, tool_choice='auto', parallel_tool_calls=True)
         # A length limit is recoverable. Discard the incomplete response,
         # then regenerate a smaller atomic edit with a bounded larger allowance.
         ceiling = min(24000, max(options['max_completion_tokens'],
                       int(os.getenv('GENESYS_OUTPUT_TOKEN_CEILING', '24000'))))
-        for attempt in range(2):
+        for attempt in range(1 if game_polish else 2):
             options['timeout'] = model_request_timeout(120 if response_schema is not None else 240 if design_stage else 180)
             logging.getLogger(__name__).info(
                 'openai_request phase=%s model=%s reasoning=%s output_limit=%s timeout_seconds=%.1f',
                 'design' if design_stage else 'verification' if response_schema is not None else 'tools' if tools else 'text',
                 request_model, options.get('reasoning_effort','default'), options['max_completion_tokens'], options['timeout'])
             response = self.client.chat.completions.create(**options)
+            from .model_context import reconcile_model_budget
+            reconcile_model_budget(getattr(options['messages'],'budget_reservation',budget_reservation),getattr(getattr(response,'usage',None),'total_tokens',None))
             record_model_usage(response)
             if not response.choices:
                 raise RuntimeError('OpenAI returned no completion.')
@@ -1585,6 +1607,8 @@ class OpenAIProvider(AIProvider):
                 request_model, choice.finish_reason, getattr(getattr(response,'usage',None),'completion_tokens',None))
             if choice.finish_reason != 'length':
                 break
+            if game_polish:
+                raise RuntimeError('Focused game polish exceeded its bounded output; source was preserved.')
             if attempt == 1:
                 raise RuntimeError('OpenAI still exceeded the output allowance after a smaller-edit retry; falling back without executing partial changes.')
             options['max_completion_tokens'] = min(ceiling, options['max_completion_tokens'] * 2)

@@ -46,7 +46,9 @@ class WorkflowEvidence:
         self.states = 0
 
     def capture(self, page, name):
-        if self.states >= 3:
+        action_frame = name.startswith('Rendered action frame: ')
+        has_action_frame = any(v.get('kind') == 'action-frame' for v in self.details.values())
+        if self.states >= 3 and (not action_frame or has_action_frame):
             return
         self.states += 1
         viewport = None
@@ -61,6 +63,7 @@ class WorkflowEvidence:
                 overflow = page.evaluate('document.documentElement.scrollWidth > innerWidth + 2')
                 key = f'generated-workflow-{self.states}-{label}'
                 self.details[key] = {'workflow':name[:180], 'width':width, 'height':height,
+                                     'kind':'action-frame' if action_frame else 'workflow-outcome',
                                      'overflow':overflow, **metrics,
                                      'scope':'Same checked state resized for visual review; not separate phone functional execution.'}
                 if overflow:

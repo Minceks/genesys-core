@@ -1,0 +1,84 @@
+{
+  "pages": [
+    "Deployment",
+    "Arena",
+    "Upgrade selection",
+    "Pause",
+    "Sector secured",
+    "Signal lost",
+    "Field settings"
+  ],
+  "requirements": [
+    {
+      "id": "r1-start-game-loads-level-1",
+      "name": "Deployment and keyboard start",
+      "scope": "browser",
+      "acceptance": "Deploy through pointer or focused keyboard activation into a visible health/score/wave HUD. Browser back returns to the menu; re-entry starts a fresh run."
+    },
+    {
+      "id": "r2-player-movement-and-shoot",
+      "name": "Responsive movement and firing",
+      "scope": "browser",
+      "acceptance": "Use keyboard or touch movement to change the rendered player/world position, release movement to stop, and fire through real inputs. Hits and eliminations change visible score; pause and restart remain usable."
+    },
+    {
+      "id": "r3-wave-clear-progression",
+      "name": "Waves, upgrades and sector completion",
+      "scope": "browser",
+      "acceptance": "Defeat the first wave with normal firing to open the upgrade selection. Choose an upgrade, complete the second wave and show Sector secured with nonzero score. No injected state or test hooks are used."
+    },
+    {
+      "id": "r4-pause-and-restart-flow",
+      "name": "Pause, resume and restart",
+      "scope": "browser",
+      "acceptance": "Pause freezes rendered gameplay and releases held input. Resume continues the same run. Restart level returns the current sector to its entry state with full starting health and wave one."
+    },
+    {
+      "id": "r5-persist-progress-setting",
+      "name": "Saved sector progression and reset",
+      "scope": "browser",
+      "acceptance": "With Persist Progress enabled, completing a sector unlocks the next sector and preserves it after reload. Disabling Persist Progress clears saved sector progression and deployment starts at sector one."
+    },
+    {
+      "id": "r6-level-navigation-buttons",
+      "name": "Next sector and replay",
+      "scope": "browser",
+      "acceptance": "Next level from Sector secured opens the next sector with fresh enemies. Restart level and Replay level reset the current sector rather than starting an unrelated level."
+    },
+    {
+      "id": "r7-reduced-motion",
+      "name": "Reduced motion and accessible controls",
+      "scope": "browser",
+      "acceptance": "The OS reduced-motion preference suppresses nonessential ambient drift, flashes and camera shake. Movement, firing and active skills remain available. Menu deployment works through real keyboard focus and Enter activation."
+    },
+    {
+      "id": "r8-active-skills-and-builds",
+      "name": "Active skills and upgrade builds",
+      "scope": "browser",
+      "acceptance": "Dash and Pulse activate from keyboard and touch controls and expose real cooldowns. Upgrade selection changes the run loadout; Rapid fire increases the visible fire-rate multiplier and affects subsequent firing."
+    },
+    {
+      "id": "r9-original-scene-and-ui",
+      "name": "Original arena art and responsive interface",
+      "scope": "visual",
+      "acceptance": "Review desktop and phone menu and actual action frames for coherent scene art, recognizable actors, readable HUD, reachable controls, responsive framing and no clipping. Respect the agent-authored original palette and identity."
+    },
+    {
+      "id": "r9-phone-touch",
+      "name": "Simultaneous phone movement and firing",
+      "scope": "browser",
+      "acceptance": "At 390px use two real concurrent touches on the movement pad and fire button; observe rendered movement and score from actual firing. Release touches, rotate/reload and retain reachable >=44px controls."
+    },
+    {
+      "id": "r10-loss-and-retry",
+      "name": "Natural loss and retry",
+      "scope": "browser",
+      "acceptance": "Allow normal enemy contact to reach the loss dialog without injecting state. Retry returns to wave one, full health and initial run score."
+    }
+  ],
+  "assetRules": [
+    "Use original canvas/vector world and character art. Public reference screenshots are research only and are not shipped.",
+    "No new framework, network dependency or image/font service. Preserve existing local saved-state keys."
+  ],
+  "designIntent": "Use the original survival foundation as an engineering and art baseline, with agent-authored identity, scene palette, mission content and fair progression. Inspect actual gameplay as well as menus."
+}

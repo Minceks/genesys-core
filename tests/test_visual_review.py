@@ -18,7 +18,7 @@ def assessment(major=False):
 def test_vision_adapter_sends_actual_image_content_and_accounts_for_usage(monkeypatch):
     from agent.ai_provider import OpenAIProvider
     calls=[];usage=[];budgets=[]
-    monkeypatch.setattr('agent.ai_provider.bounded_messages',lambda messages,tools:messages)
+    monkeypatch.setattr('agent.ai_provider.bounded_messages',lambda messages,tools,**kwargs:messages)
     monkeypatch.setattr('agent.model_context.reserve_model_budget',lambda tokens:budgets.append(tokens))
     monkeypatch.setattr('agent.ai_provider.record_model_usage',lambda response:usage.append(response))
     response=SimpleNamespace(choices=[SimpleNamespace(finish_reason='stop',message=SimpleNamespace(content=json.dumps(assessment())))])
@@ -28,7 +28,7 @@ def test_vision_adapter_sends_actual_image_content_and_accounts_for_usage(monkey
     content=calls[0]['messages'][1]['content']
     images=[part for part in content if part['type']=='image_url']
     assert len(images)==2 and all(part['image_url']['url'].startswith('data:image/jpeg;base64,') for part in images)
-    assert calls[0]['max_completion_tokens']==2400 and calls[0]['timeout']==60
+    assert calls[0]['max_completion_tokens']==6000 and calls[0]['timeout']==90
     assert calls[0]['response_format']['json_schema']['strict'] is True
     assert len(usage)==1 and budgets==[12000]
     assert review['status']=='ready' and len(review['screenshots'])==2

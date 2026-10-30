@@ -2519,13 +2519,15 @@ def _run_agent(
 
     # Parallelize only an untouched clean starter. Existing applications use
     # the established edit flow, preserving ownership and verification semantics.
-    if os.getenv('GENESYS_PARALLEL_BUILD', 'false').lower() == 'true' and not recovery_context and not verification_retry and project_id != PROJECT_ID_DEFAULT:
+    game_production = (product_brief or {}).get('productType') == 'game'
+    if (game_production or os.getenv('GENESYS_PARALLEL_BUILD', 'false').lower() == 'true') and not recovery_context and not verification_retry and project_id != PROJECT_ID_DEFAULT:
         try:
             starter = workspace.read_file('src/App.jsx')
             starter_text = starter.get('content', '') if isinstance(starter, dict) else ''
-            if 'Your project is ready' in starter_text and settings.openai_api_key and settings.gemini_api_key:
+            from .game_build import needs_game_draft
+            if ('Your project is ready' in starter_text or needs_game_draft(starter_text,prompt,product_brief)) and settings.openai_api_key and (game_production or settings.gemini_api_key):
                 from .parallel_build import draft_project
-                report_progress('Building UI and application logic in parallel')
+                report_progress('Starting game production' if game_production else 'Building UI and application logic in parallel')
                 starter_files = {'src/App.jsx': starter_text}
                 for path in ('src/usePersistentState.js', 'src/styles.css', 'src/main.jsx', 'index.html'):
                     starter_files[path] = workspace.read_file(path).get('content', '')
@@ -2535,10 +2537,14 @@ def _run_agent(
                     'designGuidance': project_design_guidance(project_id, (product_brief or {}).get('productType')),
                     'files': starter_files}, ensure_ascii=False)
                 from .progress import draft_stage_deadline
-                draft_deadline = draft_stage_deadline(agent_deadline)
+                draft_deadline = draft_stage_deadline(agent_deadline, game=game_production)
                 with model_request_scope(draft_deadline):
                     drafts = draft_project(prompt, shared_source, provider_for, draft_deadline)
+                if game_production and not drafts:
+                    raise RuntimeError('Game production budget ended before a complete draft was available')
                 if drafts:
+                    from .builder_controls import assert_writable
+                    for path in drafts:assert_writable(project_id,path)
                     for path, content in drafts.items():
                         result = workspace.write_file(path, content)
                         if not isinstance(result, dict) or result.get('status') != 'success':
@@ -2555,6 +2561,10 @@ def _run_agent(
             # Keep complete owned drafts and exact review findings. Restarting
             # from the placeholder wastes completed work and the repair budget.
             from .parallel_build import DraftReviewFailed
+            if game_production and not isinstance(draft_error, DraftReviewFailed):
+                return {'status':'error', 'errorType':'game_draft_incomplete',
+                    'message':'Game production did not finish. The project is preserved for retry; no basic substitute was published.',
+                    'buildPassed':False, 'browserVerified':False, 'modifiedFiles':list(modified_files)}
             if isinstance(draft_error, DraftReviewFailed):
                 for path, content in draft_error.drafts.items():
                     result = workspace.write_file(path, content)
@@ -2585,6 +2595,7 @@ def _run_agent(
             report_progress('Rebuilding saved changes before verification')
 
     from .visual_review import VisualPolishLoop, VisualPolishNeeded
+    from .preview_access import PreviewAccessBlocked
     visual_polish = VisualPolishLoop()
     workflow_polish = VisualPolishLoop()
     for step in range(1, TOTAL_MAX_STEPS + 1):
@@ -3455,7 +3466,7 @@ def _run_agent(
                 if project_id != PROJECT_ID_DEFAULT:
                     report_progress("Checking visual layout")
                     quality = get_browser(project_id).visual_quality(
-                        vision_loop=visual_polish if (not narrow_edit and not verification_retry and os.getenv('GENESYS_VISUAL_REVIEW','1')!='0') else None,
+                        vision_loop=visual_polish if (not narrow_edit and (not verification_retry or game_production) and os.getenv('GENESYS_VISUAL_REVIEW','1')!='0') else None,
                         design_brief=product_brief,
                         reference=(product_brief or {}).get('referenceAnalysis'),
                         public_website=(product_brief or {}).get('presentationContract', {}).get('mode') == 'public-website',
@@ -3485,6 +3496,9 @@ def _run_agent(
                             raise VisualPolishNeeded(json.dumps(workflow_review, ensure_ascii=False))
                         from .workflow_quality import remaining_design_blockers
                         content_result.setdefault('unverifiedCore', []).extend(remaining_design_blockers(workflow_review))
+                        from .game_build import game_delivery_blockers
+                        content_result['unverifiedCore'].extend(game_delivery_blockers(product_brief, workflow_review))
+                        content_result['unverifiedCore'].extend(game_delivery_blockers(product_brief, quality.get('visualReview') or {'status':'unavailable','summary':'Opening game composition was not reviewed.'}))
                         if workflow_review.get('status') != 'ready':
                             quality.setdefault('suggestions', []).append('Workflow screenshot review: '+workflow_review.get('summary','Not completed.'))
                     from .verification_report import verification_report
@@ -3561,6 +3575,10 @@ def _run_agent(
                         "checkpoint": checkpoint_result,
                 }
 
+            except PreviewAccessBlocked as exc:
+                return {'status':'error','errorType':'preview_access_blocked','message':str(exc),
+                    'buildPassed':build_passed,'browserVerified':False,'modifiedFiles':list(modified_files),
+                    'previewStarted':preview_started,'previewUrl':preview_url}
             except VisualPolishNeeded as exc:
                 report_progress('Refining the rendered design from screenshot feedback')
                 recovery_waiting_for_model=True
@@ -3574,6 +3592,20 @@ def _run_agent(
                     'data keys, stored records, user theme and feature scope. Do not recreate the project, delete '
                     'content or add dependencies to conceal a problem. Finish edits, then the system will rebuild, '
                     'review the new screenshots and rerun functional checks.\n'+str(exc)})
+                if game_production:
+                    from .game_build import polish_game
+                    try:
+                        edited = polish_game(workspace, str(exc), provider_for('openai'))
+                    except Exception as polish_error:
+                        return {'status':'error','errorType':'verification_incomplete',
+                            'message':'The game is saved, but its screenshot corrections did not finish. Retry verification.',
+                            'buildPassed':build_passed,'browserVerified':False,'modifiedFiles':list(modified_files),
+                            'verification':{'incomplete':[str(polish_error)[:500]]}}
+                    for path in edited:
+                        if path not in modified_files:modified_files.append(path)
+                    changed_since_build=True
+                    implementation_ready=True
+                    recovery_waiting_for_model=False
                 stop_browser(project_id)
                 continue
             except Exception as exc:
