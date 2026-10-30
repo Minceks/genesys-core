@@ -9,7 +9,6 @@ export function Footer() {
         <p className="m-0">Describe it. Build it. Check it. Publish it.</p>
         <nav aria-label="Footer">
           <Link to="/pricing">Pricing</Link>
-          <Link to="/terms">Terms</Link>
           <Link to="/account">Your projects</Link>
         </nav>
       </div>
