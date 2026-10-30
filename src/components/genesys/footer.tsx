@@ -1,16 +1,18 @@
-import React from 'react';
+import { Link } from '@tanstack/react-router'
+import { Brand } from './brand'
 
 export function Footer() {
   return (
-    <footer className="py-12 border-t border-white/5 text-center">
-      <p className="text-xs font-bold tracking-[0.3em] text-white/20 uppercase">
-        Genesys AI — Independent System Core
-      </p>
-      <div className="mt-4 flex justify-center gap-8 text-xs text-white/40 font-bold uppercase tracking-widest">
-        <a href="#" className="hover:text-blue-400 transition-colors">Privacy</a>
-        <a href="#" className="hover:text-blue-400 transition-colors">Terms</a>
-        <a href="#" className="hover:text-blue-400 transition-colors">Twitter</a>
+    <footer className="g-footer">
+      <div className="g-container g-footer-inner">
+        <Brand size={24} />
+        <p className="m-0">Describe it. Build it. Check it. Publish it.</p>
+        <nav aria-label="Footer">
+          <Link to="/pricing">Pricing</Link>
+          <Link to="/terms">Terms</Link>
+          <Link to="/account">Your projects</Link>
+        </nav>
       </div>
     </footer>
-  );
+  )
 }

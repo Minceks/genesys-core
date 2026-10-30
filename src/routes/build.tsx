@@ -9,9 +9,9 @@ import React, {
   useState,
 } from "react";
 
-import { Navbar } from "@/components/genesys/navbar";
+import { BrandMark } from "@/components/genesys/brand";
 import { askGenesys } from "@/utils/ai.functions";
-import { BuilderControls, type BuilderMode } from '@/components/genesys/builder-controls';
+import { BuilderControls, ModeSwitch, type BuilderMode } from '@/components/genesys/builder-controls';
 import { VisualReview } from '@/components/genesys/visual-review';
 import { VersionHistory } from '@/components/genesys/version-history';
 import { AppBackend } from '@/components/genesys/app-backend';
@@ -29,6 +29,14 @@ import {
   Check,
   AlertCircle,
   ExternalLink,
+  ArrowLeft,
+  ArrowRight,
+  Monitor,
+  MousePointerClick,
+  SlidersHorizontal,
+  Smartphone,
+  Sparkles,
+  X,
 } from "lucide-react";
 
 const MarkdownMessage = React.lazy(() => import('@/components/genesys/markdown-message'));
@@ -196,6 +204,7 @@ function BuildPage({ projectId }: { projectId: string }) {
   const [previewConnecting, setPreviewConnecting] = useState(false);
   const previewRequest = useRef(false);
   const [mobilePane, setMobilePane] = useState<'chat' | 'preview'>('chat');
+  const [toolsOpen, setToolsOpen] = useState(false);
 
   const [previewOnline, setPreviewOnline] =
     useState(false);
@@ -574,36 +583,32 @@ function BuildPage({ projectId }: { projectId: string }) {
   // ==========================================================
 
   return (
-    <div className="genesys-builder flex flex-col h-screen bg-[#020202] text-white overflow-hidden font-sans">
-      <Navbar />
-
-      <div className="fixed left-0 right-0 top-16 z-30 flex gap-2 border-b border-white/10 bg-zinc-950 px-4 py-2 lg:hidden" role="group" aria-label="Builder panels">
-        <button type="button" aria-pressed={mobilePane==='chat'} onClick={()=>setMobilePane('chat')} className="min-h-10 rounded-lg border border-white/20 px-4">Chat</button>
-        <button type="button" aria-pressed={mobilePane==='preview'} onClick={()=>setMobilePane('preview')} className="min-h-10 rounded-lg border border-white/20 px-4">Preview</button>
-        <a href="/account" className="ml-auto inline-flex min-h-10 items-center px-2 text-sm text-blue-300">Projects</a>
-      </div>
-      <div className="flex min-h-0 flex-1 pt-32 lg:pt-16 overflow-hidden">
+    <div className="genesys-builder">
+      <header className="builder-topbar">
+        <a href="/account" className="g-btn g-btn-ghost g-btn-icon" aria-label="All projects" title="All projects"><ArrowLeft size={18} /></a>
+        <a href="/" aria-label="GeneSys home" className="g-brand"><BrandMark size={26} /></a>
+        <span className="builder-divider" />
+        <div className="builder-status"><span className={`status-dot ${loading ? 'is-busy' : previewOnline ? 'is-ready' : ''}`} /><span aria-live="polite">{loading ? agentStage || 'Working on your request' : 'Ready for your next idea'}</span></div>
+        <div className="builder-panes" role="group" aria-label="Builder panels">
+          <button type="button" aria-pressed={mobilePane==='chat'} onClick={()=>setMobilePane('chat')}>Chat</button>
+          <button type="button" aria-pressed={mobilePane==='preview'} onClick={()=>setMobilePane('preview')}>Preview</button>
+        </div>
+        <div className="builder-actions">
+          <button type="button" className="g-btn g-btn-secondary g-btn-sm" aria-haspopup="dialog" aria-expanded={toolsOpen} aria-label="Project tools" onClick={()=>setToolsOpen(true)}><SlidersHorizontal size={15} /><span className="g-btn-label">Project tools</span></button>
+          <PublishProject key={publicationCandidate?.checkpointId || 'unverified'} projectId={projectId} candidate={publicationCandidate} busy={loading} />
+        </div>
+      </header>
+      <div className="builder-body">
 
         {/* ================================================== */}
         {/* COLUMN 1 — PROJECT EXPLORER                       */}
         {/* ================================================== */}
 
-        <aside className="workspace-explorer w-56 shrink-0 border-r border-white/5 bg-zinc-950/80 p-4 hidden lg:flex flex-col overflow-y-auto">
+        <aside className="workspace-explorer">
 
-          <a href="/account" className="mb-5 inline-flex min-h-11 items-center text-sm text-blue-200">← All projects</a>
-
-          <div className="flex items-center justify-between mb-6 opacity-60">
-            <span className="text-[9px] font-black uppercase tracking-[0.3em]">
-              Project Explorer
-            </span>
-
-            <RefreshCw
-              size={12}
-              onClick={() => {
-                void refreshFiles();
-              }}
-              className="cursor-pointer hover:rotate-180 transition-all"
-            />
+          <div className="explorer-title">
+            <span>Project files</span>
+            <button type="button" aria-label="Refresh project files" title="Refresh project files" onClick={() => { void refreshFiles(); }}><RefreshCw size={13} /></button>
           </div>
 
 
@@ -618,7 +623,7 @@ function BuildPage({ projectId }: { projectId: string }) {
                   className="text-blue-400/70"
                 />
 
-                <h4 className="text-[8px] font-bold text-blue-400/50 uppercase tracking-widest">
+                <h4 className="text-xs font-bold text-blue-400/50">
                   Routes
                 </h4>
               </div>
@@ -630,7 +635,7 @@ function BuildPage({ projectId }: { projectId: string }) {
                     (file) => (
                       <div
                         key={file}
-                        className="text-[10px] text-white/35 p-1.5 rounded font-mono flex items-center gap-2 hover:bg-white/5 hover:text-white/70 transition-colors"
+                        className="text-xs text-white/60 p-1.5 rounded font-mono flex items-center gap-2 hover:bg-white/5 hover:text-white/70 transition-colors"
                         title={file}
                       >
                         <FileCode
@@ -646,7 +651,7 @@ function BuildPage({ projectId }: { projectId: string }) {
                   )}
                 </div>
               ) : (
-                <div className="text-[9px] text-white/15 px-2">
+                <div className="text-xs text-white/50 px-2">
                   No routes found
                 </div>
               )}
@@ -662,7 +667,7 @@ function BuildPage({ projectId }: { projectId: string }) {
                   className="text-purple-400/70"
                 />
 
-                <h4 className="text-[8px] font-bold text-purple-400/50 uppercase tracking-widest">
+                <h4 className="text-xs font-bold text-purple-400/50">
                   Components
                 </h4>
               </div>
@@ -674,7 +679,7 @@ function BuildPage({ projectId }: { projectId: string }) {
                     (file) => (
                       <div
                         key={file}
-                        className="text-[10px] text-white/35 p-1.5 rounded font-mono flex items-center gap-2 hover:bg-white/5 hover:text-white/70 transition-colors"
+                        className="text-xs text-white/60 p-1.5 rounded font-mono flex items-center gap-2 hover:bg-white/5 hover:text-white/70 transition-colors"
                         title={file}
                       >
                         <FileCode
@@ -690,7 +695,7 @@ function BuildPage({ projectId }: { projectId: string }) {
                   )}
                 </div>
               ) : (
-                <div className="text-[9px] text-white/15 px-2">
+                <div className="text-xs text-white/50 px-2">
                   No components found
                 </div>
               )}
@@ -704,9 +709,7 @@ function BuildPage({ projectId }: { projectId: string }) {
         {/* COLUMN 2 — CHAT                                  */}
         {/* ================================================== */}
 
-        <aside className={`workspace-chat ${mobilePane === 'chat' ? 'flex' : 'hidden'} lg:flex w-full lg:w-[420px] shrink-0 border-r border-white/5 flex-col min-h-0 bg-zinc-950/40 backdrop-blur-xl`}>
-
-          <div className="border-b border-white/10 px-5 py-4"><p className="text-sm font-semibold">Your creative workspace</p><p className="workspace-status mt-1" aria-live="polite">{loading ? agentStage || 'Working on your request' : 'Ready for your next idea'}</p></div>
+        <aside className={`workspace-chat ${mobilePane === 'chat' ? 'flex' : 'hidden'} lg:flex`}>
 
           {/* CHAT HISTORY */}
 
@@ -716,26 +719,17 @@ function BuildPage({ projectId }: { projectId: string }) {
           >
 
             {messages.length === 0 && (
-              <div className="workspace-empty h-full flex flex-col items-center justify-center text-center px-8">
-                <div className="w-12 h-12 rounded-2xl bg-blue-500/10 border border-blue-500/10 flex items-center justify-center mb-4">
-                  <Brain
-                    size={22}
-                    className="text-blue-400/60"
-                  />
+              <div className="workspace-empty min-h-full flex flex-col items-center justify-center text-center px-4 py-6">
+                <div className="preview-empty-icon mb-3"><Sparkles size={22} /></div>
+                <h3 className="m-0 mb-2">What should we build?</h3>
+                <p className="m-0">Describe your idea below. GeneSys builds it, tests it in a browser and shows a live preview.</p>
+                <div className="starter-prompts">
+                  {[['A landing page for my business', 'Build a modern landing page for my business with a clear offer, features, testimonials from sample customers labelled as examples, and a contact form.'],
+                    ['A booking app', 'Build a booking app with services, available time slots, a confirmation step and saved appointments.'],
+                    ['An online store', 'Build an online store with a product catalogue, product pages, a cart and a checkout flow.']].map(([label, prompt]) => (
+                    <button type="button" key={label} disabled={loading} onClick={() => setInput(prompt)}>{label}<ArrowRight size={14} /></button>
+                  ))}
                 </div>
-
-                <h3 className="text-sm font-semibold text-white/70 mb-2">
-                  Let’s make something yours.
-                </h3>
-
-                <p className="text-[11px] leading-relaxed text-white/25">
-                  Describe what you want to
-                  build. GeneSys will inspect
-                  the project, edit the real
-                  files, build the application,
-                  repair errors, and launch the
-                  live preview.
-                </p>
               </div>
             )}
 
@@ -753,7 +747,7 @@ function BuildPage({ projectId }: { projectId: string }) {
                   {/* AGENT LABEL */}
 
                   {message.agent && (
-                    <div className="text-[9px] font-bold text-blue-400/50 uppercase tracking-widest mb-2">
+                    <div className="text-xs font-bold text-blue-400/50 mb-2">
                       {message.agent}
                     </div>
                   )}
@@ -762,8 +756,8 @@ function BuildPage({ projectId }: { projectId: string }) {
                   {/* THOUGHT */}
 
                   {message.thought && (
-                    <div className="mb-2 p-3 bg-blue-500/5 border border-blue-500/10 rounded-xl text-[10px] text-blue-300 italic w-full leading-relaxed">
-                      💭 {message.thought}
+                    <div className="mb-2 p-3 bg-blue-500/5 border border-blue-500/10 rounded-xl text-xs text-blue-300 italic w-full leading-relaxed">
+                      {message.thought}
                     </div>
                   )}
 
@@ -779,7 +773,7 @@ function BuildPage({ projectId }: { projectId: string }) {
                   )}
 
                   {message.plan && (
-                    <div className="mb-2 p-3 bg-emerald-500/5 border border-emerald-500/10 rounded-xl text-[10px] text-emerald-400 w-full">
+                    <div className="mb-2 p-3 bg-emerald-500/5 border border-emerald-500/10 rounded-xl text-xs text-emerald-400 w-full">
                       <ReactMarkdown>
                         {message.plan}
                       </ReactMarkdown>
@@ -792,8 +786,8 @@ function BuildPage({ projectId }: { projectId: string }) {
                   <div
                     className={`p-4 rounded-2xl text-sm max-w-full ${
                       message.role === "user"
-                        ? "bg-blue-600 shadow-xl shadow-blue-900/20"
-                        : "bg-zinc-900 border border-white/5"
+                        ? "chat-bubble-user"
+                        : "chat-bubble-bot"
                     }`}
                   >
                     <React.Suspense fallback={<p>{message.text}</p>}>
@@ -811,7 +805,7 @@ function BuildPage({ projectId }: { projectId: string }) {
                     message.hasFile && (
                       <div className="mt-2 space-y-1">
 
-                        <div className="flex items-center gap-1 text-[8px] font-black text-green-500/60 bg-green-500/5 px-2 py-1 rounded-full border border-green-500/10 uppercase tracking-widest">
+                        <div className="flex items-center gap-1 text-xs font-semibold text-green-500/60 bg-green-500/5 px-2 py-1 rounded-full border border-green-500/10">
                           <Check size={8} />
 
                           {
@@ -839,7 +833,7 @@ function BuildPage({ projectId }: { projectId: string }) {
                             (file) => (
                               <div
                                 key={file}
-                                className="text-[9px] text-white/25 font-mono px-2"
+                                className="text-xs text-white/55 font-mono px-2"
                               >
                                 • {file}
                               </div>
@@ -856,17 +850,17 @@ function BuildPage({ projectId }: { projectId: string }) {
                     "bot" &&
                     message.buildPassed && (
                       message.browserVerified ? (
-                        <div className="flex items-center gap-1 mt-2 text-[8px] font-black text-emerald-400/60 bg-emerald-500/5 px-2 py-1 rounded-full border border-emerald-500/10 uppercase tracking-widest">
+                        <div className="flex items-center gap-1 mt-2 text-xs font-semibold text-emerald-400/60 bg-emerald-500/5 px-2 py-1 rounded-full border border-emerald-500/10">
                           <Check size={8} />
                           Build and checks passed
                         </div>
                       ) : (
-                        <div className="flex items-center gap-1 mt-2 text-[8px] font-black text-amber-400/70 bg-amber-500/5 px-2 py-1 rounded-full border border-amber-500/10 uppercase tracking-widest">
+                        <div className="flex items-center gap-1 mt-2 text-xs font-semibold text-amber-400/70 bg-amber-500/5 px-2 py-1 rounded-full border border-amber-500/10">
                           Saved, not verified
                         </div>
                       )
                     )}
-                  {message.metrics && <p className="mt-2 text-[10px] text-white/40">
+                  {message.metrics && <p className="mt-2 text-xs text-white/40">
                     {message.metrics.durationSeconds}s · {message.metrics.modelResponses} model responses · {message.metrics.reportedTokens.toLocaleString()} reported tokens · {message.metrics.filesChanged} files
                   </p>}
 
@@ -887,11 +881,11 @@ function BuildPage({ projectId }: { projectId: string }) {
                   />
 
                   <div>
-                    <div className="text-[10px] font-bold text-white/60 uppercase tracking-widest">
+                    <div className="text-xs font-bold text-white/60">
                       {agentStage || 'GeneSys is working'}
                     </div>
 
-                    <div className="text-[9px] text-white/25 mt-1">
+                    <div className="text-xs text-white/55 mt-1">
                       Inspecting → Editing →
                       Building → Verifying
                     </div>
@@ -906,25 +900,14 @@ function BuildPage({ projectId }: { projectId: string }) {
 
           {/* INPUT */}
 
-          <div className="workspace-composer p-4 bg-black/40 border-t border-white/5">
-            <div className="workspace-options">
-            <BuilderControls projectId={projectId} mode={mode} onModeChange={setMode} busy={loading} />
-            <VisualReview projectId={projectId} busy={loading} />
-            <VersionHistory projectId={projectId} busy={loading} onRestored={()=>{setPublicationCandidate(null);setPreviewNotice('Source restored. Send a Build request to compile and verify it before publishing.');void refreshFiles();}} />
-            <AppBackend projectId={projectId} busy={loading} onConfigured={()=>{setPublicationCandidate(null);void refreshFiles();}} />
-            {previewUrl&&<button type="button" disabled={loading} aria-pressed={selectingElement} onClick={()=>{
-              const enabled=!selectingElement;selectionNonce.current=crypto.randomUUID();setSelectingElement(enabled);
-              previewFrame.current?.contentWindow?.postMessage({type:'genesys-selection-mode',enabled,nonce:selectionNonce.current},new URL(previewUrl).origin);
-            }} className="mb-2 rounded-lg border border-white/20 px-3 py-2 text-xs text-slate-200">{selectingElement?'Cancel selection':'Select element in preview'}</button>}
-            {selectedElement&&<div className="mb-2 text-xs text-slate-300">Selected: {selectedElement.tag} — {selectedElement.label.slice(0,80)}. Describe your change below. <button type="button" onClick={()=>setSelectedElement(null)}>Clear selection</button></div>}
-            <PublishProject key={publicationCandidate?.checkpointId || 'unverified'} projectId={projectId} candidate={publicationCandidate} busy={loading} />
-            {pending && !loading && <button type="button" onClick={() => { setMode(pending.mode); void handleSend(pending.prompt, pending.mode, true); }} className="mt-2 rounded-lg border border-blue-400/30 p-2 text-xs text-blue-300">Reconnect saved request</button>}
-            </div>
+          <div className="workspace-composer">
+            {selectedElement&&<div className="selected-chip"><span>Selected: {selectedElement.tag} — {selectedElement.label.slice(0,80)}. Describe your change below.</span><button type="button" onClick={()=>setSelectedElement(null)}>Clear selection</button></div>}
+            {pending && !loading && <button type="button" onClick={() => { setMode(pending.mode); void handleSend(pending.prompt, pending.mode, true); }} className="g-btn g-btn-secondary g-btn-sm mb-2 w-full">Reconnect saved request</button>}
 
-            <div className="flex items-end gap-2 bg-zinc-900 border border-white/10 rounded-2xl p-2">
+            <div className="composer-box">
 
               <textarea
-                aria-label="Message Genesys"
+                aria-label="Message GeneSys"
                 value={input}
                 onChange={(event) =>
                   setInput(event.target.value)
@@ -940,38 +923,38 @@ function BuildPage({ projectId }: { projectId: string }) {
                   }
                 }}
                 placeholder={mode === 'build' ? 'Describe the change to build…' : mode === 'plan' ? 'What should we plan before building?' : 'Ask about your app without changing it…'}
-                className="flex-1 bg-transparent border-none outline-none text-sm p-2 resize-none max-h-32 text-white placeholder:text-white/20"
-                rows={1}
+                rows={2}
                 disabled={loading}
               />
 
-              <button
-                onClick={() => {
-                  void handleSend();
-                }}
-                disabled={
-                  loading ||
-                  !input.trim()
-                }
-                className="bg-blue-600 p-2.5 rounded-xl shadow-lg hover:bg-blue-500 disabled:opacity-30 disabled:hover:bg-blue-600 transition-all"
-                aria-label="Send request"
-              >
-                {loading ? (
-                  <Loader2
-                    size={18}
-                    className="animate-spin"
-                  />
-                ) : (
-                  <Send size={18} />
-                )}
-              </button>
+              <div className="composer-row">
+                <ModeSwitch mode={mode} onModeChange={setMode} busy={loading} />
+                <button
+                  type="button"
+                  onClick={() => {
+                    void handleSend();
+                  }}
+                  disabled={
+                    loading ||
+                    !input.trim()
+                  }
+                  className="composer-send"
+                  aria-label="Send request"
+                >
+                  {loading ? (
+                    <Loader2
+                      size={18}
+                      className="animate-spin"
+                    />
+                  ) : (
+                    <Send size={17} />
+                  )}
+                </button>
+              </div>
 
             </div>
 
-            <div className="text-[8px] text-white/15 mt-2 px-2">
-              Enter to send · Shift + Enter
-              for a new line
-            </div>
+            <p className="composer-hint">{mode === 'build' ? 'Applies changes to your project.' : 'No files will change.'} Enter to send, Shift + Enter for a new line.</p>
 
           </div>
         </aside>
@@ -981,184 +964,70 @@ function BuildPage({ projectId }: { projectId: string }) {
         {/* COLUMN 3 — LIVE PREVIEW                           */}
         {/* ================================================== */}
 
-        <main className={`${mobilePane === 'preview' ? 'block' : 'hidden'} lg:block flex-1 p-3 lg:p-6 relative min-w-0`}>
-
-          <div className="preview-shell w-full h-full rounded-[2.5rem] overflow-hidden border border-white/5 bg-black shadow-2xl relative">
-
-            {/* PREVIEW HEADER */}
-
-            <div className="absolute top-0 left-0 right-0 z-20 h-12 px-5 flex items-center justify-between bg-black/60 backdrop-blur-xl border-b border-white/5">
-
-              <div className="flex items-center gap-3">
-
-                <div className="flex items-center gap-2">
-                  <Eye
-                    size={13}
-                    className="text-blue-400"
-                  />
-
-                  <span className="text-[9px] font-black uppercase tracking-[0.25em] text-white/50">
-                    Live Preview
-                  </span>
-                </div>
-
-
-                <div className="flex items-center gap-1.5">
-
-                  <span
-                    className={`w-1.5 h-1.5 rounded-full ${
-                      previewOnline
-                        ? "bg-emerald-400"
-                        : "bg-red-400"
-                    }`}
-                  />
-
-                  <span className="text-[8px] uppercase tracking-widest text-white/25">
-                    {previewOnline
-                      ? "Ready"
-                      : "Not connected"}
-                  </span>
-
-                </div>
-
-              </div>
-
-
-              <div className="flex items-center gap-2">
-
+        <main className={`preview-area ${mobilePane === 'preview' ? 'block' : 'hidden'} lg:block`}>
+          <div className="preview-shell">
+            <div className="preview-header">
+              <div className="preview-title"><span className={`status-dot ${previewOnline ? 'is-ready' : ''}`} /><span>{previewOnline ? 'Live preview' : 'Preview not connected'}</span></div>
+              <div className="preview-tools">
+                {previewUrl&&<button type="button" className="g-btn g-btn-ghost g-btn-icon" title={selectingElement?'Cancel selection':'Select element in preview'} aria-label={selectingElement?'Cancel selection':'Select element in preview'} disabled={loading} aria-pressed={selectingElement} onClick={()=>{
+                  const enabled=!selectingElement;selectionNonce.current=crypto.randomUUID();setSelectingElement(enabled);
+                  previewFrame.current?.contentWindow?.postMessage({type:'genesys-selection-mode',enabled,nonce:selectionNonce.current},new URL(previewUrl).origin);
+                }}><MousePointerClick size={16} className={selectingElement ? 'text-[var(--accent-text)]' : undefined} /></button>}
                 <div className="preview-device-controls" role="group" aria-label="Preview device">
-                  <button type="button" aria-pressed={previewDevice==='desktop'} onClick={()=>setPreviewDevice('desktop')}>Desktop</button>
-                  <button type="button" aria-pressed={previewDevice==='phone'} onClick={()=>setPreviewDevice('phone')}>Phone</button>
+                  <button type="button" aria-label="Desktop" title="Desktop" aria-pressed={previewDevice==='desktop'} onClick={()=>setPreviewDevice('desktop')}><Monitor size={15} /></button>
+                  <button type="button" aria-label="Phone" title="Phone" aria-pressed={previewDevice==='phone'} onClick={()=>setPreviewDevice('phone')}><Smartphone size={15} /></button>
                 </div>
-
-                <button
-                  type="button"
-                  onClick={() => {
-                    setPreviewKey(
-                      (value) =>
-                        value + 1
-                    );
-
-                    void checkPreview();
-                  }}
-                  className="p-2 rounded-lg text-white/30 hover:text-white/70 hover:bg-white/5 transition-colors"
-                  disabled={previewConnecting || loading}
-                  title="Refresh preview"
-                >
-                  <RefreshCw
-                    size={13}
-                  />
-                </button>
-
-
-                <a
-                  href={previewUrl || undefined}
-                  aria-disabled={!previewUrl}
-                  onClick={event => { if (!previewUrl) event.preventDefault(); }}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="p-2 rounded-lg text-white/30 hover:text-white/70 hover:bg-white/5 transition-colors"
-                  title="Open preview in new tab"
-                >
-                  <ExternalLink
-                    size={13}
-                  />
-                </a>
-
+                <button type="button" onClick={() => { setPreviewKey((value) => value + 1); void checkPreview(); }} className="g-btn g-btn-ghost g-btn-icon" disabled={previewConnecting || loading} title="Refresh preview" aria-label="Refresh preview"><RefreshCw size={15} /></button>
+                <a href={previewUrl || undefined} aria-disabled={!previewUrl} onClick={event => { if (!previewUrl) event.preventDefault(); }} target="_blank" rel="noreferrer" className="g-btn g-btn-ghost g-btn-icon" title="Open preview in new tab" aria-label="Open preview in new tab"><ExternalLink size={15} /></a>
               </div>
             </div>
-
-
-            <div className="absolute bottom-4 left-4 right-4 z-20 flex flex-wrap items-center gap-3 rounded-xl border border-white/10 bg-zinc-950/95 p-3 text-xs">
-              <button type="button" disabled={previewConnecting || loading} onClick={()=>void checkPreview()} className="min-h-10 rounded-lg bg-blue-600 px-4 font-medium text-white disabled:opacity-50">{previewConnecting ? 'Connecting preview?' : 'Reconnect preview'}</button>
-              {previewNotice && <p role="status" className="text-amber-200">{previewNotice}</p>}
-            </div>
-            {/* PREVIEW */}
-
-            {previewUrl ? (
+            <div className="preview-stage">
+              {previewUrl && (
               <iframe
-                ref={previewFrame}
-                onLoad={()=>{setSelectingElement(false);selectionNonce.current='';}}
-                key={previewKey}
-                src={previewUrl}
-                title="GeneSys Application Preview"
-                className="absolute left-0 right-0 w-full border-0 bg-black"
-                style={{ top: 48, height: 'calc(100% - 128px)', width: previewDevice === 'phone' ? 'min(390px, 100%)' : '100%', left: '50%', transform: 'translateX(-50%)', right: 'auto', background: '#fff', transition: 'width .2s ease' }}
-                allow="fullscreen; geolocation"
-                sandbox="allow-scripts allow-same-origin allow-forms allow-modals allow-popups"
-              />
-            ) : (
-              <div className="w-full h-full flex items-center justify-center">
-                <div className="text-center">
-
-                  <AlertCircle
-                    size={24}
-                    className="mx-auto mb-3 text-white/10"
-                  />
-
-                  <p className="text-[10px] text-white/20 uppercase tracking-[0.25em]">
-                    Preview unavailable
-                  </p>
-
-                </div>
-              </div>
-            )}
-
-
-            {/* INITIAL OVERLAY */}
-
-            {!previewUrl &&
-              !loading && (
-                <div className="absolute inset-0 z-10 pointer-events-none flex items-center justify-center pt-12">
-                  <div className="bg-black/70 backdrop-blur-md border border-white/5 rounded-2xl px-5 py-4 text-center">
-
-                    <div className="flex items-center justify-center gap-2 mb-2">
-                      <AlertCircle
-                        size={14}
-                        className="text-white/30"
-                      />
-
-                      <span className="text-[9px] font-black uppercase tracking-widest text-white/40">
-                        Waiting for preview
-                      </span>
-                    </div>
-
-                    <p className="text-[9px] text-white/20">
-                      Use Reconnect preview to open
-                      your saved application.
-                    </p>
-
-                  </div>
+                  ref={previewFrame}
+                  onLoad={()=>{setSelectingElement(false);selectionNonce.current='';}}
+                  key={previewKey}
+                  src={previewUrl}
+                  title="GeneSys Application Preview"
+                  className="absolute left-0 right-0 w-full border-0 bg-black"
+                  style={{ top: 0, height: '100%', width: previewDevice === 'phone' ? 'min(390px, 100%)' : '100%', left: '50%', transform: 'translateX(-50%)', right: 'auto', background: '#fff', transition: 'width .2s ease' }}
+                  allow="fullscreen; geolocation"
+                  sandbox="allow-scripts allow-same-origin allow-forms allow-modals allow-popups"
+                />
+              )}
+              {!previewOnline && !loading && (
+                <div className="preview-empty" style={previewUrl ? { background: 'var(--surface-2)', zIndex: 10 } : undefined}>
+                  <div className="preview-empty-icon"><Monitor size={24} /></div>
+                  <h3>Your preview will appear here</h3>
+                  <p>Send a request to build your project, or reconnect to open a saved version.</p>
+                  <button type="button" disabled={previewConnecting || loading} onClick={()=>void checkPreview()} className="g-btn g-btn-primary g-btn-sm">{previewConnecting ? 'Connecting preview…' : 'Reconnect preview'}</button>
                 </div>
               )}
-
-
-            {/* WORKING OVERLAY */}
-
-            {loading && (
-              <div className="absolute top-16 right-5 z-30">
-
-                <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-blue-500/10 border border-blue-500/20 backdrop-blur-xl">
-
-                  <Loader2
-                    size={12}
-                    className="animate-spin text-blue-400"
-                  />
-
-                  <span className="text-[8px] font-black uppercase tracking-widest text-blue-300/70">
-                    Updating application
-                  </span>
-
+              {!previewUrl && loading && (
+                <div className="preview-empty">
+                  <div className="preview-empty-icon"><Loader2 size={24} className="animate-spin" /></div>
+                  <h3>Building your project</h3>
+                  <p>{agentStage || 'This usually takes a few minutes.'}</p>
                 </div>
-
-              </div>
-            )}
-
+              )}
+              {loading && previewUrl && <div className="preview-working"><Loader2 size={13} className="animate-spin" />Updating application</div>}
+              {previewNotice && <p role="status" className="preview-notice">{previewNotice}</p>}
+            </div>
           </div>
-
         </main>
 
       </div>
+
+      {toolsOpen && <div className="tools-backdrop" onClick={()=>setToolsOpen(false)} />}
+      <aside className="tools-drawer" hidden={!toolsOpen} aria-label="Project tools" onKeyDown={event => { if (event.key === 'Escape') setToolsOpen(false); }}>
+        <div className="tools-head"><h2>Project tools</h2><button type="button" className="g-btn g-btn-ghost g-btn-icon" aria-label="Close project tools" onClick={()=>setToolsOpen(false)}><X size={18} /></button></div>
+        <div className="tools-body">
+          <BuilderControls projectId={projectId} busy={loading} />
+          <VisualReview projectId={projectId} busy={loading} />
+          <VersionHistory projectId={projectId} busy={loading} onRestored={()=>{setPublicationCandidate(null);setPreviewNotice('Source restored. Send a Build request to compile and verify it before publishing.');void refreshFiles();}} />
+          <AppBackend projectId={projectId} busy={loading} onConfigured={()=>{setPublicationCandidate(null);void refreshFiles();}} />
+        </div>
+      </aside>
     </div>
   );
 }
@@ -1201,5 +1070,5 @@ function OwnedBuilder() {
   if (!projectId) return <Navigate to="/account" />
   if (state === 'signin') return <Navigate to="/auth" />
   if (state === 'ready') return <BuildPage key={projectId} projectId={projectId} />
-  return <main className="min-h-screen bg-slate-50 p-12 text-slate-900"><p role="status">{state === 'loading' ? 'Opening your project…' : message}</p><a className="mt-5 block text-blue-600" href="/account">Return to dashboard</a></main>
+  return <main className="g-page grid place-items-center p-12 text-center"><p role="status" className="text-[var(--muted)]">{state === 'loading' ? 'Opening your project…' : message}</p><a className="g-link mt-5 block" href="/account">Return to dashboard</a></main>
 }

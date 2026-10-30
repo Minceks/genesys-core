@@ -3,9 +3,19 @@ import { apiFetch } from '../../lib/api';
 
 export type BuilderMode = 'build' | 'plan' | 'discuss';
 
-export function BuilderControls({ projectId, mode, onModeChange, busy }: {
-  projectId: string; mode: BuilderMode; onModeChange: (mode: BuilderMode) => void; busy: boolean;
-}) {
+const MODES: { value: BuilderMode; label: string; title: string }[] = [
+  { value: 'build', label: 'Build', title: 'Apply changes to the project' },
+  { value: 'plan', label: 'Plan', title: 'Plan first. No files change.' },
+  { value: 'discuss', label: 'Discuss', title: 'Ask questions. No files change.' },
+];
+
+export function ModeSwitch({ mode, onModeChange, busy }: { mode: BuilderMode; onModeChange: (mode: BuilderMode) => void; busy: boolean }) {
+  return <div className="mode-switch" role="group" aria-label="Builder mode">
+    {MODES.map(item => <button type="button" key={item.value} title={item.title} disabled={busy} aria-pressed={mode === item.value} onClick={() => onModeChange(item.value)}>{item.label}</button>)}
+  </div>;
+}
+
+export function BuilderControls({ projectId, busy }: { projectId: string; busy: boolean }) {
   const [instructions, setInstructions] = useState('');
   const [paths, setPaths] = useState('');
   const [revision, setRevision] = useState(0);
@@ -42,15 +52,7 @@ export function BuilderControls({ projectId, mode, onModeChange, busy }: {
     finally { setSaving(false); }
   }
 
-  return <div className="mb-3 space-y-2 text-xs text-white/70">
-    <div className="flex items-center justify-between gap-3">
-      <label className="flex items-center gap-2">Mode
-        <select aria-label="Builder mode" value={mode} disabled={busy} onChange={event => onModeChange(event.target.value as BuilderMode)} className="rounded-lg border border-white/15 bg-zinc-900 px-2 py-2 text-white">
-          <option value="build">Build</option><option value="plan">Plan</option><option value="discuss">Discuss</option>
-        </select>
-      </label>
-      <span>{mode === 'build' ? 'Apply changes' : 'No file changes'}</span>
-    </div>
+  return <div>
     <details className="rounded-lg border border-white/10 p-3">
       <summary className="cursor-pointer">AI instructions &amp; frozen files</summary>
       <div className="mt-3 space-y-3">
@@ -62,7 +64,7 @@ export function BuilderControls({ projectId, mode, onModeChange, busy }: {
         </label>
         <p>Frozen paths are blocked from AI writes. End a folder path with /.</p>
         <div className="flex gap-3">
-          <button type="button" disabled={!loaded || busy || saving} onClick={() => void save()} className="rounded-lg bg-blue-600 px-3 py-2 text-white disabled:opacity-40">{saving ? 'Saving…' : 'Save controls'}</button>
+          <button type="button" disabled={!loaded || busy || saving} onClick={() => void save()} className="rounded-lg bg-[var(--accent)] px-3 py-2 text-white disabled:opacity-40">{saving ? 'Saving…' : 'Save controls'}</button>
           <button type="button" disabled={busy || saving} onClick={() => setReload(value => value + 1)} className="rounded-lg border border-white/20 px-3 py-2">Reload controls</button>
         </div>
         {notice && <p role="status">{notice}</p>}

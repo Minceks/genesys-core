@@ -1,11 +1,15 @@
 import { useEffect, useState } from 'react'
 import { createRoute, Navigate } from '@tanstack/react-router'
 import type { Session } from '@supabase/supabase-js'
+import { ArrowRight, LogOut, Plus, Sparkles } from 'lucide-react'
 import { Route as rootRoute } from './__root'
+import { Brand } from '@/components/genesys/brand'
 import { supabase } from '../lib/supabase'
 
 export const Route = createRoute({ getParentRoute: () => rootRoute, path: '/account', component: AccountDashboard })
 type Project = { id: string; name: string; created_at: string }
+const THUMBNAILS = ['linear-gradient(135deg,#6470ff,#38bdf8)', 'linear-gradient(135deg,#8b5cf6,#ec4899)', 'linear-gradient(135deg,#10b981,#0ea5e9)', 'linear-gradient(135deg,#f97316,#db2777)']
+const thumbnail = (id: string) => THUMBNAILS[[...id].reduce((sum, char) => sum + char.charCodeAt(0), 0) % THUMBNAILS.length]
 
 function AccountDashboard() {
   const [session, setSession] = useState<Session | null>(null)
@@ -14,6 +18,7 @@ function AccountDashboard() {
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState('')
   const userId = session?.user.id
+  const [waitingIdea] = useState(() => { try { return sessionStorage.getItem('genesys_starter_prompt') || '' } catch { return '' } })
   useEffect(() => {
     let active = true
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, next) => {
@@ -68,19 +73,31 @@ function AccountDashboard() {
     } finally { setBusy(false) }
   }
 
-  if (!ready) return <main className="min-h-screen bg-[#080b12] p-12 text-slate-100" role="status">Loading your dashboard…</main>
+  if (!ready) return <main className="g-page grid place-items-center" role="status"><span className="text-[var(--muted)]">Loading your projects…</span></main>
   if (!session) return <Navigate to="/auth" />
-  return <main className="min-h-screen bg-[#080b12] text-slate-100">
-    <header className="border-b bg-[#101622] px-6 py-5"><nav className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-4"><a className="text-xl font-bold text-blue-300" href="/">GeneSys</a><div className="flex flex-wrap items-center gap-5 text-sm"><a href="/">Home</a><a href="#projects">My projects</a><a href="#profile">Profile</a><button disabled={busy} onClick={() => action('signout')}>Sign out</button></div></nav></header>
-    <div className="mx-auto max-w-6xl px-6 py-10">
-      <h1 className="text-3xl font-semibold">Your workspace</h1><p className="mt-2 text-slate-400">Manage your projects and account.</p>
-      {message && <p role="status" className="mt-6 rounded-xl border border-blue-100 bg-blue-50 p-4 text-blue-900">{message}</p>}
-      <div className="mt-8 grid gap-8 lg:grid-cols-[1fr_320px]">
-        <section id="projects"><div className="flex items-center justify-between"><h2 className="text-xl font-semibold">My projects</h2><button disabled={busy} onClick={() => action('create')} className="rounded-xl bg-blue-600 px-4 py-3 text-sm font-semibold text-white disabled:opacity-50">{busy ? 'Please wait…' : 'New project'}</button></div>
-          <div className="mt-5 grid gap-4 sm:grid-cols-2">{projects.map(project => <a key={project.id} href={`/build?projectId=${encodeURIComponent(project.id)}`} className="rounded-2xl border border-white/10 bg-[#101622] p-6 hover:border-blue-400"><h3 className="font-semibold">{project.name}</h3><p className="mt-2 text-xs text-slate-400">Created {new Date(project.created_at).toLocaleDateString()}</p><span className="mt-6 inline-block text-sm font-semibold text-blue-300">Open project →</span></a>)}</div>
-          {!busy && projects.length === 0 && <p className="mt-5 rounded-2xl border border-dashed p-8 text-slate-400">Create your first project to get started.</p>}
+  return <main className="g-page g-glow">
+    <header className="g-nav"><nav aria-label="Workspace" className="g-container"><div className="g-nav-inner"><Brand /><div className="g-nav-actions"><a href="/" className="g-btn g-btn-ghost g-btn-sm">Home</a><button type="button" disabled={busy} onClick={() => action('signout')} className="g-btn g-btn-ghost g-btn-sm"><LogOut size={15} />Sign out</button></div></div></nav></header>
+    <div className="g-container py-10">
+      <div className="flex flex-wrap items-end justify-between gap-4">
+        <div><h1 className="m-0 text-3xl font-extrabold sm:text-4xl">Your projects</h1><p className="mt-2 text-[var(--muted)]">Pick up where you left off, or start something new.</p></div>
+        <button type="button" disabled={busy} onClick={() => action('create')} className="g-btn g-btn-primary"><Plus size={17} />{busy ? 'Please wait…' : 'New project'}</button>
+      </div>
+      {waitingIdea && <div className="wk-idea mt-6"><p><strong className="inline-flex items-center gap-2"><Sparkles size={15} />Your idea is ready to build</strong><small>{waitingIdea}</small></p><button type="button" disabled={busy} onClick={() => action('create')} className="g-btn g-btn-primary g-btn-sm">Start this project <ArrowRight size={15} /></button></div>}
+      {message && <p role="status" className="g-notice mt-6">{message}</p>}
+      <div className="mt-8 grid gap-8 lg:grid-cols-[1fr_300px]">
+        <section id="projects" aria-label="Projects">
+          <div className="wk-grid">
+            {busy && projects.length === 0 && [0, 1, 2].map(item => <div key={item} className="g-card g-skeleton" style={{ height: 212 }} />)}
+            {projects.map(project => <a key={project.id} href={`/build?projectId=${encodeURIComponent(project.id)}`} className="g-card wk-card"><div className="wk-thumb" style={{ background: thumbnail(project.id) }} aria-hidden="true">{project.name.trim().charAt(0).toUpperCase() || 'G'}</div><div className="wk-body"><h3>{project.name}</h3><p>Created {new Date(project.created_at).toLocaleDateString()}</p></div></a>)}
+            {!busy && <button type="button" onClick={() => action('create')} className="wk-new"><Plus size={22} />{projects.length ? 'New project' : 'Create your first project'}</button>}
+          </div>
         </section>
-        <aside id="profile" className="h-fit rounded-2xl border border-white/10 bg-[#101622] p-6"><h2 className="text-xl font-semibold">Your profile</h2><p className="mt-5 text-xs font-semibold uppercase text-slate-400">Email</p><p className="mt-1 break-all text-sm">{session.user.email ?? 'No email address'}</p><p className="mt-5 text-xs font-semibold uppercase text-slate-400">Member since</p><p className="mt-1 text-sm">{new Date(session.user.created_at).toLocaleDateString()}</p><button disabled={busy || !session.user.email} onClick={() => action('reset')} className="mt-6 block text-sm font-semibold text-blue-300 disabled:opacity-50">Send password reset email</button><button disabled={busy} onClick={() => action('signout')} className="mt-4 text-sm text-slate-300">Sign out</button></aside>
+        <aside id="profile" className="g-card h-fit p-5">
+          <h2 className="m-0 text-base font-bold">Account</h2>
+          <p className="mt-4 mb-0 text-xs text-[var(--faint)]">Email</p><p className="m-0 break-all text-sm">{session.user.email ?? 'No email address'}</p>
+          <p className="mt-4 mb-0 text-xs text-[var(--faint)]">Member since</p><p className="m-0 text-sm">{new Date(session.user.created_at).toLocaleDateString()}</p>
+          <button type="button" disabled={busy || !session.user.email} onClick={() => action('reset')} className="g-btn g-btn-secondary g-btn-sm mt-5 w-full">Send password reset email</button>
+        </aside>
       </div>
     </div>
   </main>

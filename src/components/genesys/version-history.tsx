@@ -31,7 +31,7 @@ export function VersionHistory({projectId,busy,onRestored}:{projectId:string;bus
     {!!versions.length&&<select aria-label="Source version" value={selected} disabled={busy||working} onChange={event=>setSelected(event.target.value)} className="block w-full rounded-lg bg-zinc-900 p-2 text-white">
       <option value="">Choose a source version</option>{versions.map(version=><option key={version.id} value={version.id}>{new Date(version.createdAt*1000).toLocaleString()} — {version.label} ({version.files} files)</option>)}
     </select>}
-    {selected&&<div className="mt-2"><p>Replace current source with this version? The live published site will stay as it is.</p><button type="button" disabled={busy||working} onClick={()=>void restore()} className="mt-2 rounded-lg bg-blue-600 px-3 py-2 text-white">Back up current source and restore</button></div>}
+    {selected&&<div className="mt-2"><p>Replace current source with this version? The live published site will stay as it is.</p><button type="button" disabled={busy||working} onClick={()=>void restore()} className="mt-2 rounded-lg bg-[var(--accent)] px-3 py-2 text-white">Back up current source and restore</button></div>}
     {notice&&<p role="status" className="mt-2">{notice}</p>}
   </details>;
 }

@@ -2,6 +2,7 @@ import { useEffect, useState, type FormEvent } from 'react'
 import { createRoute } from '@tanstack/react-router'
 import { Route as rootRoute } from './__root'
 import { supabase, hasRecoverySession, clearRecoverySession, recoveryLinkError } from '../lib/supabase'
+import { BrandMark } from '@/components/genesys/brand'
 
 export const Route = createRoute({
   getParentRoute: () => rootRoute,
@@ -79,11 +80,11 @@ function ResetPasswordPage() {
     }
   }
 
-  const inputClass = 'mt-2 w-full rounded-xl border border-white/10 px-4 py-3 text-slate-100 outline-none focus:ring-2 focus:ring-blue-500'
+  const inputClass = 'g-input'
   return (
-    <main className="min-h-screen bg-[#080b12] px-6 py-16 text-slate-100 flex items-center justify-center">
-      <section className="w-full max-w-md rounded-3xl border border-white/10 bg-[#101622] p-8 shadow-sm" aria-labelledby="reset-title">
-        <a href="/" className="text-xl font-bold text-blue-300">GeneSys</a>
+    <main className="g-page g-glow flex items-center justify-center px-6 py-16">
+      <section className="g-card w-full max-w-md p-8" aria-labelledby="reset-title">
+        <a href="/" className="g-brand"><BrandMark />GeneSys</a>
         <h1 id="reset-title" className="mt-8 text-2xl font-semibold">{complete ? 'Password updated' : recovering ? 'Choose a new password' : 'Reset your password'}</h1>
         {ready && !complete && supabase && (
           <form onSubmit={submit} className="mt-6 space-y-5">
@@ -91,11 +92,11 @@ function ResetPasswordPage() {
               <label className="block text-sm font-medium">New password<input className={inputClass} type="password" minLength={8} autoComplete="new-password" required disabled={busy} value={password} onChange={e => setPassword(e.target.value)} /></label>
               <label className="block text-sm font-medium">Confirm new password<input className={inputClass} type="password" minLength={8} autoComplete="new-password" required disabled={busy} value={confirmation} onChange={e => setConfirmation(e.target.value)} /></label>
             </> : <label className="block text-sm font-medium">Email address<input className={inputClass} type="email" autoComplete="email" required disabled={busy} value={email} onChange={e => setEmail(e.target.value)} /></label>}
-            <button className="w-full rounded-xl bg-blue-600 px-4 py-3 font-semibold text-white hover:bg-blue-700 disabled:opacity-50" disabled={busy}>{busy ? 'Please wait…' : recovering ? 'Update password' : 'Send reset email'}</button>
+            <button className="g-btn g-btn-primary w-full" disabled={busy}>{busy ? 'Please wait…' : recovering ? 'Update password' : 'Send reset email'}</button>
           </form>
         )}
         {message && <p role="status" className="mt-5 text-sm text-slate-300">{message}</p>}
-        <a href="/auth" className="mt-6 inline-block text-sm font-medium text-blue-300">Return to sign in</a>
+        <a href="/auth" className="mt-6 inline-block text-sm font-medium text-[var(--accent-text)]">Return to sign in</a>
       </section>
     </main>
   )

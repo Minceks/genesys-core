@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { apiFetch } from '../../lib/api';
+import { Rocket } from 'lucide-react';
 
 export type PublicationCandidate = { checkpointId: string; promotionToken: string };
 type ReleaseReview = { status: 'blocked' | 'needs_review'; reviewHash: string;
@@ -81,11 +82,11 @@ export function PublishProject({ projectId, candidate, busy }: {
   }
 
   return <>
-    <button type="button" onClick={() => setOpen(true)} className="mt-3 min-h-11 w-full rounded-xl border border-white/15 p-3 text-left text-xs font-medium text-white/80">Publish website</button>
+    <button type="button" onClick={() => setOpen(true)} className="g-btn g-btn-primary g-btn-sm" aria-label="Publish website"><Rocket size={15} /><span className="g-btn-label">Publish</span></button>
     <dialog ref={dialog} onCancel={() => setOpen(false)} onClose={() => setOpen(false)} aria-labelledby="publication-review-title"
       style={{ width: 'min(620px, calc(100vw - 32px))', maxHeight: '85dvh' }}
-      className="m-auto overflow-y-auto rounded-2xl border border-white/20 bg-slate-950 p-0 text-sm text-slate-200 shadow-2xl backdrop:bg-black/75">
-    <div className="sticky top-0 z-10 flex items-center justify-between gap-4 border-b border-white/10 bg-slate-950 px-5 py-4">
+      className="m-auto overflow-y-auto rounded-2xl border border-white/20 bg-[var(--surface)] p-0 text-sm text-slate-200 shadow-2xl backdrop:bg-black/75">
+    <div className="sticky top-0 z-10 flex items-center justify-between gap-4 border-b border-white/10 bg-[var(--surface)] px-5 py-4">
       <h2 id="publication-review-title" className="text-lg font-semibold text-white">Review and publish</h2>
       <button type="button" autoFocus aria-label="Close publishing review" onClick={() => setOpen(false)} className="min-h-11 rounded-lg border border-white/20 px-3">Close</button>
     </div>
@@ -109,7 +110,7 @@ export function PublishProject({ projectId, candidate, busy }: {
         </div>)}
       </div>}
       <button type="button" disabled={busy || publishing || checking} onClick={() => void loadReview()} className="mt-4 min-h-11 w-full rounded-lg border border-white/20 px-3 py-2 disabled:opacity-40 sm:w-auto">Refresh release checks</button>
-      <button type="button" disabled={!reviewed || busy || publishing || checking} onClick={() => void publish()} className="mt-3 min-h-11 w-full rounded-lg bg-blue-600 px-4 py-2 font-medium text-white disabled:opacity-40 sm:ml-2 sm:w-auto">
+      <button type="button" disabled={!reviewed || busy || publishing || checking} onClick={() => void publish()} className="mt-3 min-h-11 w-full rounded-lg bg-[var(--accent)] px-4 py-2 font-medium text-white disabled:opacity-40 sm:ml-2 sm:w-auto">
         {publishing ? 'Publishing…' : url ? 'Publish this version again' : 'Publish verified version'}
       </button>
     </>}

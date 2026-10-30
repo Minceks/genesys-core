@@ -1,4 +1,6 @@
 import React from 'react';
+import { Navbar } from './navbar';
+import { Footer } from './footer';
 
 interface LegalProps {
   title: string;
@@ -9,17 +11,19 @@ interface LegalProps {
 
 export function LegalPage({ title, subtitle, lastUpdated, children }: LegalProps) {
   return (
-    <div className="min-h-screen bg-black text-zinc-300 pt-32 pb-20 px-6 font-sans">
-      <div className="max-w-3xl mx-auto">
+    <div className="g-page text-[var(--muted)]">
+      <Navbar />
+      <div className="max-w-3xl mx-auto px-6 py-16">
         <header className="mb-16 border-b border-white/10 pb-10">
-          <h1 className="text-5xl font-bold text-white mb-4" style={{ fontFamily: 'Sora' }}>{title}</h1>
-          <p className="text-blue-400 font-medium">{subtitle}</p>
-          <p className="text-xs text-zinc-500 mt-4 uppercase tracking-widest">Last Updated: {lastUpdated}</p>
+          <h1 className="text-4xl font-extrabold text-[var(--text)] sm:text-5xl mb-4">{title}</h1>
+          <p className="text-[var(--accent-text)] font-medium">{subtitle}</p>
+          <p className="text-xs text-[var(--faint)] mt-4">Last Updated: {lastUpdated}</p>
         </header>
         <div className="space-y-12 leading-relaxed text-sm">
           {children}
         </div>
       </div>
+      <Footer />
     </div>
   );
 }
@@ -27,7 +31,7 @@ export function LegalPage({ title, subtitle, lastUpdated, children }: LegalProps
 export function LegalSection({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <section>
-      <h2 className="text-xl font-bold text-white mb-4" style={{ fontFamily: 'Sora' }}>{title}</h2>
+      <h2 className="text-xl font-bold text-[var(--text)] mb-4">{title}</h2>
       <div className="space-y-4">
         {children}
       </div>
