@@ -11,3 +11,4 @@ google-genai
 httpx
 openai
 tiktoken
+sentry-sdk

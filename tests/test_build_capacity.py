@@ -1,3 +1,4 @@
+import time
 from types import SimpleNamespace
 from unittest.mock import Mock
 import pytest
@@ -105,3 +106,17 @@ def test_full_design_tier_is_separate_from_tool_execution_and_schema_planning(mo
     monkeypatch.setenv('GENESYS_DESIGN_MODEL','gpt-5-mini')
     provider.generate(messages,[])
     assert create.call_args.kwargs['model']=='gpt-5-mini'
+
+
+def test_design_requests_can_finish_their_output_allowance_within_the_draft_stage(monkeypatch):
+    from agent.progress import DESIGN_REQUEST_TIMEOUT_SECONDS
+    monkeypatch.setattr('agent.ai_provider.bounded_messages',lambda messages,_:messages)
+    monkeypatch.setattr('agent.ai_provider.record_model_usage',lambda _:None)
+    create=Mock(return_value=SimpleNamespace(choices=[SimpleNamespace(finish_reason='stop',
+        message=SimpleNamespace(content='{}',tool_calls=[]))]))
+    provider=OpenAIProvider(model='test-model',client=SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create))))
+    draft=[{'role':'system','content':'DEFAULT BUILD STANDARD: draft'},{'role':'user','content':'Build'}]
+    provider.generate(draft,[])
+    assert create.call_args.kwargs['timeout']==DESIGN_REQUEST_TIMEOUT_SECONDS>24000/70
+    with model_request_scope(time.monotonic()+100):provider.generate(draft,[])
+    assert create.call_args.kwargs['timeout']<=100

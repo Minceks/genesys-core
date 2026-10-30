@@ -7,6 +7,11 @@ import time
 progress_callback = ContextVar("genesys_progress_callback", default=None)
 model_deadline = ContextVar('genesys_model_deadline', default=None)
 REVIEW_RESERVE_SECONDS = 180
+# The design tier produces about 70 tokens per second, so its 24000-token
+# allowance needs about 340 seconds. Stage deadlines still bound every request.
+DESIGN_REQUEST_TIMEOUT_SECONDS = 360
+# A screenshot polish edit takes 80-95 seconds. Less cannot finish before the reserve.
+MIN_POLISH_SECONDS = 90
 
 
 class ModelDeadlineExceeded(RuntimeError):

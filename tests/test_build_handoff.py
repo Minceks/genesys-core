@@ -124,3 +124,75 @@ def test_real_agent_hands_saved_changes_to_build_and_keeps_inspection_context(mo
     assert len(calls)==(2 if 'deadline' in failure_mode else 1)
     assert len(writes)==1
     assert any('CURRENT INSPECTED SOURCE CONTEXT' in str(message.get('content')) for message in calls[0])
+
+
+def agent_at_visual_review(monkeypatch,reserve_seconds,polish_error):
+    """Drive the real loop to a passed build whose screenshot review requests polish."""
+    from agent import orchestrator
+    from agent.ai_provider import AIResponse,AIToolCall
+    class FunctionalChecksReached(BaseException):pass
+    calls=[]
+    review={'status':'needs_polish','summary':'Hero needs a focal point','findings':[]}
+    browser=SimpleNamespace(stop=lambda:None,visual_quality=Mock(side_effect=[
+        {'status':'success','visualPolishRequested':True,'visualReview':review},
+        {'status':'success','visualPolishRequested':False,'visualReview':review}]))
+    def content_checks(*_,**__):raise FunctionalChecksReached()
+    browser.content_checks=content_checks
+    workspace=SimpleNamespace(prepare=lambda:None,
+        read_file=lambda _: {'status':'success','content':'export default function App(){return <main>Ready</main>}', 'truncated':False},
+        get_diff=lambda: {'status':'success','diff':'diff --git a/src/App.jsx b/src/App.jsx\n--- a/src/App.jsx\n+++ b/src/App.jsx\n-old\n+new'},
+        run_build=Mock(return_value={'status':'success','success':True,'exitCode':0,'output':'Compiled'}),
+        start_preview=Mock(return_value={'status':'success','url':'https://preview.test'}),
+        create_checkpoint=Mock())
+    class Editor:
+        model='fixture-model'
+        def generate(self,messages,tools):
+            calls.append(messages)
+            if len(calls)==1:
+                return AIResponse(text='',tool_calls=[AIToolCall(id='edit',name='write_file',
+                    arguments={'filename':'src/App.jsx','content':'export default function App(){return <main>Updated</main>}'})])
+            if len(calls)==2:return AIResponse(text='Saved')
+            raise polish_error
+    project='00000000-0000-4000-8000-000000000001'
+    monkeypatch.setattr(orchestrator,'settings',SimpleNamespace(provider_name='openai',agent_timeout_seconds=240))
+    monkeypatch.setattr(orchestrator,'REVIEW_RESERVE_SECONDS',reserve_seconds)
+    monkeypatch.setattr(orchestrator,'get_provider',lambda:Editor())
+    monkeypatch.setattr(orchestrator,'provider_for',lambda _:SimpleNamespace(model='fixture',
+        generate=Mock(side_effect=ModelDeadlineExceeded('Fallback request window ended'))))
+    monkeypatch.setattr(orchestrator,'FALLBACK_PROVIDER','gemini')
+    monkeypatch.setattr(orchestrator,'get_workspace',lambda _:workspace)
+    monkeypatch.setattr(orchestrator,'get_browser',lambda _:browser)
+    monkeypatch.setattr(orchestrator,'stop_browser',lambda _:None)
+    monkeypatch.setattr(orchestrator,'BrowserSession',lambda **_:browser)
+    monkeypatch.setattr('agent.builder_controls.get_controls',lambda _: {})
+    monkeypatch.setattr('agent.version_history.operate',lambda *_,**__:{'status':'success'})
+    monkeypatch.setattr('agent.product_design.prepare_design',lambda *_:{'productType':'app','subtype':'app'})
+    monkeypatch.setattr('agent.build_spec.prepare_build_spec',lambda *_:{})
+    monkeypatch.setattr(orchestrator,'_compact_messages',lambda messages:messages)
+    monkeypatch.setattr(orchestrator,'scan_project',lambda *_,**__: {'status':'success','sourceFiles':['src/App.jsx']})
+    monkeypatch.setattr(orchestrator,'build_project_context',lambda _: 'CURRENT INSPECTED SOURCE CONTEXT')
+    monkeypatch.setattr(orchestrator,'target_project_files',lambda *_:['src/App.jsx'])
+    monkeypatch.setattr(orchestrator,'_validate_change_plan',lambda *_:{'valid':True})
+    monkeypatch.setattr(orchestrator,'_validate_diff',lambda *_:{'valid':True})
+    monkeypatch.setattr(orchestrator,'MAX_STEPS',6)
+    monkeypatch.setattr(orchestrator,'TOTAL_MAX_STEPS',8)
+    monkeypatch.setattr(orchestrator,'_execute_agent_tool',lambda name,*_,**__:
+        {'status':'success','files':['src/App.jsx']} if name=='list_files' else {'status':'success'})
+    monkeypatch.setattr(orchestrator,'execute_tool',lambda *_,**__:{'status':'success','hasRuntimeErrors':False})
+    with pytest.raises(FunctionalChecksReached):orchestrator.run_agent('Fix application code',project)
+    return workspace,browser,calls
+
+
+@pytest.mark.parametrize('polish_error',[ModelDeadlineExceeded('Polish window ended'),TimeoutError('Polish request timed out')])
+def test_timed_out_polish_verifies_the_saved_build_instead_of_failing(monkeypatch,polish_error):
+    workspace,browser,calls=agent_at_visual_review(monkeypatch,100,polish_error)
+    assert len(calls)==3 and 'SCREENSHOT DESIGN REVIEW' in str(calls[-1])
+    assert browser.visual_quality.call_count==2
+    workspace.run_build.assert_called_once()  # The unchanged build stays proven.
+
+
+def test_polish_without_time_to_finish_goes_directly_to_functional_checks(monkeypatch):
+    workspace,browser,calls=agent_at_visual_review(monkeypatch,200,RuntimeError('Polish must not start'))
+    assert len(calls)==2
+    assert browser.visual_quality.call_count==1
+    workspace.run_build.assert_called_once()

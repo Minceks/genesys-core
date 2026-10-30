@@ -1,6 +1,7 @@
 from __future__ import annotations
 from .progress import (report_progress, progress_callback, execution_timeout,
-                       model_request_scope, model_deadline, ModelDeadlineExceeded, REVIEW_RESERVE_SECONDS)
+                       model_request_scope, model_deadline, ModelDeadlineExceeded, REVIEW_RESERVE_SECONDS,
+                       MIN_POLISH_SECONDS)
 from .build_metrics import record_repair
 from .model_context import text_safe, ModelBudgetExceeded
 
@@ -2150,7 +2151,14 @@ def _run_agent(
     recovery_failure_type: str | None = None
     recovery_strategy: dict[str, Any] | None = None
     recovery_waiting_for_model = False
+    polish_pending = False
     checkpoint_result: dict[str, Any] | None = None
+
+    def _polish_time_available() -> bool:
+        # Polish is optional and functional checks are mandatory. Never start an
+        # edit that can only finish by spending the verification reserve.
+        remaining = agent_deadline - time.monotonic() - REVIEW_RESERVE_SECONDS
+        return game_production or remaining >= MIN_POLISH_SECONDS
 
     def _agent_timeout_result() -> dict[str, Any]:
         try:
@@ -2159,6 +2167,9 @@ def _run_agent(
             pass
 
         message = (
+            "Your build is saved, but the time limit ended before its browser "
+            "checks finished. Retry to verify the saved build."
+            if build_passed else
             "Agent execution reached its time limit before all "
             "required build and browser checks completed."
         )
@@ -2601,6 +2612,7 @@ def _run_agent(
     for step in range(1, TOTAL_MAX_STEPS + 1):
 
         steps_used = step
+        polish_pending = polish_pending and recovery_waiting_for_model
 
         if time.monotonic() >= agent_deadline:
             return _agent_timeout_result()
@@ -3478,7 +3490,9 @@ def _run_agent(
                         logging.getLogger(__name__).warning('layout_verification_failed %s',json.dumps(layout_evidence(quality),ensure_ascii=True))
                         raise RuntimeError('Rendered layout checks failed. Repair the reported elements and preserve working application logic. Fix sizing and wrapping; do not hide overflow, remove content or disable controls to mask the problem:\n' + json.dumps(quality, ensure_ascii=False))
                     if quality.get('visualPolishRequested'):
-                        raise VisualPolishNeeded(json.dumps(quality['visualReview'],ensure_ascii=False))
+                        if _polish_time_available():
+                            raise VisualPolishNeeded(json.dumps(quality['visualReview'],ensure_ascii=False))
+                        quality.setdefault('suggestions', []).append('Screenshot review: '+quality['visualReview'].get('summary','Not completed.'))
                     report_progress('Checking requested content and interactions')
                     visual_checks = []
                     if quality['status'] == 'success':
@@ -3492,7 +3506,7 @@ def _run_agent(
                         report_progress('Reviewing the working product on desktop and phone')
                         workflow_review, needs_polish = get_browser(project_id).review_workflow_design(product_brief, workflow_polish)
                         quality['workflowVisualReview'] = workflow_review
-                        if needs_polish:
+                        if needs_polish and _polish_time_available():
                             raise VisualPolishNeeded(json.dumps(workflow_review, ensure_ascii=False))
                         from .workflow_quality import remaining_design_blockers
                         content_result.setdefault('unverifiedCore', []).extend(remaining_design_blockers(workflow_review))
@@ -3582,6 +3596,7 @@ def _run_agent(
             except VisualPolishNeeded as exc:
                 report_progress('Refining the rendered design from screenshot feedback')
                 recovery_waiting_for_model=True
+                polish_pending=True
                 implementation_ready=False
                 preview_started=False
                 preview_url=None
@@ -3865,7 +3880,9 @@ def _run_agent(
 
             error_text = str(exc)
             if isinstance(exc, ModelDeadlineExceeded):
-                if changed_since_build and not recovery_waiting_for_model:
+                # An unfinished polish leaves a saved build to verify, not a failure.
+                if polish_pending or (changed_since_build and not recovery_waiting_for_model):
+                    recovery_waiting_for_model = False
                     implementation_ready = True
                     continue
                 return _agent_timeout_result()
@@ -3921,7 +3938,8 @@ def _run_agent(
                     print(f'Provider fallback succeeded: {fallback_name}')
                     break
                 except ModelDeadlineExceeded:
-                    if changed_since_build and not recovery_waiting_for_model:
+                    if polish_pending or (changed_since_build and not recovery_waiting_for_model):
+                        recovery_waiting_for_model = False
                         implementation_ready = True
                         handoff_to_checks = True
                         break

@@ -1,0 +1,30 @@
+name: tests
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      # Placeholders let settings load. Tests must never reach a real provider.
+      DAYTONA_API_KEY: test
+      GROQ_API_KEY: test
+      GEMINI_API_KEY: test
+      OPENAI_API_KEY: test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+          cache: pip
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: pip install -r requirements.txt pytest
+      - run: playwright install --with-deps chromium
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - run: npm ci --prefix reference_tools --omit=dev --ignore-scripts --no-audit --no-fund
+      - run: python -m pytest tests -q --tb=short

@@ -11,6 +11,16 @@ from urllib.parse import urlsplit
 
 import aiohttp
 from aiohttp import web
+try:
+    from .selection_bridge import inject
+except ImportError:
+    import importlib.util
+    from pathlib import Path
+    bridge_spec=importlib.util.spec_from_file_location('genesys_selection_bridge',Path(__file__).with_name('selection_bridge.py'))
+    bridge_module=importlib.util.module_from_spec(bridge_spec)
+    bridge_spec.loader.exec_module(bridge_module)
+    inject=bridge_module.inject
+
 HOP = {'connection', 'keep-alive', 'proxy-authenticate', 'proxy-authorization',
        'te', 'trailer', 'transfer-encoding', 'upgrade'}
 
@@ -130,6 +140,7 @@ def create_app():
                             result_headers['Permissions-Policy'] = 'camera=(), microphone=(), geolocation=(self)'
                             result_headers['Cache-Control'] = 'no-cache'
                             content=await upstream.read()
+                            if upstream.status==200:content=inject(content,result_headers)
                             return web.Response(status=upstream.status, body=content, headers=result_headers)
                 except (aiohttp.ClientError, asyncio.TimeoutError):
                     return web.Response(status=503, text='Saved build temporarily unavailable. Please retry.', headers={'Cache-Control':'no-store'})
@@ -192,6 +203,9 @@ def create_app():
                 result_headers['Referrer-Policy'] = 'strict-origin-when-cross-origin'
                 result_headers['Cache-Control'] = 'no-store'
                 result_headers['Permissions-Policy'] = 'camera=(), microphone=(), geolocation=(self)'
+                if upstream.status==200 and 'text/html' in upstream.headers.get('Content-Type',''):
+                    content=inject(await upstream.read(),result_headers)
+                    return web.Response(status=upstream.status,body=content,headers=result_headers)
                 response = web.StreamResponse(status=upstream.status, headers=result_headers)
                 await response.prepare(request)
                 async for chunk in upstream.content.iter_chunked(65536):

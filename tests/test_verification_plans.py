@@ -16,6 +16,8 @@ class Locator:
 
 
 class Page:
+    url = 'http://app.test/'
+
     def __init__(self):
         self.mutations = 0
         self.names = []
@@ -42,6 +44,18 @@ class Provider:
     def generate(self, *args):
         self.calls += 1
         return SimpleNamespace(text=json.dumps(self.plan))
+
+
+def test_incomplete_contract_plan_is_rejected_before_actions():
+    plan = {'requirements': [{'id': 'one', 'name': 'First behavior'}, {'id': 'two', 'name': 'Second behavior'}],
+            'checks': [{'name': 'First behavior', 'covers': ['one'], 'steps': [
+                {'action': 'visible', 'target': {'by': 'text', 'name': 'Ready'}}]}]}
+    contract = {'requirements': [dict(item, scope='browser', acceptance='Perform behavior and verify result') for item in plan['requirements']]}
+    page = Page()
+    result = verify_functions(page, 'Build the application', Provider(plan), attempt=1, contract=contract)
+    assert page.mutations == 0
+    assert 'missing executable checks' in result['unverifiedCore'][0]
+    assert 'two' in result['unverifiedCore'][0]
 
 
 def test_empty_selector_is_a_plan_error():

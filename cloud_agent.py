@@ -50,6 +50,15 @@ configure_logging()
 settings = load_settings()
 
 logger = logging.getLogger(__name__)
+
+if os.getenv('SENTRY_DSN'):
+    import sentry_sdk
+    # Prompts and generated source stay out of reports.
+    sentry_sdk.init(dsn=os.environ['SENTRY_DSN'], send_default_pii=False, include_local_variables=False)
+
+# The account should not lose a build allowance to these. Tokens the build spent
+# still count against the daily token allowance.
+PLATFORM_FAILURES = {'agent_timeout', 'ai_request', 'workspace_unavailable', 'version_backup', 'planning'}
 usage_limiter = UsageLimiter()
 
 
@@ -62,6 +71,7 @@ def reserve_build(prompt):
 
 
 def limit_response(error):
+    logger.warning('build_request_limited reason=%s retry_after=%s', error, error.retry_after)
     return jsonify(status='error', message=str(error), retryAfter=error.retry_after), 429, {'Retry-After': str(error.retry_after)}
 
 
@@ -462,9 +472,11 @@ def execute_agent_request(prompt, project_id, conversation_history, reservation=
     metrics = BuildMetrics()
     metrics_token = current.set(metrics)
     token = account_context.set(reservation[0] if reservation else None)
+    refund = False
     try:
         result = _execute_agent_request(prompt, project_id, conversation_history, recovery_context)
         if isinstance(result, dict):
+            refund = result.get('errorType') in PLATFORM_FAILURES
             result['metrics'] = metrics.summary(result)
             if result.get('requestType') != 'chat' and result.get('modifiedFiles'):
                 try:
@@ -476,7 +488,7 @@ def execute_agent_request(prompt, project_id, conversation_history, reservation=
         return result
     finally:
         current.reset(metrics_token)
-        usage_limiter.release(reservation)
+        usage_limiter.release(reservation, refund=refund)
         account_context.reset(token)
 
 
@@ -699,6 +711,7 @@ def start_agent_job():
             user_id=g.user["id"] if getattr(g, "user", None) else None)
     except ValueError as error:
         usage_limiter.release(reservation, refund=True)
+        logger.warning('build_request_rejected reason=%s', error)
         return jsonify(status="error", message=str(error)), 429
     except Exception:
         usage_limiter.release(reservation, refund=True)

@@ -1557,7 +1557,7 @@ class OpenAIProvider(AIProvider):
             return AIResponse(text=content)
 
     def generate(self, messages, tools, response_schema=None):
-        from .progress import model_request_timeout
+        from .progress import DESIGN_REQUEST_TIMEOUT_SECONDS, model_request_timeout
         if response_schema is not None:
             from .structured_schema import validate_schema_limits
             validate_schema_limits(response_schema)
@@ -1589,8 +1589,9 @@ class OpenAIProvider(AIProvider):
         request_model = os.getenv('GENESYS_DESIGN_MODEL', 'gpt-5.4') if design_stage else self.model
         if verification_stage:
             request_model = os.getenv('GENESYS_VERIFICATION_MODEL') or 'gpt-5.4'
+        request_limit = 120 if response_schema is not None else DESIGN_REQUEST_TIMEOUT_SECONDS if design_stage else 180
         options = dict(model=request_model, messages=prepared,
-                       timeout=model_request_timeout(120 if response_schema is not None else 240 if design_stage else 180),
+                       timeout=model_request_timeout(request_limit),
                        max_completion_tokens=min(24000, max(2000, int(os.getenv('GENESYS_OUTPUT_TOKEN_LIMIT', '12000')))))
         if design_stage:
             options['max_completion_tokens'] = min(24000, max(2000, int(os.getenv('GENESYS_DESIGN_OUTPUT_TOKEN_LIMIT','24000'))))
@@ -1615,7 +1616,7 @@ class OpenAIProvider(AIProvider):
         ceiling = min(24000, max(options['max_completion_tokens'],
                       int(os.getenv('GENESYS_OUTPUT_TOKEN_CEILING', '24000'))))
         for attempt in range(1 if game_polish else 2):
-            options['timeout'] = model_request_timeout(120 if response_schema is not None else 240 if design_stage else 180)
+            options['timeout'] = model_request_timeout(request_limit)
             logging.getLogger(__name__).info(
                 'openai_request phase=%s model=%s reasoning=%s output_limit=%s timeout_seconds=%.1f',
                 'design' if design_stage else 'verification' if response_schema is not None else 'tools' if tools else 'text',
