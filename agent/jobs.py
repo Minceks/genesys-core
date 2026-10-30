@@ -173,6 +173,12 @@ class JobManager:
             result = self.execute(job['prompt'], job['projectId'], history, reservation, recovery)
             state = 'completed' if result.get('status') == 'success' else 'failed'
             self.update(job_id, state=state, stage='Complete' if state == 'completed' else 'Request failed', result=result)
+            report=result.get('verification') or {}
+            summary={'jobId':job_id,'state':state,'errorType':result.get('errorType'),
+                'buildPassed':bool(result.get('buildPassed')),'browserVerified':bool(result.get('browserVerified')),
+                'failed':[str(item)[:500] for item in report.get('failed',[])[:3]],
+                'incomplete':[str(item)[:500] for item in report.get('incomplete',[])[:3]]}
+            (logger.info if state=='completed' else logger.warning)('background_agent_result %s',json.dumps(summary,ensure_ascii=True))
         except Exception as error:
             if 'cannot schedule new futures after' in str(error).lower():
                 logger.warning('background_job_interrupted_by_shutdown job=%s', job_id)

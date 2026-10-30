@@ -6,7 +6,46 @@ from agent.jobs import JobManager
 from agent.progress import report_progress
 
 
-def test_projects_have_separate_progress_and_results_and_capacity_is_bounded():
+@pytest.fixture(autouse=True)
+def isolated_job_store(tmp_path, monkeypatch):
+    monkeypatch.setenv('GENESYS_JOB_DB', str(tmp_path / 'jobs.sqlite3'))
+    monkeypatch.delenv('RAILWAY_ENVIRONMENT_ID', raising=False)
+
+
+def claim(manager, job_id, project):
+    # Run a queued durable job without starting an immortal dispatcher thread.
+    with manager.connection() as db:
+        db.execute("UPDATE jobs SET state='running',owner=?,attempts=1 WHERE id=?", (manager.owner, job_id))
+    return manager.get(job_id, project)
+
+
+def test_failed_application_retry_delivers_diagnostics_to_implementation():
+    manager=JobManager(workers=1)
+    received=[]
+    try:
+        manager.execute=lambda prompt,project,history,reservation,recovery:received.append(recovery) or {'status':'success'}
+        job_id=manager.submit('project','retry',prompt='Build an app',implementation_retry='Repair missing Create New Site control')
+        manager.run(claim(manager,job_id,'project'),[],None,0)
+        assert received==['Repair missing Create New Site control']
+        assert manager.get(job_id,'project')['state']=='completed'
+    finally:
+        manager.executor.shutdown(wait=True)
+
+
+def test_legacy_queued_retry_does_not_skip_implementation():
+    manager=JobManager(workers=1)
+    received=[]
+    try:
+        manager.execute=lambda prompt,project,history,reservation,recovery:received.append(recovery) or {'status':'success'}
+        job_id=manager.submit('project','legacy',prompt='Build an app',verification_retry='compiled-only')
+        job=claim(manager,job_id,'project');job.pop('verificationRetryVerified')
+        manager.run(job,[],None,0)
+        assert isinstance(received[0],str) and 'no evidence' in received[0]
+    finally:
+        manager.executor.shutdown(wait=True)
+
+
+def test_projects_have_separate_progress_and_results_and_duplicate_requests_are_blocked():
     manager = JobManager(workers=2)
     release = threading.Event()
     ready_a, ready_b = threading.Event(), threading.Event()
@@ -18,16 +57,17 @@ def test_projects_have_separate_progress_and_results_and_capacity_is_bounded():
         return {"status": "success", "projectId": project}
 
     try:
-        a = manager.submit("a", "request-a", lambda: execute("a", ready_a))
-        b = manager.submit("b", "request-b", lambda: execute("b", ready_b))
+        manager.execute = lambda prompt,project,*_:execute(project,ready_a if project=='a' else ready_b)
+        a = manager.submit("a", "request-a", prompt='Build A')
+        b = manager.submit("b", "request-b", prompt='Build B')
+        manager.executor.submit(manager.run,claim(manager,a,'a'),[],None,0)
+        manager.executor.submit(manager.run,claim(manager,b,'b'),[],None,0)
         assert ready_a.wait(5) and ready_b.wait(5)
         assert manager.get(a, "b") is None
         assert manager.get(a, "a")["stage"] == "Building a"
         assert manager.get(b, "b")["stage"] == "Building b"
         with pytest.raises(ValueError, match="already running"):
-            manager.submit("a", "other", lambda: {})
-        with pytest.raises(ValueError, match="busy"):
-            manager.submit("c", "request-c", lambda: {})
+            manager.submit("a", "other", prompt='Duplicate')
     finally:
         release.set()
         manager.executor.shutdown(wait=True)
@@ -35,11 +75,23 @@ def test_projects_have_separate_progress_and_results_and_capacity_is_bounded():
     assert manager.get(b, "b")["requestId"] == "request-b"
 
 
+def test_durable_waiting_queue_has_bounded_capacity():
+    manager=JobManager(workers=1)
+    try:
+        for index in range(100):
+            manager.submit(str(index),str(index),prompt='Queued work')
+        with pytest.raises(ValueError,match='busy'):
+            manager.submit('overflow','overflow',prompt='No worker or provider should execute this')
+    finally: manager.executor.shutdown(wait=True)
+
+
 def test_background_failure_is_reported_and_releases_project():
     manager = JobManager(workers=1)
-    def fail():
+    def fail(*_):
         raise RuntimeError("private backend detail")
-    job = manager.submit("project", "request", fail)
+    manager.execute=fail
+    job = manager.submit("project", "request", prompt='Synthetic failing job')
+    manager.executor.submit(manager.run,claim(manager,job,'project'),[],None,0)
     manager.executor.shutdown(wait=True)
     result = manager.get(job, "project")
     assert result["state"] == "failed"
@@ -61,6 +113,8 @@ def test_beta_routes_require_auth_and_return_request_references(monkeypatch):
     response = client.post("/agent/jobs", json={"projectId": "test", "prompt": "hello"}, headers={"X-API-Key": "test-key"})
     assert response.status_code == 202
     job = response.get_json()
+    manager.execute=cloud_agent.execute_agent_request
+    manager.executor.submit(manager.run,claim(manager,job['jobId'],'test'),[],None,0)
     manager.executor.shutdown(wait=True)
     assert job["requestId"] == response.headers["X-Request-ID"]
     assert client.get(f"/agent/jobs/{job['jobId']}?projectId=other", headers={"X-API-Key": "test-key"}).status_code == 404

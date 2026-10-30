@@ -1506,35 +1506,55 @@ class OpenAIProvider(AIProvider):
                 raise ValueError('Unsupported screenshot format')
             parts += [{'type':'text','text':label}, {'type':'image_url','image_url':{
                 'url':'data:'+mime+';base64,'+base64.b64encode(data).decode('ascii'),'detail':'high'}}]
-        # Reserve text and a conservative image allowance through existing budgets.
-        output_limit=8000 if game_polish else 6000
-        text_budget=bounded_messages([{'role':'system','content':instruction},{'role':'user','content':parts[0]['text'],
-            **({'_preserve_complete_source':True} if game_polish else {})}],[],output_limit=output_limit,attempts=1)
-        try:
-            image_budget=reserve_model_budget(6000*len(images))
-        except Exception:
-            from .model_context import reconcile_model_budget
-            reconcile_model_budget(getattr(text_budget,'budget_reservation',None),0)
-            raise
-        options=dict(model=self.model,messages=[{'role':'system','content':instruction},{'role':'user','content':parts}],
-            max_completion_tokens=output_limit,timeout=180 if game_polish else 90,
-            response_format={'type':'json_schema','json_schema':{'name':'visual_design_review','strict':True,'schema':schema}})
-        if self.model.startswith(('gpt-5','gpt-6','o3','o4')):
-            options['reasoning_effort']=os.getenv('GENESYS_REVIEW_REASONING_EFFORT','medium')
         from .progress import model_request_timeout
-        options['timeout'] = model_request_timeout(180 if game_polish else 90)
-        response=self.client.chat.completions.create(**options)
         from .model_context import reconcile_model_budget
-        actual=getattr(getattr(response,'usage',None),'total_tokens',None)
-        text_reservation=getattr(text_budget,'budget_reservation',None)
-        if type(actual) is int:
-            text_used=min(actual,text_reservation['tokens']) if text_reservation else 0
-            reconcile_model_budget(text_reservation,text_used)
-            reconcile_model_budget(image_budget,actual-text_used)
-        record_model_usage(response)
-        if not response.choices or response.choices[0].finish_reason!='stop' or not response.choices[0].message.content:
-            raise RuntimeError('Visual review did not return a complete assessment')
-        return AIResponse(text=response.choices[0].message.content)
+        phase='game-polish' if game_polish else 'design-review'
+        for attempt,output_limit in enumerate((16000,24000) if game_polish else (6000,12000)):
+            attempt_instruction=instruction
+            if attempt:
+                attempt_instruction+='\nThe previous response was incomplete and discarded. Return compact complete JSON only. Use minimal exact replacements instead of repeating long source sections. No partial response was applied.'
+            # Every attempt is admitted and settled separately. Never refund an
+            # unreported timeout or apply fragments from an incomplete response.
+            text_budget=bounded_messages([{'role':'system','content':attempt_instruction},{'role':'user','content':parts[0]['text'],
+                **({'_preserve_complete_source':True} if game_polish else {})}],[],output_limit=output_limit,attempts=1)
+            try:
+                image_budget=reserve_model_budget(6000*len(images))
+            except Exception:
+                reconcile_model_budget(getattr(text_budget,'budget_reservation',None),0)
+                raise
+            options=dict(model=self.model,messages=[{'role':'system','content':attempt_instruction},{'role':'user','content':parts}],
+                max_completion_tokens=output_limit,
+                response_format={'type':'json_schema','json_schema':{'name':'visual_design_review','strict':True,'schema':schema}})
+            if self.model.startswith(('gpt-5','gpt-6','o3','o4')):
+                options['reasoning_effort']=os.getenv('GENESYS_REVIEW_REASONING_EFFORT','medium')
+            options['timeout']=model_request_timeout(240 if game_polish else 90)
+            logging.getLogger(__name__).info('openai_vision_request phase=%s model=%s attempt=%s output_limit=%s',phase,self.model,attempt+1,output_limit)
+            response=self.client.chat.completions.create(**options)
+            actual=getattr(getattr(response,'usage',None),'total_tokens',None)
+            text_reservation=getattr(text_budget,'budget_reservation',None)
+            if type(actual) is int:
+                text_used=min(actual,text_reservation['tokens']) if text_reservation else 0
+                reconcile_model_budget(text_reservation,text_used)
+                reconcile_model_budget(image_budget,actual-text_used)
+            record_model_usage(response)
+            choice=response.choices[0] if response.choices else None
+            finish=getattr(choice,'finish_reason','missing-choice')
+            message=getattr(choice,'message',None)
+            content=getattr(message,'content',None)
+            refusal=getattr(message,'refusal',None)
+            logging.getLogger(__name__).info('openai_vision_response phase=%s model=%s finish_reason=%s completion_tokens=%s',
+                phase,self.model,finish,getattr(getattr(response,'usage',None),'completion_tokens',None))
+            if refusal:
+                raise RuntimeError(phase+' did not return a complete response (finish_reason=refusal); source was preserved.')
+            if finish=='length':
+                if attempt==0:continue
+                raise RuntimeError(phase+' exceeded its output allowance after a bounded retry; source was preserved.')
+            if attempt==0 and not refusal and (finish=='missing-choice' or (finish=='stop' and not content)):
+                continue
+            if finish!='stop' or not content:
+                reason='refusal' if refusal else str(finish)
+                raise RuntimeError(phase+' did not return a complete response (finish_reason='+reason+'); source was preserved.')
+            return AIResponse(text=content)
 
     def generate(self, messages, tools, response_schema=None):
         from .progress import model_request_timeout
