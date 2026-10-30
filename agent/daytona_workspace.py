@@ -308,6 +308,19 @@ for name, contents in files.items():
             pass
         self._install_user_project(sandbox)
 
+    def write_asset(self, filename: str, content: bytes) -> None:
+        """Store a binary project asset, which text file writes cannot carry."""
+        relative = str(filename)
+        from .builder_controls import assert_writable
+        assert_writable(self.project_id, relative)
+        remote_path = safe_remote_path(relative)
+        self._ensure_sandbox_running()
+        result = self._run_file_operation(lambda: self.sandbox.process.exec(
+            "mkdir -p " + shlex.quote(str(PurePosixPath(remote_path).parent)), timeout=30))
+        if result.exit_code != 0:
+            raise RuntimeError('Could not create the asset directory')
+        self._run_file_operation(lambda: self.sandbox.fs.upload_file(content, remote_path, timeout=120))
+
     def _install_user_project(self, sandbox) -> None:
         result = sandbox.process.exec(
             "npm install --include=dev && touch .genesys-user-project && "

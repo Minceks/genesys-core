@@ -67,7 +67,7 @@ def initial_source_context(cache, files, targets):
     parts = []
     remaining = 12000
     for path in candidates:
-        if len(parts) >= 4 or path not in available or not path.endswith(('.js', '.jsx', '.tsx', '.css')) or path.startswith('recovered/'):
+        if len(parts) >= 4 or path not in available or not path.endswith(('.js', '.jsx', '.tsx', '.css')) or path.startswith(('recovered/', 'src/components/ui/')):
             continue
         result = cache.read_file(path)
         content = result.get('content') if isinstance(result, dict) else None

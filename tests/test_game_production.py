@@ -270,3 +270,9 @@ def test_image_aware_game_polish_never_truncates_its_source_context(monkeypatch)
     assert captured[1]['_preserve_complete_source'] and 'SOURCE-END' in captured[1]['content']
     assert 'SOURCE-END' in create.call_args.kwargs['messages'][1]['content'][0]['text']
     assert create.call_args.kwargs['max_completion_tokens']==16000
+
+
+@pytest.fixture(autouse=True)
+def plain_design_responses(monkeypatch):
+    # These fakes return whole responses. Streaming is covered in test_build_upgrades.py.
+    monkeypatch.setenv('GENESYS_STREAM_DESIGN', '0')

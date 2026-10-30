@@ -1,7 +1,7 @@
 from __future__ import annotations
 from .progress import (report_progress, progress_callback, execution_timeout,
                        model_request_scope, model_deadline, ModelDeadlineExceeded, REVIEW_RESERVE_SECONDS,
-                       MIN_POLISH_SECONDS)
+                       MIN_POLISH_SECONDS, repair_model_scope)
 from .build_metrics import record_repair
 from .model_context import text_safe, ModelBudgetExceeded
 
@@ -2152,6 +2152,7 @@ def _run_agent(
     recovery_strategy: dict[str, Any] | None = None
     recovery_waiting_for_model = False
     polish_pending = False
+    draft_incomplete = False
     checkpoint_result: dict[str, Any] | None = None
 
     def _polish_time_available() -> bool:
@@ -2540,7 +2541,7 @@ def _run_agent(
                 from .parallel_build import draft_project
                 report_progress('Starting game production' if game_production else 'Building UI and application logic in parallel')
                 starter_files = {'src/App.jsx': starter_text}
-                for path in ('src/usePersistentState.js', 'src/styles.css', 'src/main.jsx', 'index.html'):
+                for path in ('src/usePersistentState.js', 'src/styles.css', 'src/main.jsx', 'index.html', 'package.json'):
                     starter_files[path] = workspace.read_file(path).get('content', '')
                 # Workers receive data and design requirements, not the platform
                 # agent's tool-use/system instructions copied into a user prompt.
@@ -2550,7 +2551,7 @@ def _run_agent(
                 from .progress import draft_stage_deadline
                 draft_deadline = draft_stage_deadline(agent_deadline, game=game_production)
                 with model_request_scope(draft_deadline):
-                    drafts = draft_project(prompt, shared_source, provider_for, draft_deadline)
+                    drafts = draft_project(prompt, shared_source, provider_for, draft_deadline, save_image=workspace.write_asset)
                 if game_production and not drafts:
                     raise RuntimeError('Game production budget ended before a complete draft was available')
                 if drafts:
@@ -2569,6 +2570,7 @@ def _run_agent(
                         '. Preserve their changes; repair only verification failures.'})
         except Exception as draft_error:
             logging.getLogger(__name__).exception('parallel_build_fell_back')
+            draft_incomplete = True
             # Keep complete owned drafts and exact review findings. Restarting
             # from the placeholder wastes completed work and the repair budget.
             from .parallel_build import DraftReviewFailed
@@ -3873,7 +3875,8 @@ def _run_agent(
         handoff_to_checks = False
         try:
 
-            with model_request_scope(agent_deadline - (0 if last_failure_type else REVIEW_RESERVE_SECONDS)):
+            with (model_request_scope(agent_deadline - (0 if last_failure_type else REVIEW_RESERVE_SECONDS)),
+                  repair_model_scope(draft_incomplete or recovery_waiting_for_model)):
                 response = provider.generate(messages, step_tools)
 
         except Exception as exc:

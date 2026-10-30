@@ -4,6 +4,7 @@ import logging
 import os
 import re
 import time
+from types import SimpleNamespace
 import uuid
 from dataclasses import dataclass, field
 from typing import Any
@@ -1556,8 +1557,31 @@ class OpenAIProvider(AIProvider):
                 raise RuntimeError(phase+' did not return a complete response (finish_reason='+reason+'); source was preserved.')
             return AIResponse(text=content)
 
+    def _streamed_completion(self, options):
+        """Long drafts stream, so a stalled connection fails early and a slow one survives."""
+        from .progress import STREAM_STALL_SECONDS
+        started = time.monotonic()
+        limit = options['timeout']
+        stream = self.client.chat.completions.create(**{**options, 'timeout': min(limit, STREAM_STALL_SECONDS),
+            'stream': True, 'stream_options': {'include_usage': True}})
+        parts, finish_reason, usage = [], None, None
+        try:
+            for chunk in stream:
+                if time.monotonic() - started > limit:
+                    raise TimeoutError('Streamed model response exceeded its time budget.')
+                usage = getattr(chunk, 'usage', None) or usage
+                for choice in chunk.choices or []:
+                    finish_reason = choice.finish_reason or finish_reason
+                    if choice.delta and choice.delta.content:
+                        parts.append(choice.delta.content)
+        finally:
+            close = getattr(stream, 'close', None)
+            if close: close()
+        message = SimpleNamespace(content=''.join(parts), tool_calls=None)
+        return SimpleNamespace(choices=[SimpleNamespace(finish_reason=finish_reason or 'length', message=message)], usage=usage)
+
     def generate(self, messages, tools, response_schema=None):
-        from .progress import DESIGN_REQUEST_TIMEOUT_SECONDS, model_request_timeout
+        from .progress import DESIGN_REQUEST_TIMEOUT_SECONDS, model_request_timeout, repair_model
         if response_schema is not None:
             from .structured_schema import validate_schema_limits
             validate_schema_limits(response_schema)
@@ -1589,6 +1613,8 @@ class OpenAIProvider(AIProvider):
         request_model = os.getenv('GENESYS_DESIGN_MODEL', 'gpt-5.4') if design_stage else self.model
         if verification_stage:
             request_model = os.getenv('GENESYS_VERIFICATION_MODEL') or 'gpt-5.4'
+        if tools and repair_model.get():
+            request_model = os.getenv('GENESYS_REPAIR_MODEL') or os.getenv('GENESYS_DESIGN_MODEL', 'gpt-5.4')
         request_limit = 120 if response_schema is not None else DESIGN_REQUEST_TIMEOUT_SECONDS if design_stage else 180
         options = dict(model=request_model, messages=prepared,
                        timeout=model_request_timeout(request_limit),
@@ -1621,7 +1647,8 @@ class OpenAIProvider(AIProvider):
                 'openai_request phase=%s model=%s reasoning=%s output_limit=%s timeout_seconds=%.1f',
                 'design' if design_stage else 'verification' if response_schema is not None else 'tools' if tools else 'text',
                 request_model, options.get('reasoning_effort','default'), options['max_completion_tokens'], options['timeout'])
-            response = self.client.chat.completions.create(**options)
+            streaming = design_stage and not tools and os.getenv('GENESYS_STREAM_DESIGN', '1') != '0'
+            response = self._streamed_completion(options) if streaming else self.client.chat.completions.create(**options)
             from .model_context import reconcile_model_budget
             reconcile_model_budget(getattr(options['messages'],'budget_reservation',budget_reservation),getattr(getattr(response,'usage',None),'total_tokens',None))
             record_model_usage(response)

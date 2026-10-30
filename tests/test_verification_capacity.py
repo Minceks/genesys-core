@@ -1,3 +1,4 @@
+import pytest
 from types import SimpleNamespace
 from unittest.mock import Mock
 import time
@@ -80,3 +81,9 @@ def test_native_preference_is_asserted_after_reload_not_inferred_from_visibility
             result=verify_functions(page,'Remember sound preference',SimpleNamespace(generate=lambda *_:None),attempt=1,_plan_override=plan)
             assert result['coverage']['passedIds']==['R1'] and not result['issues'],result
         finally:browser.close()
+
+
+@pytest.fixture(autouse=True)
+def plain_design_responses(monkeypatch):
+    # These fakes return whole responses. Streaming is covered in test_build_upgrades.py.
+    monkeypatch.setenv('GENESYS_STREAM_DESIGN', '0')

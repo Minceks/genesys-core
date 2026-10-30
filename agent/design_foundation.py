@@ -10,7 +10,7 @@ def digest(value):
     return hashlib.sha256(value.encode()).hexdigest()
 
 
-def stylesheet(system):
+def stylesheet(system, modern=False):
     # Only plain values from the brief enter CSS; no arbitrary CSS fragments.
     def safe(value, fallback):
         return value if isinstance(value, str) and re.fullmatch(r'[\w\s#.,%()"\-]+', value) else fallback
@@ -35,11 +35,22 @@ def stylesheet(system):
         f'  --radius-control: {safe(materials.get("controlRadius"), "10px")};',
         f'  --radius-panel: {safe(materials.get("panelRadius"), "18px")};',
     ]
-    return '/* Project visual system. Override deliberately in styles.css; keep the shared import. */\n:root {\n' + '\n'.join(declarations) + '''
+    fonts = ''.join(f'@import "{name}";\n' for name in typography.get('packages', ()) if modern and re.fullmatch(r'@fontsource-variable/[a-z-]+', str(name)))
+    return fonts + '/* Project visual system. Override deliberately in styles.css; keep the shared import. */\n:root {\n' + '\n'.join(declarations) + '''
   --space-1:4px; --space-2:8px; --space-3:12px; --space-4:16px;
   --space-6:24px; --space-8:32px; --space-12:48px; --space-16:64px;
 }
-:where(body){background:var(--background);color:var(--text);font-family:var(--font-body);font-size:1rem;line-height:1.65}
+''' + ('''@layer base {
+  :where(body){background:var(--background);color:var(--text);font-family:var(--font-body);font-size:1rem;line-height:1.65}
+  :where(h1,h2,h3,h4){font-family:var(--font-display);line-height:1.12;text-wrap:balance}
+  :where(h1){font-size:var(--type-display);letter-spacing:-.04em}
+  :where(h2){font-size:var(--type-section);letter-spacing:-.025em}
+  :where(button:not([class])){border:1px solid var(--border);border-radius:var(--radius-control);padding:10px 16px;background:var(--surface);color:var(--text);min-height:44px;cursor:pointer}
+  :where(input:not([class]):not([type=checkbox]):not([type=radio]):not([type=hidden]),select:not([class]),textarea:not([class])){border:1px solid var(--border);border-radius:var(--radius-control);padding:10px 12px;background:var(--surface);color:var(--text);min-height:44px}
+  :where(input[type=checkbox],input[type=radio]){width:1.1rem;min-width:1.1rem;height:1.1rem;flex-grow:0;accent-color:var(--accent)}
+  :where(button,a,input,select,textarea):focus-visible{outline:3px solid var(--accent);outline-offset:3px}
+}
+''' if modern else ''':where(body){background:var(--background);color:var(--text);font-family:var(--font-body);font-size:1rem;line-height:1.65}
 :where(h1,h2,h3,h4){font-family:var(--font-display);line-height:1.12;text-wrap:balance}
 :where(h1){font-size:var(--type-display);letter-spacing:-.04em}
 :where(h2){font-size:var(--type-section);letter-spacing:-.025em}
@@ -47,13 +58,14 @@ def stylesheet(system):
 :where(input:not([type=checkbox]):not([type=radio]):not([type=hidden]),select,textarea){border:1px solid var(--border);border-radius:var(--radius-control);padding:10px 12px;background:var(--surface);color:var(--text);min-height:44px}
 :where(input[type=checkbox],input[type=radio]){width:1.1rem;min-width:1.1rem;height:1.1rem;flex-grow:0;accent-color:var(--accent)}
 :where(button,a,input,select,textarea):focus-visible{outline:3px solid var(--accent);outline-offset:3px}
-'''
+''')
 
 
 def prepare_foundation(workspace, system, previous=None):
     try:
         main = workspace.read_file('src/main.jsx').get('content', '')
         current = workspace.read_file(PATH).get('content', '')
+        package = workspace.read_file('package.json').get('content', '')
     except (FileNotFoundError, ValueError, TypeError, AttributeError):
         return None
     if not re.search(r'''import\s*['"]\./design-tokens\.css['"]''', main):
@@ -61,7 +73,7 @@ def prepare_foundation(workspace, system, previous=None):
     recorded = (previous or {}).get('designFoundation') or {}
     if current != PLACEHOLDER and digest(current) != recorded.get('hash'):
         return {'path': PATH, 'status': 'user-managed'}
-    css = stylesheet(system)
+    css = stylesheet(system, modern='tailwindcss' in package)
     if css != current:
         from .builder_controls import assert_writable
         try:

@@ -6,12 +6,15 @@ import time
 
 progress_callback = ContextVar("genesys_progress_callback", default=None)
 model_deadline = ContextVar('genesys_model_deadline', default=None)
+repair_model = ContextVar('genesys_repair_model', default=False)
 REVIEW_RESERVE_SECONDS = 180
 # The design tier produces about 70 tokens per second, so its 24000-token
 # allowance needs about 340 seconds. Stage deadlines still bound every request.
 DESIGN_REQUEST_TIMEOUT_SECONDS = 360
 # A screenshot polish edit takes 80-95 seconds. Less cannot finish before the reserve.
 MIN_POLISH_SECONDS = 90
+# A stream delivers nothing while the model reasons, so a stall must allow for that.
+STREAM_STALL_SECONDS = 120
 
 
 class ModelDeadlineExceeded(RuntimeError):
@@ -24,6 +27,13 @@ def model_request_scope(deadline):
     token = model_deadline.set(min(parent, deadline) if parent is not None else deadline)
     try: yield
     finally: model_deadline.reset(token)
+
+
+@contextmanager
+def repair_model_scope(enabled):
+    token = repair_model.set(bool(enabled))
+    try: yield
+    finally: repair_model.reset(token)
 
 
 def model_request_timeout(default):

@@ -46,7 +46,7 @@ DIRECTIONS = {
     'website': {'layout':'Purpose-specific page sections, clear navigation and a meaningful call to action.',
         'visual':'Brand and audience appropriate typography, coherent spacing and deliberate imagery.',
         'assets':'Relevant photos/illustrations, never empty image placeholders.',
-        'technology':'Responsive semantic React/HTML with existing project dependencies.',
+        'technology':'Responsive semantic React with the project\'s installed styling and component tools.',
         'checks':['Navigation works', 'Calls to action work', 'Responsive sections do not overflow']},
 }
 

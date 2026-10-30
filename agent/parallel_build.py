@@ -7,8 +7,11 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from contextvars import copy_context
 from .design_quality import BUILD_STANDARD
+from .image_generation import enabled as images_enabled, planned_images, produce_image
+from .ui_kit import STACK_GUIDE, STACK_REVIEW
 
 logger = logging.getLogger(__name__)
+PLANNED_FILE = re.compile(r'src/(?:components|pages|sections|hooks|data|lib)/(?!ui/|utils\.)[\w-]+(?:/[\w-]+)*\.jsx?')
 
 
 class DraftReviewFailed(ValueError):
@@ -49,6 +52,17 @@ def normalize_owned_files(files, paths):
     return normalized
 
 
+def planned_files(plan, key, taken=()):
+    """Valid, bounded source paths a worker must deliver for a modern project."""
+    paths = []
+    for item in plan.get(key) or []:
+        path = (item.get('path') if isinstance(item, dict) else item)
+        path = path.removeprefix('./') if isinstance(path, str) else ''
+        if PLANNED_FILE.fullmatch(path) and path not in taken and path not in paths:
+            paths.append(path)
+    return paths[:8]
+
+
 def review_draft(files, plan, source, provider):
     if not files or any(not isinstance(code,str) or not code.strip() for code in files.values()):
         raise ValueError('Draft review requires complete nonempty source files')
@@ -70,6 +84,7 @@ def review_draft(files, plan, source, provider):
             {'role': 'system', 'content':
              BUILD_STANDARD + '\nReview the complete React UI and logic draft against its shared plan. Return JSON only: '
              '{"valid":true or false,"issues":["specific defects"],"files":{"path":"complete corrected source"}}. '
+             + (STACK_GUIDE + '\n' + STACK_REVIEW + ' src/components/ui and src/lib/utils.js are installed. ' if 'tailwindcss' in source else '') +
              'Check named imports/exports, hook arguments, returned fields, exact action payload keys and '
              'result shapes, dynamic option population, persistence, cancellation/undo and stable confirmation. '
              'Apply designExecution.deliveryPlaybook to the actual source. Check dependent selection invalidation, '
@@ -145,7 +160,7 @@ def review_draft(files, plan, source, provider):
     return {**files, **repairs}
 
 
-def draft_project(prompt, source, provider_for, deadline):
+def draft_project(prompt, source, provider_for, deadline, save_image=None):
     from .game_build import is_game_source, draft_game
     if is_game_source(source):
         return draft_game(prompt, source, provider_for, deadline)
@@ -153,12 +168,24 @@ def draft_project(prompt, source, provider_for, deadline):
     if deadline - started < 100:
         return None
     planner = provider_for('openai')
+    modern = 'tailwindcss' in source
+    stack = '\n' + STACK_GUIDE + '\n' if modern else '\n'
+    file_plan = ('Add primaryFiles and secondaryFiles: arrays of {"path","exports","purpose"} with paths under src/components, '
+        'src/pages, src/hooks or src/data, at most 8 each. primaryFiles are the app shell and main views, secondaryFiles the '
+        'supporting sections. Give exact export names so separately written files connect. ' if modern else '')
+    if modern and save_image and images_enabled():
+        file_plan += ('Add generatedImages only where photography or artwork materially lifts the product, usually a hero '
+            'and at most two sections: an array of {"path":"public/images/name.png","prompt":"specific subject, style, '
+            'lighting and composition","alt":"accurate description","size":"1536x1024, 1024x1536 or 1024x1024"}. Use an '
+            'empty array for tools, dashboards, games and products the user supplied images for. Generated people, places '
+            'and products are illustrative: never present them as real customers, staff, premises or stock. ')
     plan = parsed(planner.generate([{'role':'system', 'content':
-        BUILD_STANDARD + '\nPlan a React user application. Return JSON only: {"interface": "...", "requirements": [...], "pageComposition": [...]}. '
+        BUILD_STANDARD + stack + 'Plan a React user application. Return JSON only: {"interface": "...", "requirements": [...], "pageComposition": [...]}. ' + file_plan +
         'Also include designDecision: {"direction":"chosen composition", "reason":"audience and task fit", '
         '"signature":"one distinctive visual detail", "mobile":"intentional phone composition"}. '
         'Add concrete typography, palette, spacing and heroGeometry strings to designDecision. '
-        'Include styleInterface: exact class names, view hierarchy, component states and responsive transformations shared by the JSX and CSS workers. '
+        + ('Include styleInterface: component hierarchy, states and responsive transformations shared by all workers. ' if modern else
+        'Include styleInterface: exact class names, view hierarchy, component states and responsive transformations shared by the JSX and CSS workers. ') +
         'Apply engineeringStrategy: compare two practical approaches, choose maintainable boundaries, '
         'and record trendAdaptation in designDecision with zero to three relevant ideas, source/date '
         'or curated basis, user benefit and rejected mismatches. User scope, genre and preferences win. '
@@ -192,7 +219,7 @@ def draft_project(prompt, source, provider_for, deadline):
         'and clearly label unavailable integrations without inventing success. '
         'Include exact input object keys and result shapes for every action; UI form names must map '
         'explicitly to these keys. Define how selectors obtain options and update dependent inputs. '
-        'That module owns data and behavior; App.jsx owns JSX. Use only React and existing dependencies. '
+        'That module owns data and behavior; components own JSX. Use only packages already in package.json. '
         'Persistence must reuse src/usePersistentState.js. Keep the plan under 800 words.'},
         {'role':'user','content':prompt + '\nExisting starter:\n' + source}], []).text)
     if not isinstance(plan.get('interface'), str) or not isinstance(plan.get('requirements'), list):
@@ -201,13 +228,21 @@ def draft_project(prompt, source, provider_for, deadline):
         composition = plan.get('pageComposition')
         if not isinstance(composition, list) or len(composition) < 3:
             raise ValueError('Public website plan is missing its page composition')
+    images = planned_images(plan) if modern and save_image and images_enabled() else []
+    plan['generatedImages'] = images
+    if images:
+        stack += ('Generated images are being created. Reference each from the plan as src="/images/name.png" with its exact '
+                  'alt text, inside a fixed aspect-ratio container using object-cover. Do not import them or invent other image paths.\n')
     shared = prompt + '\nSHARED PLAN:\n' + json.dumps(plan) + '\nSTARTER:\n' + source
+    primary = planned_files(plan, 'primaryFiles') if modern else []
+    secondary = planned_files(plan, 'secondaryFiles', primary) if modern else []
     def worker(name, paths, role, optional_paths=()):
         result = parsed(provider_for(name).generate([{'role':'system','content':
-            BUILD_STANDARD + '\n' + role + ' Follow the exact shared interface. Return JSON only: {"files": {"path": "complete source"}}. '
+            BUILD_STANDARD + stack + role + ' Follow the exact shared interface. Return JSON only: {"files": {"path": "complete source"}}. '
             'Required files: ' + ', '.join(paths) + '. Optional assigned branding files: '
             + ', '.join(optional_paths) + '. Write no other files. No placeholders or dependencies. '
-            'Use JavaScript, plain CSS and React. Keep each file compact. No build or deployment tools.'},
+            + ('Use JavaScript and React with the installed stack. Keep files focused. No build or deployment tools.' if modern else
+            'Use JavaScript, plain CSS and React. Keep each file compact. No build or deployment tools.')},
             {'role':'user','content': shared}], []).text)
         files = normalize_owned_files(result.get('files'), set(paths) | set(optional_paths))
         if (not isinstance(files, dict) or set(paths) - set(files)
@@ -217,12 +252,16 @@ def draft_project(prompt, source, provider_for, deadline):
             raise ValueError('Worker returned invalid source')
         return files
     # Workers create drafts in memory. They cannot concurrently modify the sandbox.
-    with ThreadPoolExecutor(max_workers=3, thread_name_prefix='genesys-builder') as pool:
-        ui = pool.submit(copy_context().run, worker, 'openai', ['src/App.jsx'],
+    client = getattr(planner, 'client', None)
+    with ThreadPoolExecutor(max_workers=3 + len(images), thread_name_prefix='genesys-builder') as pool:
+        for image in images if client else ():
+            pool.submit(copy_context().run, produce_image, client, image, save_image)
+        ui = pool.submit(copy_context().run, worker, 'openai', ['src/App.jsx'] + primary,
             'Build the responsive UI. Import logic from ./projectLogic and styles from ./styles.css. '
             'Use static named imports of the exact shared exports. If the contract uses a React hook, call it unconditionally at component top level. '
             'For canvas games initialize the shared engine after canvas mount and keep a single simulation owner; do not reimplement simulation or run duplicate animation loops in App. '
-            'Use the exact styleInterface class names and view hierarchy; a separate worker owns all page CSS. '
+            + ('Style with Tailwind utilities and the component kit. Import the planned secondaryFiles by their exact exports; another worker writes them. ' if modern else
+            'Use the exact styleInterface class names and view hierarchy; a separate worker owns all page CSS. ') +
             'Never duplicate logic with fallback hooks, stubs or no-op actions. Never dynamically swap hooks. '
             'Render every requested action result, including quiz questions, answers and scores when applicable. '
             'Map form fields to the exact shared action payload keys. Populate dependent dropdowns '
@@ -255,7 +294,10 @@ def draft_project(prompt, source, provider_for, deadline):
         logic = pool.submit(copy_context().run, worker, os.getenv('GENESYS_PARALLEL_LOGIC_PROVIDER', 'openai'), ['src/projectLogic.js'],
             'Implement the exact shared logic interface, state, validation and requested actions. '
             'Preserve reload persistence using the supplied usePersistentState hook. No JSX or CSS.')
-        styles = pool.submit(copy_context().run, worker, 'openai', ['src/styles.css'],
+        styles = pool.submit(copy_context().run, worker, 'openai', ['src/styles.css'] + secondary,
+            ('Implement the planned supporting components with Tailwind utilities and the component kit, using their exact exports. '
+             'Keep src/styles.css minimal: only keyframes or effects utilities cannot express, or one short comment when none are needed. '
+             'Finish responsive, hover, focus, selected, empty and disabled states. Respect reduced motion. No application logic.') if modern else
             'Implement the complete responsive stylesheet using the shared styleInterface class names and view hierarchy. '
             'Honor the exact designDecision type scale, colors, spacing, art treatment and component states. '
             'Provide deliberate desktop and phone compositions, readable focus/disabled/selected/result states, '
@@ -267,7 +309,7 @@ def draft_project(prompt, source, provider_for, deadline):
             except Exception as error:
                 failures.append(type(error).__name__)
         if failures:
-            missing = sorted({'src/App.jsx','src/styles.css','src/projectLogic.js'} - set(files))
+            missing = sorted({'src/App.jsx','src/styles.css','src/projectLogic.js',*primary,*secondary} - set(files))
             if files:
                 raise DraftReviewFailed(files, [
                     'One draft worker did not finish ('+', '.join(failures)+'). Complete missing files: '+

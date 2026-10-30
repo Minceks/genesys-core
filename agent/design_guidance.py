@@ -1,6 +1,7 @@
 """Project-specific visual guidance for generated applications."""
 
 import hashlib
+from .ui_kit import STACK_GUIDE
 
 DESIGN_DIRECTIONS = (
     "Warm editorial: ivory surfaces, ink text, terracotta accents, expressive headings and generous whitespace.",
@@ -25,7 +26,7 @@ PURPOSE_DIRECTIONS = {
 def project_design_guidance(project_id: str, product_type: str | None = None) -> str:
     index = int.from_bytes(hashlib.sha256(project_id.encode()).digest()[:4], "big")
     direction = PURPOSE_DIRECTIONS.get(product_type, DESIGN_DIRECTIONS[index % len(DESIGN_DIRECTIONS)])
-    return f"""
+    return STACK_GUIDE + f"""
 VISUAL DESIGN FOR THIS USER APPLICATION
 Use designExecution.qualityContract for every product type, not only commerce.
 Choose its product-specific focal composition, content rhythm and asset treatment
@@ -111,8 +112,8 @@ Use the saved design decision throughout the work instead of improvising a new
 palette or structure on each repair. Diagnose the first failing ancestor or workflow,
 make a targeted repair and recheck it; preserve unrelated UI and existing saved data.
 New starters already import src/design-tokens.css with the saved palette, typography,
-spacing and baseline controls. Read and reuse these variables in src/styles.css;
-keep the import, and spend implementation effort on the actual page composition,
+spacing and baseline controls, exposed as Tailwind theme utilities. Keep the import,
+and spend implementation effort on the actual page composition,
 subject artwork and every requested interaction. The baseline is not a finished UI.
 For existing projects, preserve their actual theme and stylesheet structure.
 When a collection needs original artwork, plan distinct compositions for each piece.
@@ -271,8 +272,9 @@ Avoid applying the same card grid, gradients, blue accents or generic hero to ev
 Keep text legible: aim for WCAG AA contrast, visible keyboard focus, descriptive labels,
 usable touch targets and responsive layouts without horizontal overflow.
 Use hover/active states and restrained transitions; respect prefers-reduced-motion.
-Use semantic HTML and actual installed styling tools. The clean starter has plain CSS;
-Tailwind class names do not work unless Tailwind has actually been configured.
+Use semantic HTML and actual installed styling tools. New starters include Tailwind and a
+component kit; older projects without tailwindcss in package.json keep their own CSS, and
+Tailwind class names do nothing there.
 Keep each implementation tool call small and complete. Use focused patches for existing files;
 split large new applications into components instead of emitting the entire project in one response.
 Never leave placeholder code to fit a response budget.

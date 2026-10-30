@@ -120,3 +120,9 @@ def test_design_requests_can_finish_their_output_allowance_within_the_draft_stag
     assert create.call_args.kwargs['timeout']==DESIGN_REQUEST_TIMEOUT_SECONDS>24000/70
     with model_request_scope(time.monotonic()+100):provider.generate(draft,[])
     assert create.call_args.kwargs['timeout']<=100
+
+
+@pytest.fixture(autouse=True)
+def plain_design_responses(monkeypatch):
+    # These fakes return whole responses. Streaming is covered in test_build_upgrades.py.
+    monkeypatch.setenv('GENESYS_STREAM_DESIGN', '0')

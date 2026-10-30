@@ -89,16 +89,17 @@ def same_build_requirements(previous, current):
 
 def implementation_sources(workspace, entry='src/App.jsx'):
     """Follow local UI imports so nested scenes, engines and state inform contracts."""
-    pending=[entry];sources={};budget=48000;attempts=0
-    while pending and len(sources)<12 and budget>0 and attempts<60:
+    pending=[entry];sources={};budget=96000;attempts=0
+    while pending and len(sources)<24 and budget>0 and attempts<120:
         path=pending.pop(0);attempts+=1
-        if path in sources or not path.startswith('src/') or '..' in path.split('/'):continue
+        if path in sources or not path.startswith('src/') or '..' in path.split('/') or path.startswith('src/components/ui/'):continue
         try:code=workspace.read_file(path).get('content','')
         except (ValueError, TypeError, AttributeError, FileNotFoundError):continue
         if not isinstance(code,str) or not code:continue
         code=code[:min(20000,budget)];sources[path]=code;budget-=len(code)
-        for match in re.finditer(r"(?:from\s*|import\s*)['\"](\.[^'\"]+)['\"]",code):
-            base=posixpath.normpath(posixpath.join(posixpath.dirname(path),match.group(1)))
+        for match in re.finditer(r"(?:from\s*|import\s*)['\"]((?:\.|@/)[^'\"]+)['\"]",code):
+            target=match.group(1)
+            base='src/'+target[2:] if target.startswith('@/') else posixpath.normpath(posixpath.join(posixpath.dirname(path),target))
             if posixpath.splitext(base)[1]:pending.append(base)
             else:pending.extend(base+ext for ext in ('.jsx','.tsx','.js','.ts','/index.jsx','/index.tsx'))
     return sources
