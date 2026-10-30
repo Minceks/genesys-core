@@ -126,7 +126,7 @@ def test_real_agent_hands_saved_changes_to_build_and_keeps_inspection_context(mo
     assert any('CURRENT INSPECTED SOURCE CONTEXT' in str(message.get('content')) for message in calls[0])
 
 
-def agent_at_visual_review(monkeypatch,reserve_seconds,polish_error):
+def agent_at_visual_review(monkeypatch,reserve_seconds,polish_error,workflow_review=None,workflow_repair=False):
     """Drive the real loop to a passed build whose screenshot review requests polish."""
     from agent import orchestrator
     from agent.ai_provider import AIResponse,AIToolCall
@@ -136,14 +136,18 @@ def agent_at_visual_review(monkeypatch,reserve_seconds,polish_error):
     browser=SimpleNamespace(stop=lambda:None,visual_quality=Mock(side_effect=[
         {'status':'success','visualPolishRequested':True,'visualReview':review},
         {'status':'success','visualPolishRequested':False,'visualReview':review}]))
-    def content_checks(*_,**__):raise FunctionalChecksReached()
+    def content_checks(*_,**__):
+        if workflow_review is None:raise FunctionalChecksReached()
+        return {'status':'success','issues':[],'unverified':[],'unverifiedCore':[],'testedInteractions':['Booking flow'],'coverage':{}}
     browser.content_checks=content_checks
+    browser.review_workflow_design=lambda *_:(workflow_review,workflow_repair)
+    browser.get_console=lambda:{'hasRuntimeErrors':False}
     workspace=SimpleNamespace(prepare=lambda:None,
         read_file=lambda _: {'status':'success','content':'export default function App(){return <main>Ready</main>}', 'truncated':False},
         get_diff=lambda: {'status':'success','diff':'diff --git a/src/App.jsx b/src/App.jsx\n--- a/src/App.jsx\n+++ b/src/App.jsx\n-old\n+new'},
         run_build=Mock(return_value={'status':'success','success':True,'exitCode':0,'output':'Compiled'}),
         start_preview=Mock(return_value={'status':'success','url':'https://preview.test'}),
-        create_checkpoint=Mock())
+        create_checkpoint=Mock(side_effect=FunctionalChecksReached()))
     class Editor:
         model='fixture-model'
         def generate(self,messages,tools):
@@ -196,3 +200,19 @@ def test_polish_without_time_to_finish_goes_directly_to_functional_checks(monkey
     assert len(calls)==2
     assert browser.visual_quality.call_count==1
     workspace.run_build.assert_called_once()
+
+
+def test_passing_checks_with_open_design_notes_finish_as_a_verified_build(monkeypatch):
+    # A working build whose review still has opinions after its repair budget.
+    review={'status':'needs_polish','summary':'Phone controls feel cramped','findings':[
+        {'severity':'major','evidence':'Skill buttons are small.','correction':'Enlarge them.'}]}
+    workspace,browser,calls=agent_at_visual_review(monkeypatch,200,RuntimeError('Polish must not start'),review)
+    workspace.create_checkpoint.assert_called_once()  # Reached only after browser_verified.
+    assert len(calls)==2
+
+
+def test_a_build_gets_one_polish_round_even_when_a_second_view_asks_for_another(monkeypatch):
+    review={'status':'needs_polish','summary':'Still cramped','findings':[]}
+    workspace,browser,calls=agent_at_visual_review(monkeypatch,100,ModelDeadlineExceeded('Polish window ended'),review,True)
+    assert str(calls[-1]).count('SCREENSHOT DESIGN REVIEW')==1
+    workspace.create_checkpoint.assert_called_once()

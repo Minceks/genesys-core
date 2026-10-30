@@ -8,14 +8,14 @@ from agent.design_execution import design_execution
 from agent.design_quality import BUILD_STANDARD
 
 
-def test_unresolved_major_design_findings_block_delivery_without_treating_provider_outage_as_a_defect():
-    from agent.workflow_quality import remaining_design_blockers
+def test_unresolved_major_design_findings_become_owner_notes_and_outages_add_nothing():
+    from agent.workflow_quality import remaining_design_notes
     findings=[{'severity':'major','evidence':'Phone result text is clipped.', 'correction':'Reflow result content.'},
               {'severity':'minor','evidence':'Accent preference.', 'correction':'Consider another accent.'}]
-    assert remaining_design_blockers({'status':'needs_polish','findings':findings})==[
-        'Workflow design review: Phone result text is clipped. Required correction: Reflow result content.']
-    assert remaining_design_blockers({'status':'unavailable','findings':findings})==[]
-    assert remaining_design_blockers({'status':'ready','findings':[]})==[]
+    assert remaining_design_notes({'status':'needs_polish','findings':findings})==[
+        'Design review: Phone result text is clipped. Suggested change: Reflow result content.']
+    assert remaining_design_notes({'status':'unavailable','findings':findings})==[]
+    assert remaining_design_notes({'status':'ready','findings':[]})==[]
 
 
 def test_default_playbook_is_shared_without_imposing_the_example_game_on_other_products():

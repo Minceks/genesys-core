@@ -1,11 +1,11 @@
 """Bounded visual evidence from real checked states, before baseline restoration."""
 
 
-def remaining_design_blockers(review):
-    """Concrete unresolved major findings block delivery; outages are not app defects."""
+def remaining_design_notes(review):
+    """Findings left after the repair budget are the owner's call, never a failed build."""
     if review.get('status') != 'needs_polish':
         return []
-    return ['Workflow design review: '+item['evidence']+' Required correction: '+item['correction']
+    return ['Design review: '+item['evidence']+' Suggested change: '+item['correction']
             for item in review.get('findings', []) if item.get('severity') == 'major']
 
 

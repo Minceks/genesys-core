@@ -2152,14 +2152,15 @@ def _run_agent(
     recovery_strategy: dict[str, Any] | None = None
     recovery_waiting_for_model = False
     polish_pending = False
+    polish_rounds = 0
     draft_incomplete = False
     checkpoint_result: dict[str, Any] | None = None
 
-    def _polish_time_available() -> bool:
-        # Polish is optional and functional checks are mandatory. Never start an
-        # edit that can only finish by spending the verification reserve.
+    def _polish_allowed() -> bool:
+        # Polish is optional and functional checks are mandatory. One round per
+        # build, and never an edit that can only finish by spending the reserve.
         remaining = agent_deadline - time.monotonic() - REVIEW_RESERVE_SECONDS
-        return game_production or remaining >= MIN_POLISH_SECONDS
+        return polish_rounds == 0 and (game_production or remaining >= MIN_POLISH_SECONDS)
 
     def _agent_timeout_result() -> dict[str, Any]:
         try:
@@ -2609,8 +2610,10 @@ def _run_agent(
 
     from .visual_review import VisualPolishLoop, VisualPolishNeeded
     from .preview_access import PreviewAccessBlocked
-    visual_polish = VisualPolishLoop(max_reviews=5 if game_production else 2, max_repairs=2 if game_production else 1)
-    workflow_polish = VisualPolishLoop(max_reviews=3 if game_production else 2, max_repairs=2 if game_production else 1)
+    # Each repair rewrites code and reruns every check. A second round chased
+    # the same finding without success, so a build gets one in total.
+    visual_polish = VisualPolishLoop(max_reviews=3 if game_production else 2, max_repairs=1)
+    workflow_polish = VisualPolishLoop(max_reviews=2, max_repairs=1)
     for step in range(1, TOTAL_MAX_STEPS + 1):
 
         steps_used = step
@@ -3492,7 +3495,7 @@ def _run_agent(
                         logging.getLogger(__name__).warning('layout_verification_failed %s',json.dumps(layout_evidence(quality),ensure_ascii=True))
                         raise RuntimeError('Rendered layout checks failed. Repair the reported elements and preserve working application logic. Fix sizing and wrapping; do not hide overflow, remove content or disable controls to mask the problem:\n' + json.dumps(quality, ensure_ascii=False))
                     if quality.get('visualPolishRequested'):
-                        if _polish_time_available():
+                        if _polish_allowed():
                             raise VisualPolishNeeded(json.dumps(quality['visualReview'],ensure_ascii=False))
                         quality.setdefault('suggestions', []).append('Screenshot review: '+quality['visualReview'].get('summary','Not completed.'))
                     report_progress('Checking requested content and interactions')
@@ -3508,11 +3511,12 @@ def _run_agent(
                         report_progress('Reviewing the working product on desktop and phone')
                         workflow_review, needs_polish = get_browser(project_id).review_workflow_design(product_brief, workflow_polish)
                         quality['workflowVisualReview'] = workflow_review
-                        if needs_polish and _polish_time_available():
+                        if needs_polish and _polish_allowed():
                             raise VisualPolishNeeded(json.dumps(workflow_review, ensure_ascii=False))
-                        from .workflow_quality import remaining_design_blockers
-                        content_result.setdefault('unverifiedCore', []).extend(remaining_design_blockers(workflow_review))
+                        from .workflow_quality import remaining_design_notes
+                        quality.setdefault('suggestions', []).extend(remaining_design_notes(workflow_review))
                         from .game_build import game_delivery_blockers
+                        content_result.setdefault('unverifiedCore', [])
                         content_result['unverifiedCore'].extend(game_delivery_blockers(product_brief, workflow_review))
                         content_result['unverifiedCore'].extend(game_delivery_blockers(product_brief, quality.get('visualReview') or {'status':'unavailable','summary':'Opening game composition was not reviewed.'}))
                         if workflow_review.get('status') != 'ready':
@@ -3599,6 +3603,7 @@ def _run_agent(
                 report_progress('Refining the rendered design from screenshot feedback')
                 recovery_waiting_for_model=True
                 polish_pending=True
+                polish_rounds+=1
                 implementation_ready=False
                 preview_started=False
                 preview_url=None

@@ -59,13 +59,14 @@ def review(project, checkpoint, commit):
     visual = visual if isinstance(visual, dict) else {}
     visual_status = visual.get('status', 'unreviewed')
     findings = visual.get('findings') if isinstance(visual.get('findings'), list) else []
-    for finding in findings:
-        if isinstance(finding, dict) and finding.get('severity') == 'major':
-            blockers.append('Visual repair required: ' + str(finding.get('area') or 'Layout')[:120]
-                            + ' — ' + str(finding.get('evidence') or visual.get('summary') or '')[:700])
-    if visual_status == 'needs_polish' and not any(str(item).startswith('Visual repair required:') for item in blockers):
-        blockers.append('Visual repair required: ' + str(visual.get('summary') or 'The screenshot review identified unfinished design.')[:700])
+    # Screenshot findings are judgment, so the owner decides: they appear in the
+    # acknowledged review below. Failed or incomplete checks above still block.
     manual = _list(report.get('manualReview'))
+    design_notes = ['Open design note: ' + str(finding.get('area') or 'Layout')[:120] + ' — ' + str(finding.get('evidence') or visual.get('summary') or '')[:700]
+                    for finding in findings if isinstance(finding, dict) and finding.get('severity') == 'major']
+    if visual_status == 'needs_polish' and not design_notes:
+        design_notes.append('Open design note: ' + str(visual.get('summary') or 'The screenshot review identified unfinished design.')[:700])
+    manual = design_notes + manual
     if visual_status not in {'ready', 'needs_polish'}:
         manual.insert(0, 'Screenshot review is unavailable or was not run. Inspect this version on desktop and phone; no automatic visual approval was obtained.')
     if (visual_status == 'ready' and visual.get('sourceFingerprint') and evidence

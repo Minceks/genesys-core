@@ -153,8 +153,8 @@ def draft_game(prompt, source, provider_for, deadline):
 
 
 def game_delivery_blockers(brief, review):
-    """An unreviewed game is saved for retry, never certified as polished."""
-    if (brief or {}).get('productType') == 'game' and review.get('status') != 'ready':
+    """A game nobody reviewed is saved for retry. Reviewed design notes do not block it."""
+    if (brief or {}).get('productType') == 'game' and review.get('status') not in {'ready', 'needs_polish'}:
         return ['Game finish is not approved: '+review.get('summary', 'In-play screenshot review did not finish.')]
     return []
 

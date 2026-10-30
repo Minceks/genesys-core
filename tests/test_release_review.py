@@ -54,17 +54,28 @@ def test_review_is_bound_to_project_checkpoint_and_commit(database):
     assert release.review(PROJECT, CHECKPOINT, 'b' * 40)['status'] == 'blocked'
 
 
-@pytest.mark.parametrize('kind', ['failed', 'incomplete', 'major', 'needs_polish'])
+@pytest.mark.parametrize('kind', ['failed', 'incomplete'])
 def test_unresolved_checks_block_publication_without_checkbox_override(database, kind):
     value = evidence()
-    if kind in {'failed', 'incomplete'}: value['verification'][kind] = ['Booking flow needs repair']
-    elif kind == 'needs_polish': value['verification']['visualReview']['status'] = 'needs_polish'
-    else: value['verification']['visualReview']['findings'] = [
-        {'severity': 'major', 'area': 'Phone layout', 'evidence': 'Primary action overlaps the form.'}]
+    value['verification'][kind] = ['Booking flow needs repair']
     release.save_evidence(PROJECT, value)
     review = release.review(PROJECT, CHECKPOINT, COMMIT)
     assert review['status'] == 'blocked' and review['blockers']
     assert not release.acknowledged(review, review['reviewHash'], [item['id'] for item in review['acknowledgements']])
+
+
+@pytest.mark.parametrize('kind', ['major', 'needs_polish'])
+def test_open_design_notes_need_the_owners_acknowledgement_rather_than_blocking(database, kind):
+    value = evidence()
+    if kind == 'needs_polish': value['verification']['visualReview'].update(status='needs_polish', summary='Phone controls feel cramped.')
+    else: value['verification']['visualReview']['findings'] = [
+        {'severity': 'major', 'area': 'Phone layout', 'evidence': 'Primary action overlaps the form.'}]
+    release.save_evidence(PROJECT, value)
+    review = release.review(PROJECT, CHECKPOINT, COMMIT)
+    assert review['status'] == 'needs_review' and not review['blockers']
+    assert review['acknowledgements'][0]['items'][0].startswith('Open design note:')
+    assert not release.acknowledged(review, review['reviewHash'], [])
+    assert release.acknowledged(review, review['reviewHash'], [item['id'] for item in review['acknowledgements']])
 
 
 def test_unavailable_vision_is_not_silently_approved_and_deferred_items_need_acknowledgement(database):

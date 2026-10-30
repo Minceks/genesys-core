@@ -99,7 +99,7 @@ export function PublishProject({ projectId, candidate, busy }: {
           {review.status === 'blocked' ? 'Fix these issues before publishing' : 'Ready for your release review'}
         </p>
         {review.blockers.length > 0 && <ul className="list-disc space-y-2 pl-5 text-red-200">{review.blockers.map((item, index) => <li key={index}>{item}</li>)}</ul>}
-        <p>Visual review: {review.visualAssessment === 'ready' ? 'No major issues reported in the captured screens.' : review.visualAssessment === 'needs_polish' ? 'Repairs required.' : 'Your desktop and phone review is required.'}</p>
+        <p>Visual review: {review.visualAssessment === 'ready' ? 'No major issues reported in the captured screens.' : review.visualAssessment === 'needs_polish' ? 'Open design notes are listed below. Publish once you are happy with them.' : 'Your desktop and phone review is required.'}</p>
         {review.acknowledgements.map(item => <div key={item.id} className={item.id === 'deferred-integrations' ? 'rounded-lg border border-amber-400/30 bg-amber-950/20 p-3' : ''}>
           {item.items.length > 0 && <ul className="mb-2 list-disc space-y-2 pl-5 text-slate-200">{item.items.map((text, index) => <li key={index}>{text}</li>)}</ul>}
           <label className="flex items-start gap-2 leading-relaxed">

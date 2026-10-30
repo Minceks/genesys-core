@@ -60,6 +60,7 @@ def test_incomplete_plan_cannot_skip_the_scene_and_game_finish_cannot_pass_on_pr
     with pytest.raises(ValueError,match='actors'):validate_game_plan(incomplete)
     assert game_delivery_blockers({'productType':'game'},{'status':'unavailable','summary':'No checked in-play evidence'})
     assert not game_delivery_blockers({'productType':'game'},{'status':'ready'})
+    assert not game_delivery_blockers({'productType':'game'},{'status':'needs_polish','summary':'Phone HUD is busy'})
     assert not game_delivery_blockers({'productType':'app'},{'status':'unavailable'})
 
 
