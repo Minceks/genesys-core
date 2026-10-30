@@ -42,6 +42,11 @@ a major unfinished prototype even when the menu looks polished. Look for recogni
 actor silhouettes/equipment, coherent world art and depth, readable active HUD, phone camera
 framing and concrete action feedback. Respect abstract/minimal games and the requested style;
 do not force realistic art or survival features onto puzzles.
+Judge visible actor art at its intended top-down game scale. Offscreen directional arrows
+are threat indicators, not enemy sprites; do not infer missing actor anatomy from those arrows.
+A phone snap carousel may deliberately show a fully readable current card and part of the
+next card to signal scrolling. Judge actual current-card legibility and reachability; that
+intentional peek alone is not a major clipping or desktop-recomposition defect.
 For game reviewPhase=entry, these are deliberately entry/menu captures. Review their
 composition, copy and launch affordance. Do not flag absent active HUD, touch controls,
 combat, cooldowns or obscured background actors as defects in a title/menu view. Actual
@@ -115,14 +120,14 @@ def review_screenshots(provider,brief,images,previous=None,*,capture_details=Non
 
 
 class VisualPolishLoop:
-    """One polish pass and one new-source recheck, without repeated same-build calls."""
-    def __init__(self):
-        self.reviews={};self.calls=0;self.repair_offered=False;self.previous=[]
+    """Bounded polish and new-source rechecks, without repeated same-build calls."""
+    def __init__(self, max_reviews=2, max_repairs=1):
+        self.reviews={};self.calls=0;self.repairs=0;self.max_repairs=max_repairs;self.previous=[];self.max_reviews=max_reviews
 
     def run(self,fingerprint,callback):
         if fingerprint in self.reviews:
             return self.reviews[fingerprint],False
-        if self.calls>=2:
+        if self.calls>=self.max_reviews:
             return {'status':'unavailable','summary':'Visual review budget exhausted; manual review remains.','findings':self.previous},False
         self.calls+=1
         try:
@@ -133,11 +138,11 @@ class VisualPolishLoop:
             result={'status':'unavailable','summary':'Screenshot-based review could not complete; no visual approval was obtained.','findings':[]}
         self.reviews[fingerprint]=result
         result['sourceFingerprint']=fingerprint
-        repair=result['status']=='needs_polish' and not self.repair_offered
-        if repair:self.repair_offered=True
+        repair=result['status']=='needs_polish' and self.repairs<self.max_repairs
+        if repair:self.repairs+=1
         self.previous=result.get('findings',[])
         # A provider outage is not a broken application and must not trigger model retry loops.
-        if result['status']=='unavailable':self.calls=2
+        if result['status']=='unavailable':self.calls=self.max_reviews
         return result,repair
 
 

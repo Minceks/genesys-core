@@ -1495,7 +1495,9 @@ class OpenAIProvider(AIProvider):
         from .model_context import reserve_model_budget
         if not 2 <= len(images) <= 4:
             raise ValueError('Visual review needs two to four bounded screenshots')
-        parts = [{'type':'text','text':json.dumps(context,ensure_ascii=False)[:18000]}]
+        game_polish = 'GAME TARGETED POLISH.' in instruction
+        context_text=json.dumps(context,ensure_ascii=False)
+        parts = [{'type':'text','text':context_text if game_polish else context_text[:18000]}]
         for label, data in images:
             if not isinstance(data,bytes) or len(data)>2_000_000:
                 raise ValueError('Visual review screenshot exceeds its limit')
@@ -1505,7 +1507,9 @@ class OpenAIProvider(AIProvider):
             parts += [{'type':'text','text':label}, {'type':'image_url','image_url':{
                 'url':'data:'+mime+';base64,'+base64.b64encode(data).decode('ascii'),'detail':'high'}}]
         # Reserve text and a conservative image allowance through existing budgets.
-        text_budget=bounded_messages([{'role':'system','content':instruction},{'role':'user','content':parts[0]['text']}],[],output_limit=6000,attempts=1)
+        output_limit=8000 if game_polish else 6000
+        text_budget=bounded_messages([{'role':'system','content':instruction},{'role':'user','content':parts[0]['text'],
+            **({'_preserve_complete_source':True} if game_polish else {})}],[],output_limit=output_limit,attempts=1)
         try:
             image_budget=reserve_model_budget(6000*len(images))
         except Exception:
@@ -1513,12 +1517,12 @@ class OpenAIProvider(AIProvider):
             reconcile_model_budget(getattr(text_budget,'budget_reservation',None),0)
             raise
         options=dict(model=self.model,messages=[{'role':'system','content':instruction},{'role':'user','content':parts}],
-            max_completion_tokens=6000,timeout=90,
+            max_completion_tokens=output_limit,timeout=180 if game_polish else 90,
             response_format={'type':'json_schema','json_schema':{'name':'visual_design_review','strict':True,'schema':schema}})
         if self.model.startswith(('gpt-5','gpt-6','o3','o4')):
             options['reasoning_effort']=os.getenv('GENESYS_REVIEW_REASONING_EFFORT','medium')
         from .progress import model_request_timeout
-        options['timeout'] = model_request_timeout(90)
+        options['timeout'] = model_request_timeout(180 if game_polish else 90)
         response=self.client.chat.completions.create(**options)
         from .model_context import reconcile_model_budget
         actual=getattr(getattr(response,'usage',None),'total_tokens',None)

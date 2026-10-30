@@ -406,6 +406,12 @@ class BrowserSession:
         return result
 
     @browser_thread
+    def game_polish_images(self):
+        evidence=getattr(self,'_workflow_evidence',None)
+        if not evidence:return []
+        return [item for item in evidence.images if evidence.details[item[0]].get('kind')=='action-frame'][-2:]
+
+    @browser_thread
     def review_workflow_design(self, design_brief, vision_loop):
         evidence = getattr(self, '_workflow_evidence', None)
         if not evidence or not evidence.images:

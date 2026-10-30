@@ -222,3 +222,51 @@ def test_focused_polisher_can_apply_an_agent_authored_camera_repair():
         return SimpleNamespace(text=json.dumps({'edits':[{'path':'src/projectLogic.js','old':'(rect.width < 680 ? 1.12 : 1)','new':'(rect.width < 680 ? 1.3 : 1)'}]}))
     assert polish_game(Workspace(),'Phone combat is too small',SimpleNamespace(generate=generate))==['src/projectLogic.js']
     assert '(rect.width < 680 ? 1.3 : 1)' in files['src/projectLogic.js']
+
+
+def test_entry_can_be_rechecked_after_both_bounded_game_polish_phases():
+    from agent.visual_review import VisualPolishLoop
+    loop=VisualPolishLoop(max_reviews=3)
+    assert loop.run('initial',lambda _:{'status':'needs_polish','findings':[]})[1]
+    assert loop.run('menu-repaired',lambda _:{'status':'ready','findings':[]})[0]['status']=='ready'
+    assert loop.run('gameplay-repaired',lambda _:{'status':'ready','findings':[]})[0]['status']=='ready'
+    assert loop.run('fourth',lambda _:None)[0]['status']=='unavailable'
+
+
+def test_game_polish_can_observe_actual_combat_with_complete_owned_source():
+    from agent.game_build import polish_game
+    files={'src/styles.css':'main{min-height:100vh}'}
+    class Workspace:
+        def read_file(self,path):return {'content':files.get(path,'')}
+        def write_file(self,path,value):files[path]=value;return {'status':'success'}
+    images=[('actual-desktop',b'frame'),('actual-phone',b'frame')]
+    def review(instruction,context,received,schema):
+        assert received==images and context['files']==files
+        assert schema['properties']['edits']['items']['properties']['path']['enum']==['src/styles.css']
+        return SimpleNamespace(text=json.dumps({'edits':[{'path':'src/styles.css','old':'','new':'main{padding:20px}'}]}))
+    assert polish_game(Workspace(),'Read actual combat',SimpleNamespace(review_images=review),images)==['src/styles.css']
+
+
+def test_game_visual_repairs_are_bounded_but_can_correct_a_remaining_major_finding():
+    from agent.visual_review import VisualPolishLoop
+    loop=VisualPolishLoop(max_reviews=4,max_repairs=2)
+    callback=lambda _:{'status':'needs_polish','findings':[]}
+    assert loop.run('first',callback)[1]
+    assert loop.run('second',callback)[1]
+    assert not loop.run('third',callback)[1]
+
+
+def test_image_aware_game_polish_never_truncates_its_source_context(monkeypatch):
+    from unittest.mock import Mock
+    from agent.ai_provider import OpenAIProvider
+    captured=[]
+    monkeypatch.setattr('agent.ai_provider.bounded_messages',lambda messages,*_,**kwargs:captured.extend(messages) or messages)
+    monkeypatch.setattr('agent.model_context.reserve_model_budget',lambda _:None)
+    monkeypatch.setattr('agent.ai_provider.record_model_usage',lambda _:None)
+    create=Mock(return_value=SimpleNamespace(usage=None,choices=[SimpleNamespace(finish_reason='stop',message=SimpleNamespace(content='{"edits":[]}'))]))
+    provider=OpenAIProvider(model='gpt-5.4',client=SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create))))
+    provider.review_images('DEFAULT BUILD STANDARD: GAME TARGETED POLISH.',{'source':'x'*30000+'SOURCE-END'},
+        [('desktop',b'\x89PNGfixture'),('phone',b'\x89PNGfixture')],{'type':'object','properties':{},'additionalProperties':False})
+    assert captured[1]['_preserve_complete_source'] and 'SOURCE-END' in captured[1]['content']
+    assert 'SOURCE-END' in create.call_args.kwargs['messages'][1]['content'][0]['text']
+    assert create.call_args.kwargs['max_completion_tokens']==8000

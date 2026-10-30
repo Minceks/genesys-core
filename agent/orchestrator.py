@@ -2596,8 +2596,8 @@ def _run_agent(
 
     from .visual_review import VisualPolishLoop, VisualPolishNeeded
     from .preview_access import PreviewAccessBlocked
-    visual_polish = VisualPolishLoop()
-    workflow_polish = VisualPolishLoop()
+    visual_polish = VisualPolishLoop(max_reviews=5 if game_production else 2, max_repairs=2 if game_production else 1)
+    workflow_polish = VisualPolishLoop(max_reviews=3 if game_production else 2, max_repairs=2 if game_production else 1)
     for step in range(1, TOTAL_MAX_STEPS + 1):
 
         steps_used = step
@@ -3595,7 +3595,11 @@ def _run_agent(
                 if game_production:
                     from .game_build import polish_game
                     try:
-                        edited = polish_game(workspace, str(exc), provider_for('openai'))
+                        images = get_browser(project_id).game_polish_images()
+                        if images:
+                            polish_provider = OpenAIProvider(model=os.getenv('GENESYS_VISUAL_REVIEW_MODEL') or 'gpt-5.4')
+                        else:polish_provider = provider_for('openai')
+                        edited = polish_game(workspace, str(exc), polish_provider, images=images)
                     except Exception as polish_error:
                         return {'status':'error','errorType':'verification_incomplete',
                             'message':'The game is saved, but its screenshot corrections did not finish. Retry verification.',

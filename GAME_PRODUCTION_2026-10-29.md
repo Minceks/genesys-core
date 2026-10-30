@@ -13,6 +13,7 @@ The prior recovery rebuilt one customer game manually. That did not make future 
 - Games receive an isolated entry point instead of generic website styles. The survival foundation includes swipeable phone sector cards, touch guidance and landscape controls bounded to the viewport.
 - Visual repairs use a focused, source-aware model call with bounded CSS overrides, configuration replacements and owned actor/camera renderer edits. The renderer boundary protects simulation, input mapping and the frame loop; state mutation and hidden callbacks are rejected. Encounter mechanics, skill balance and saved-data keys are protected during visual polish. Entry and gameplay screenshots are judged against their corresponding accepted references.
 - Completed model calls settle reservations against reported usage. Unknown usage and historical reservations remain charged; the existing daily limit still applies. This prevents unused output allowances from exhausting the budget during review and repair.
+- Gameplay repair receives the actual checked combat screenshots with the complete owned renderer and presentation source. Its source context is never silently truncated. Games have at most two correction passes per review phase, with an entry recheck after gameplay edits. Reviews can cite only attached generated image labels, and later checked combat replaces early action samples within the same retained image budget.
 
 ## Scope
 
@@ -21,3 +22,5 @@ This is a tested foundation and a stronger production/review workflow, not model
 ## Evidence
 
 Local runtime audits exercise all five sectors, real skill damage/cooldowns, upgrades, progression, loss/retry, the single RAF lifecycle and contact-damage recovery. The full foundation browser regression passes ten requirements without model calls or state injection. Fresh real-agent evaluation receipts are retained locally under `.test-game-production-*`; they distinguish unsuccessful attempts from completed approvals and record that generated game source was not edited manually.
+
+Validation on October 30: 66 relevant automated checks pass. A synthetic game created by the real agent reached successful verification after agent-owned repairs and verification retries while this workflow was being corrected. All ten browser gameplay requirements pass, both opening and gameplay screenshot reviews are ready, and the agent saved a verified checkpoint. The generated source was never manually edited. Minor visual suggestions remain in the receipt; this is not a guarantee of aesthetic perfection or evidence for unrelated genres.
