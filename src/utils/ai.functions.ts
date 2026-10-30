@@ -1,3 +1,6 @@
+import { readVerificationReport, type VerificationReportData } from '../components/genesys/verification-report';
+import { apiFetch } from '../lib/api';
+import { runAgentJob } from '../lib/agent-job';
 // ============================================================
 // GeneSys frontend agent client
 // ============================================================
@@ -48,6 +51,14 @@ export type AgentStep = {
 };
 
 export type GenesysAgentResponse = {
+  checkpoint?: { status?: string; checkpointId?: string };
+  promotionToken?: string;
+  verification?: VerificationReportData;
+  metrics?: { durationSeconds: number; modelResponses: number; reportedTokens: number; filesChanged: number };
+  browserVerified?: boolean;
+  previewUrl?: string | null;
+  mode?: 'build' | 'plan' | 'discuss';
+  proposedBuildPrompt?: string | null;
   text: string;
   agent: string;
   steps: AgentStep[];
@@ -94,7 +105,9 @@ async function getErrorMessage(
 // ============================================================
 
 export async function askGenesys(
-  prompt: string
+  prompt: string,
+  projectId: string,
+  options: { mode?: 'build' | 'plan' | 'discuss'; history?: { role: 'user' | 'assistant'; content: string }[]; onProgress?: (stage: string) => void } = {},
 ): Promise<GenesysAgentResponse> {
   const cleanedPrompt = prompt.trim();
 
@@ -105,46 +118,22 @@ export async function askGenesys(
   }
 
   const url =
-    `${CLOUD_AGENT_URL}/agent/run`;
+    `${CLOUD_AGENT_URL}/agent/jobs`;
 
   try {
-    const response = await fetch(
-      url,
-      {
-        method: "POST",
-
-        headers: {
-          "Content-Type":
-            "application/json",
-          "Accept":
-            "application/json",
-          ...(API_KEY
-            ? { "X-API-Key": API_KEY }
-            : {}),
-        },
-
-        body: JSON.stringify({
-          projectId:
-            "genesys-project",
-          prompt:
-            cleanedPrompt,
-        }),
-      }
-    );
-
-    if (!response.ok) {
-      const message =
-        await getErrorMessage(response);
-
-      throw new Error(message);
-    }
-
-    const data =
-      await response.json();
+    const data = await runAgentJob(projectId, cleanedPrompt, options);
 
     return {
+      checkpoint: data.checkpoint && typeof data.checkpoint.checkpointId === 'string' ? data.checkpoint : undefined,
+      promotionToken: typeof data.promotionToken === 'string' ? data.promotionToken : undefined,
+      verification: readVerificationReport(data.verification),
+      metrics: data.metrics && typeof data.metrics.durationSeconds === 'number' ? data.metrics : undefined,
+      browserVerified: data.browserVerified === true,
+      previewUrl: typeof data.previewUrl === 'string' && data.previewUrl.startsWith('https://') ? data.previewUrl : null,
+      mode: ['build', 'plan', 'discuss'].includes(data.mode) ? data.mode : undefined,
+      proposedBuildPrompt: typeof data.proposedBuildPrompt === 'string' ? data.proposedBuildPrompt : null,
       text:
-        typeof data.answer ===
+        typeof data.message === 'string' && data.status === 'error' ? data.message : typeof data.text === 'string' ? data.text : typeof data.answer ===
         "string"
           ? data.answer
           : "GeneSys completed the request.",

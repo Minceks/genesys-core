@@ -45,6 +45,40 @@ def test_large_full_rewrite_is_rejected(monkeypatch):
         tools.write_file("src/Hero.tsx", "shortened content")
 
 
+def test_whole_product_replacement_backs_up_large_source_before_write(monkeypatch):
+    original='old source' * 1000
+    writes=[]
+    workspace=SimpleNamespace(read_file=lambda _: {'content':original,'truncated':False},
+        write_file=lambda path,content: writes.append((path,content)) or {'status':'success'})
+    monkeypatch.setattr(tools,'get_workspace',lambda _:workspace)
+    token=tools.replacement_project.set('project')
+    try:
+        tools.write_file('src/App.jsx','new product',project_id='project')
+        assert writes[0][0].startswith('.genesys-rebuild-backups/')
+        assert writes[0][1]==original
+        assert writes[1]==('src/App.jsx','new product')
+        with pytest.raises(ValueError,match='Use edit_file'):
+            tools.write_file('src/App.jsx','other project',project_id='other')
+        with pytest.raises(ValueError,match='Use edit_file'):
+            tools.write_file('package.json','{}',project_id='project')
+    finally:
+        tools.replacement_project.reset(token)
+
+
+def test_failed_replacement_backup_does_not_overwrite_source(monkeypatch):
+    writes=[]
+    workspace=SimpleNamespace(read_file=lambda _: {'content':'x'*4000},
+        write_file=lambda path,content: writes.append(path) or {'status':'error'})
+    monkeypatch.setattr(tools,'get_workspace',lambda _:workspace)
+    token=tools.replacement_project.set('project')
+    try:
+        with pytest.raises(RuntimeError,match='backup failed'):
+            tools.write_file('src/App.jsx','new product',project_id='project')
+        assert len(writes)==1 and writes[0].startswith('.genesys-rebuild-backups/')
+    finally:
+        tools.replacement_project.reset(token)
+
+
 def test_exact_edit_preserves_unshown_content(monkeypatch):
     original = "a" * 40000 + "unique heading" + "z" * 40000
     written = []
@@ -75,5 +109,7 @@ def test_ambiguous_edit_does_not_write(monkeypatch, old_text):
         download_file=lambda _: b"repeated repeated",
     )))
     monkeypatch.setattr(tools, "get_workspace", lambda _: workspace)
-    with pytest.raises(ValueError, match="exactly once"):
-        tools.edit_file("src/Hero.tsx", old_text, "replacement")
+    result = tools.edit_file("src/Hero.tsx", old_text, "replacement")
+    assert result['status'] == 'error'
+    assert 'exactly once' in result['error']
+    assert result['currentContent'] == 'repeated repeated'

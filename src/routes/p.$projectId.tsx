@@ -1,9 +1,4 @@
-import { createRoute } from '@tanstack/react-router'
+import { createRoute, Navigate } from '@tanstack/react-router'
 import { Route as rootRoute } from './__root'
-import React from 'react'
-
-export const Route = createRoute({
-  getParentRoute: () => rootRoute,
-  path: '/p/$projectId',
-  component: () => <div style={{padding: '50px', background: 'black', color: 'white', height: '100vh'}}><h1>PROJECT VIEWER LIVE</h1></div>,
-})
+export const Route = createRoute({getParentRoute:()=>rootRoute,path:'/p/$projectId',component:ProjectLink})
+function ProjectLink(){const {projectId}=Route.useParams();return <Navigate to="/build" search={{projectId}} replace />}

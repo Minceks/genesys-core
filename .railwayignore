@@ -12,3 +12,6 @@ __pycache__/
 debug.log
 backups/
 genesys-pro/
+.verification-evidence/
+.verification-node-deps/
+.builder-ui-check/
