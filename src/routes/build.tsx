@@ -17,6 +17,7 @@ import { VersionHistory } from '@/components/genesys/version-history';
 import { AppBackend } from '@/components/genesys/app-backend';
 import { PublishProject, type PublicationCandidate } from '@/components/genesys/publish-project';
 import { pendingJob, type PendingJob } from '@/lib/agent-job';
+import { mergeHistory, savedPrompt } from '@/lib/chat-history';
 
 import {
   Send,
@@ -297,6 +298,31 @@ function BuildPage({ projectId }: { projectId: string }) {
     } catch(error) {setPreviewNotice(error instanceof Error ? error.message : 'Preview could not connect.');}
     finally {previewRequest.current = false; setPreviewConnecting(false);}
   }
+
+
+  // Tab storage only survives this tab. The server holds the project's chat.
+  useEffect(() => {
+    let active = true;
+    apiFetch(`/agent/jobs?projectId=${encodeURIComponent(projectId)}&history=1`).then(async response => {
+      if (!response.ok) throw new Error('Chat history unavailable');
+      const data = await response.json();
+      const saved: ChatMessage[] = (Array.isArray(data.jobs) ? data.jobs : []).flatMap((job: any) => {
+        const turns: ChatMessage[] = [{ role: 'user', text: savedPrompt(job.prompt) }];
+        const result = job.result;
+        if (result) turns.push({
+          role: 'bot', agent: 'GeneSys',
+          text: cleanAgentText(String(result.text || result.message || (result.browserVerified ? 'The build and browser checks passed.' : 'Your saved request finished. Review the results below.'))),
+          buildPassed: result.buildPassed === true, browserVerified: result.browserVerified === true,
+          verification: result.verification, modifiedFiles: Array.isArray(result.modifiedFiles) ? result.modifiedFiles : [],
+          hasFile: Array.isArray(result.modifiedFiles) && result.modifiedFiles.length > 0,
+          metrics: result.metrics,
+        });
+        return turns;
+      });
+      if (active && saved.length) setMessages(previous => mergeHistory(saved, previous));
+    }).catch(error => console.warn('Could not restore saved project chat:', error));
+    return () => { active = false; };
+  }, [projectId]);
 
 
   // ==========================================================

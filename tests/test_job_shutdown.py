@@ -46,3 +46,20 @@ def test_failed_verification_is_logged_without_dumping_prompt_or_generated_sourc
         assert 'verification_incomplete' in caplog.text
         assert 'PRIVATE REQUEST' not in caplog.text and 'PRIVATE SOURCE' not in caplog.text
     finally:manager.executor.shutdown(wait=True)
+
+
+def test_finished_jobs_stay_as_chat_history_until_the_retention_limit(tmp_path, monkeypatch):
+    import time
+    from agent.jobs import HISTORY_SECONDS
+    monkeypatch.setenv('GENESYS_JOB_DB', str(tmp_path / 'jobs.sqlite3'))
+    monkeypatch.delenv('RAILWAY_ENVIRONMENT_ID', raising=False)
+    manager = JobManager()
+    recent = manager.submit('project', 'request', prompt='Build a counter')
+    expired = manager.submit('other', 'request', prompt='Build a clock')
+    now = time.time()
+    with manager.connection() as db:
+        db.execute("UPDATE jobs SET state='completed',updated=? WHERE id=?", (now - 2 * 86400, recent))
+        db.execute("UPDATE jobs SET state='completed',updated=? WHERE id=?", (now - HISTORY_SECONDS - 60, expired))
+    manager.submit('third', 'request', prompt='Build a timer')
+    assert [job['prompt'] for job in manager.conversation('project')] == ['Build a counter']
+    assert manager.conversation('other') == []
