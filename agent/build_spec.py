@@ -168,27 +168,45 @@ def validate_regression_evidence(spec,sources,request,require_evidence=False):
     return spec
 
 
+# What the fixed game tests assert. An edit naming these may change it on purpose.
+FOUNDATION_TOUCHES = re.compile(r'\b(?:health|hp|lives?|score|retry|waves?|levels?|sectors?|start|title|menu|buttons?|labels?'
+    r'|rename|remove|delete|restart|joystick|touch|mobile|phone|controls?|keyboard|fire|firing|weapons?|skills?|dash|pulse'
+    r'|upgrades?|slower|easier|pause|save|progress|settings?|reduced.motion|redesign|rewrite|rebuild)\b', re.I)
+
+
+def keeps_foundation_tests(previous, prompt, brief):
+    from .game_playtests import supports_contract
+    return (brief.get('buildIntent') == 'edit-product' and supports_contract(previous)
+            and not FOUNDATION_TOUCHES.search(prompt))
+
+
 def prepare_build_spec(workspace, prompt, brief, provider, restore_foundation=False):
     request_hash = hashlib.sha256(prompt.encode()).hexdigest()
     replacing = brief.get('buildIntent') in {'replace-product', 'new-product'}
-    previous = {}
+    try:
+        previous = json.loads(workspace.read_file(SPEC_PATH).get('content', '{}'))
+        current = (previous.get('version') == 2 and previous.get('requestHash') == request_hash and previous.get('requirements')
+                   and previous.get('planningPolicyVersion') == PLANNING_POLICY_VERSION
+                   and (not replacing or previous.get('replacementContractVersion') == 1))
+    except (ValueError, TypeError, AttributeError, FileNotFoundError):
+        previous, current = {}, False
     from .game_foundation import survival_foundation_fits
     if survival_foundation_fits(prompt, brief):
         starter = workspace.read_file('src/App.jsx').get('content','')
-        if replacing or restore_foundation or 'Your project is ready' in starter:
+        # A recheck of an edit must keep the checks written for that edit.
+        restore = restore_foundation and not (current and previous.get('editRequirements'))
+        if replacing or restore or 'Your project is ready' in starter:
             from .game_playtests import foundation_contract
             spec = foundation_contract(prompt)
             saved = workspace.write_file(SPEC_PATH,json.dumps(spec,ensure_ascii=False,indent=2))
             if saved.get('status') != 'success':raise RuntimeError('Could not persist foundation game contract')
             return spec
-    try:
-        previous = json.loads(workspace.read_file(SPEC_PATH).get('content', '{}'))
-        if (previous.get('version') == 2 and previous.get('requestHash') == request_hash and previous.get('requirements')
-                and previous.get('planningPolicyVersion') == PLANNING_POLICY_VERSION
-                and (not replacing or previous.get('replacementContractVersion') == 1)):
+    if current:
+        try:
             return validate_spec(previous)
-    except (ValueError, TypeError, AttributeError, FileNotFoundError):
-        previous = {}
+        except (ValueError, TypeError, AttributeError):
+            previous = {}
+    keep_foundation = keeps_foundation_tests(previous, prompt, brief)
     sources = {} if replacing else implementation_sources(workspace)
     implementation = sources.get('src/App.jsx', '')
     messages = [
@@ -276,8 +294,12 @@ def prepare_build_spec(workspace, prompt, brief, provider, restore_foundation=Fa
                                                'implementationSources': sources,
                                                'previousSpecification': {} if replacing or previous.get('planningPolicyVersion') != PLANNING_POLICY_VERSION else previous}, ensure_ascii=False)},
     ]
+    if keep_foundation:
+        messages[0]['content'] += (' Server-owned regression checks already cover the existing game. Define only what '
+            'this edit changes, in as few requirements as possible, with browser acceptance observable through '
+            'the existing named controls and HUD. Do not restate existing behavior.')
     structured = getattr(provider, 'generate_structured', None)
-    ground_regressions = (not replacing and brief.get('buildIntent') == 'edit-product'
+    ground_regressions = (not replacing and not keep_foundation and brief.get('buildIntent') == 'edit-product'
                           and re.search(r'\b(?:ui|design\w*|style|look|font|colou?r|layout|theme|polish|spacing)\b',prompt,re.I)
                           and not re.search(r'\b(?:add|implement|create|feature|integrat\w*)\b',prompt,re.I)
                           and callable(structured) and any(re.search(r'\b(?:import|function|const)\b|=>|<[A-Za-z]',code) for code in sources.values()))
@@ -328,6 +350,10 @@ def prepare_build_spec(workspace, prompt, brief, provider, restore_foundation=Fa
     spec.update(version=2, planningPolicyVersion=PLANNING_POLICY_VERSION, requestHash=request_hash, request=prompt)
     if replacing:
         spec['replacementContractVersion'] = 1
+    if keep_foundation:
+        from .game_playtests import foundation_contract
+        edits = [dict(item, id='edit-' + item['id']) for item in spec['requirements']]
+        spec = dict(foundation_contract(prompt), editRequirements=edits)
     saved = workspace.write_file(SPEC_PATH, json.dumps(spec, ensure_ascii=False, indent=2))
     if not isinstance(saved, dict) or saved.get('status') != 'success':
         raise RuntimeError('Could not persist build specification')

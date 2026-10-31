@@ -21,6 +21,21 @@ def supports_contract(contract):
             and contract.get('requirements')==json.loads((ROOT/'contract.json').read_text())['requirements'])
 
 
+def add_edit_checks(result, edit, requirements):
+    edit.pop('_verifiedPlan',None)
+    coverage=edit.get('coverage') or {}
+    for key in ('issues','unverifiedCore','testedInteractions'):
+        result.setdefault(key,[]).extend(edit.get(key,[]))
+    result.setdefault('unverified',[]).extend(edit.get('unverified',[]))
+    result['coverage']['requirements'].extend(requirements)
+    result['coverage']['passedIds'].extend(coverage.get('passedIds',[]))
+    for r in requirements:
+        if r['id'] not in result['coverage']['passedIds'] and not any(str(v).startswith(r['id']+':') for v in result['unverifiedCore']):
+            result['unverifiedCore'].append(r['id']+': Edit check did not complete')
+    if result['issues']:result['status']='error'
+    return result
+
+
 def verify_foundation(page, prompt, provider, contract, sources, preverified, callback):
     from .functional_verification import verify_functions,restore_verification_state
     from .verification_frames import sample_canvas
@@ -90,4 +105,8 @@ def verify_foundation(page, prompt, provider, contract, sources, preverified, ca
         if r['id'] not in result['coverage']['passedIds']:
             message=r['id']+': Foundation regression did not complete'
             if not any(str(v).startswith(r['id']+':') for v in result['unverifiedCore']):result['unverifiedCore'].append(message)
+    edits=[r for r in contract.get('editRequirements',[]) if r.get('scope')=='browser']
+    if edits and not result.get('issues') and not result.get('unverifiedCore'):
+        scoped=dict(contract,requirements=edits,editRequirements=[])
+        add_edit_checks(result,verify_functions(page,prompt,provider,sources=sources,contract=scoped,_on_workflow=callback),edits)
     return result
