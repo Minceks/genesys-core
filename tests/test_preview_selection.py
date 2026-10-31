@@ -38,7 +38,8 @@ def test_compressed_saved_preview_reaches_the_browser_as_a_page(monkeypatch):
     requests=[]
     class Response:
         status=200
-        headers={'Content-Type':'text/html; charset=utf-8','Content-Encoding':'gzip'}
+        @property
+        def headers(self):return {'Content-Type':'text/html; charset=utf-8','Content-Encoding':'gzip','Last-Modified':'Sat, 31 Oct 2026 08:53:37 GMT'}
         async def __aenter__(self):return self
         async def __aexit__(self,*_):pass
         async def read(self):return gzip.compress(b'<!doctype html><html><body><main>Game</main></body></html>')
@@ -52,13 +53,18 @@ def test_compressed_saved_preview_reaches_the_browser_as_a_page(monkeypatch):
         await client.server.app['client'].close()
         client.server.app['client']=Backend()
         try:
-            response=await client.get('/',headers={'Host':'a'*32+'.previews.example.test'})
-            return response.status,response.headers.get('Content-Encoding'),await response.read()
+            cached={'If-Modified-Since':'Sat, 31 Oct 2026 08:53:37 GMT','If-None-Match':'"old"'}
+            response=await client.get('/',headers={'Host':'a'*32+'.previews.example.test','Accept':'text/html,*/*',**cached})
+            page=await response.read()
+            await client.get('/assets/app.js',headers={'Host':'a'*32+'.previews.example.test','Accept':'*/*',**cached})
+            return response.status,response.headers,page
         finally:await client.close()
-    status,encoding,page=asyncio.run(run())
-    assert status==200 and encoding is None
+    status,headers,page=asyncio.run(run())
+    assert status==200 and 'Content-Encoding' not in headers and 'Last-Modified' not in headers
     assert page.startswith(b'<!doctype html><html><body><main>Game</main><script data-genesys-selection>')
     assert requests[0]['Accept-Encoding']=='gzip'
+    assert 'If-Modified-Since' not in requests[0] and 'If-None-Match' not in requests[0]
+    assert 'If-Modified-Since' in requests[1] and 'If-None-Match' in requests[1]
 
 
 def test_real_cross_origin_selection_requires_editor_activation_and_suppresses_action():

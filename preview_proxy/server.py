@@ -125,7 +125,9 @@ def create_app():
                 if request.method not in {'GET', 'HEAD'}:
                     return web.Response(status=405)
                 internal_headers = {'X-GeneSys-Proxy-Key': secret, 'Accept-Encoding': 'gzip'}
-                for key in ('Accept', 'If-None-Match', 'If-Modified-Since', 'Range'):
+                # Pages are rewritten here, so a saved file's date says nothing about the browser's copy.
+                page = 'text/html' in request.headers.get('Accept', '').lower()
+                for key in ('Accept', 'Range') if page else ('Accept', 'If-None-Match', 'If-Modified-Since', 'Range'):
                     if key in request.headers:
                         internal_headers[key] = request.headers[key]
                 target = backend + '/internal/preview-builds/' + ticket + request.rel_url.raw_path

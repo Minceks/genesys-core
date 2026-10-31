@@ -33,6 +33,6 @@ def inject(body, headers):
     # Selection is optional. A page it cannot read is served exactly as it arrived.
     if html is None or len(html)>LIMIT:return body
     for key in list(headers):
-        if key.lower() in {'content-length','content-encoding','etag'}:headers.pop(key)
+        if key.lower() in {'content-length','content-encoding','etag','last-modified'}:headers.pop(key)
     lower=html.lower();position=lower.rfind(b'</body>')
     return html[:position]+BRIDGE+html[position:] if position>=0 else html+BRIDGE
