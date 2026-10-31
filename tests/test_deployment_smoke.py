@@ -45,6 +45,17 @@ def test_http_probe_checks_real_local_assets_and_never_follows_external_or_redir
     assert len(calls) == 1
 
 
+def test_preview_page_is_checked_as_a_browser_receives_it():
+    seen = []
+    def serve(request):
+        seen.append(request.headers)
+        return httpx.Response(200, headers={'content-type': 'text/html'}, content=b'\x1f\x8b\x08compressed<script data-genesys-selection></script>')
+    with httpx.Client(transport=httpx.MockTransport(serve)) as client:
+        with pytest.raises(ValueError, match='did not return HTML'):
+            smoke.check_http('https://project.example.test/', time.monotonic() + 10, client)
+    assert 'range' not in seen[0]
+
+
 @pytest.mark.parametrize('failure', ['missing', 'html-instead-of-js', 'empty'])
 def test_asset_failures_cannot_pass_as_a_healthy_deployment(failure):
     def serve(request):

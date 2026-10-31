@@ -112,6 +112,7 @@ def create_app():
         blocked = HOP | connection_headers | {'host', 'authorization', 'x-api-key', 'x-genesys-proxy-key', 'forwarded', 'x-forwarded-host', 'x-forwarded-for', 'x-forwarded-proto'}
         result = {k: v for k, v in request.headers.items() if k.lower() not in blocked and not k.lower().startswith('x-daytona-')}
         result['X-Daytona-Skip-Preview-Warning'] = 'true'
+        result['Accept-Encoding'] = 'gzip'
         return result
 
     async def proxy(request):
@@ -123,7 +124,7 @@ def create_app():
             if backend.startswith('https://'):
                 if request.method not in {'GET', 'HEAD'}:
                     return web.Response(status=405)
-                internal_headers = {'X-GeneSys-Proxy-Key': secret}
+                internal_headers = {'X-GeneSys-Proxy-Key': secret, 'Accept-Encoding': 'gzip'}
                 for key in ('Accept', 'If-None-Match', 'If-Modified-Since', 'Range'):
                     if key in request.headers:
                         internal_headers[key] = request.headers[key]

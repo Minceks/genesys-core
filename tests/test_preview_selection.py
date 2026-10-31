@@ -1,6 +1,12 @@
+from aiohttp.test_utils import TestClient, TestServer
 from playwright.sync_api import sync_playwright
+import asyncio
+import gzip
 import importlib.util
 from pathlib import Path
+
+import pytest
+
 spec=importlib.util.spec_from_file_location('selection_bridge',Path(__file__).resolve().parents[1]/'preview_proxy/selection_bridge.py')
 module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module)
 inject=module.inject
@@ -8,9 +14,51 @@ inject=module.inject
 
 def test_selection_bridge_preserves_headers_for_assets_and_injects_only_html():
     headers={'Content-Type':'text/html','Content-Length':'6','Content-Encoding':'gzip','ETag':'old'}
-    assert b'data-genesys-selection' in inject(b'<body>Hi</body>',headers)
+    page=inject(gzip.compress(b'<body>Hi</body>'),headers)
+    assert page.startswith(b'<body>Hi<script data-genesys-selection>') and page.endswith(b'</body>')
     assert 'Content-Length' not in headers and 'Content-Encoding' not in headers
     assert inject(b'image',{'Content-Type':'image/png'})==b'image'
+
+
+@pytest.mark.parametrize('body,encoding',[(b'\x1f\x8bbroken','gzip'),(gzip.compress(b'<body>Hi</body>')[:12],'gzip'),(b'compressed','br'),
+                                          (gzip.compress(b' '*2_000_001),'gzip')])
+def test_a_page_that_cannot_be_read_is_served_exactly_as_it_arrived(body,encoding):
+    headers={'Content-Type':'text/html','Content-Encoding':encoding,'ETag':'old'}
+    assert inject(body,headers)==body
+    assert headers=={'Content-Type':'text/html','Content-Encoding':encoding,'ETag':'old'}
+
+
+def test_compressed_saved_preview_reaches_the_browser_as_a_page(monkeypatch):
+    spec=importlib.util.spec_from_file_location('preview_server',Path(__file__).resolve().parents[1]/'preview_proxy/server.py')
+    proxy=importlib.util.module_from_spec(spec);spec.loader.exec_module(proxy)
+    monkeypatch.setenv('GENESYS_PREVIEW_DOMAIN','previews.example.test')
+    monkeypatch.setenv('GENESYS_PREVIEW_PROXY_KEY','k'*32)
+    monkeypatch.setenv('GENESYS_PUBLISHED_BACKEND_URL','https://backend.example.test')
+    monkeypatch.delenv('RAILWAY_ENVIRONMENT_ID',raising=False)
+    requests=[]
+    class Response:
+        status=200
+        headers={'Content-Type':'text/html; charset=utf-8','Content-Encoding':'gzip'}
+        async def __aenter__(self):return self
+        async def __aexit__(self,*_):pass
+        async def read(self):return gzip.compress(b'<!doctype html><html><body><main>Game</main></body></html>')
+    class Backend:
+        def request(self,method,url,**kw):
+            requests.append(kw['headers']);return Response()
+        async def close(self):pass
+    async def run():
+        client=TestClient(TestServer(proxy.create_app()))
+        await client.start_server()
+        await client.server.app['client'].close()
+        client.server.app['client']=Backend()
+        try:
+            response=await client.get('/',headers={'Host':'a'*32+'.previews.example.test'})
+            return response.status,response.headers.get('Content-Encoding'),await response.read()
+        finally:await client.close()
+    status,encoding,page=asyncio.run(run())
+    assert status==200 and encoding is None
+    assert page.startswith(b'<!doctype html><html><body><main>Game</main><script data-genesys-selection>')
+    assert requests[0]['Accept-Encoding']=='gzip'
 
 
 def test_real_cross_origin_selection_requires_editor_activation_and_suppresses_action():

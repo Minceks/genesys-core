@@ -45,10 +45,11 @@ def saved_targets(limit=2):
     return targets
 
 
-def _read(client, url, limit, deadline):
+def _read(client, url, limit, deadline, partial=True):
     remaining = deadline - time.monotonic()
     if remaining <= 0: raise TimeoutError('Deployment check time budget exhausted')
-    with client.stream('GET', url, timeout=min(12, remaining), headers={'Range': f'bytes=0-{limit - 1}'}) as response:
+    headers = {'Range': f'bytes=0-{limit - 1}'} if partial else {}
+    with client.stream('GET', url, timeout=min(12, remaining), headers=headers) as response:
         if response.status_code not in {200, 206}:
             raise ValueError(f'HTTP {response.status_code} for {urlsplit(url).path}')
         data = bytearray()
@@ -62,8 +63,9 @@ def check_http(url, deadline, client=None):
     owns = client is None
     client = client or httpx.Client(follow_redirects=False, trust_env=False)
     try:
-        body, mime = _read(client, url, 512000, deadline)
-        if 'text/html' not in mime or not re.search(rb'<[a-zA-Z!]', body):
+        # A partial response skips the proxy's page handling, so fetch what a browser gets.
+        body, mime = _read(client, url, 512000, deadline, partial=False)
+        if 'text/html' not in mime or not re.match(rb'(?:\xef\xbb\xbf)?\s*<[a-zA-Z!]', body):
             raise ValueError('Saved preview did not return HTML')
         parser = Assets(); parser.feed(body.decode('utf-8', errors='replace'))
         origin = urlsplit(url)
