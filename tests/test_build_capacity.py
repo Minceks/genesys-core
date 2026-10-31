@@ -126,3 +126,18 @@ def test_design_requests_can_finish_their_output_allowance_within_the_draft_stag
 def plain_design_responses(monkeypatch):
     # These fakes return whole responses. Streaming is covered in test_build_upgrades.py.
     monkeypatch.setenv('GENESYS_STREAM_DESIGN', '0')
+
+
+def test_tool_calls_use_the_effort_chat_completions_accepts(monkeypatch):
+    monkeypatch.delenv('GENESYS_REASONING_EFFORT',raising=False)
+    monkeypatch.setattr('agent.ai_provider.bounded_messages',lambda messages,_:messages)
+    monkeypatch.setattr('agent.ai_provider.record_model_usage',lambda _:None)
+    create=Mock(return_value=SimpleNamespace(choices=[SimpleNamespace(finish_reason='stop',message=SimpleNamespace(content='{}',tool_calls=[]))]))
+    client=SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create)))
+    tools=[{'type':'function','function':{'name':'read_file','parameters':{'type':'object','properties':{}}}}]
+    OpenAIProvider(model='gpt-5.4',client=client).generate([{'role':'user','content':'Fix it'}],tools)
+    assert create.call_args.kwargs['reasoning_effort']=='none'
+    OpenAIProvider(model='gpt-5.4',client=client).generate([{'role':'user','content':'Fix it'}],[])
+    assert create.call_args.kwargs['reasoning_effort']=='medium'
+    OpenAIProvider(model='gpt-5-mini',client=client).generate([{'role':'user','content':'Fix it'}],tools)
+    assert create.call_args.kwargs['reasoning_effort']=='medium'

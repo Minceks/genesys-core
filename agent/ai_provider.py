@@ -1637,6 +1637,9 @@ class OpenAIProvider(AIProvider):
             options['reasoning_effort'] = 'low'
         if tools:
             options.update(tools=tools, tool_choice='auto', parallel_tool_calls=True)
+            # Chat Completions rejects function tools with any other effort on these models.
+            if request_model.startswith('gpt-5.'):
+                options['reasoning_effort'] = 'none'
         # A length limit is recoverable. Discard the incomplete response,
         # then regenerate a smaller atomic edit with a bounded larger allowance.
         ceiling = min(24000, max(options['max_completion_tokens'],

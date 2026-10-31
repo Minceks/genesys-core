@@ -153,6 +153,34 @@ def test_a_failed_worker_reports_its_planned_files_for_repair():
     assert 'src/pages/Home.jsx' in caught.value.drafts
 
 
+class LargeSite(Drafts):
+    def generate(self, messages, tools):
+        if 'Plan a React user application' in messages[0]['content']:
+            self.prompts.append(messages[0]['content'])
+            pages = ['Home', 'Shop', 'Product', 'Cart', 'Checkout', 'Orders']
+            return SimpleNamespace(text=json.dumps({'interface': 'useApp()', 'requirements': ['Buy'],
+                'primaryFiles': [{'path': f'src/pages/{page}.jsx', 'exports': [page], 'purpose': page} for page in pages],
+                'secondaryFiles': [{'path': 'src/components/Hero.jsx', 'exports': ['Hero'], 'purpose': 'Hero'}]}))
+        return super().generate(messages, tools)
+
+
+def test_a_large_site_is_shared_between_two_workers_so_one_response_cannot_overflow():
+    provider = LargeSite()
+    files = draft_project('Build a store', modern_source(), lambda _: provider, 10**12)
+    assert {f'src/pages/{page}.jsx' for page in ('Home', 'Shop', 'Product', 'Cart', 'Checkout', 'Orders')} < set(files)
+    workers = [re.search(r'Required files: (.*?)\. Optional', prompt).group(1).split(', ') for prompt in provider.prompts if 'Build the responsive UI' in prompt]
+    assert sorted(len(paths) for paths in workers) == [3, 4]
+    assert sum('src/App.jsx' in paths for paths in workers) == 1
+    assert len({path for paths in workers for path in paths}) == 7
+
+
+def test_losing_one_site_worker_keeps_the_other_workers_pages():
+    provider = LargeSite(fail='src/pages/Orders.jsx')
+    with pytest.raises(DraftReviewFailed) as caught:
+        draft_project('Build a store', modern_source(), lambda _: provider, 10**12)
+    assert 'src/App.jsx' in caught.value.drafts and 'src/pages/Orders.jsx' not in caught.value.drafts
+
+
 def test_source_review_follows_alias_imports_and_skips_the_shared_kit():
     files = {'src/App.jsx': "import { Home } from '@/pages/Home'\nimport { Button } from '@/components/ui/button'",
              'src/pages/Home.jsx': "import './local'", 'src/pages/local.js': 'export {}',

@@ -236,6 +236,8 @@ def draft_project(prompt, source, provider_for, deadline, save_image=None):
     shared = prompt + '\nSHARED PLAN:\n' + json.dumps(plan) + '\nSTARTER:\n' + source
     primary = planned_files(plan, 'primaryFiles') if modern else []
     secondary = planned_files(plan, 'secondaryFiles', primary) if modern else []
+    # One response cannot hold a large site: a store's pages hit the output limit.
+    half = (len(primary) + 1) // 2 if len(primary) >= 4 else len(primary)
     def worker(name, paths, role, optional_paths=()):
         result = parsed(provider_for(name).generate([{'role':'system','content':
             BUILD_STANDARD + stack + role + ' Follow the exact shared interface. Return JSON only: {"files": {"path": "complete source"}}. '
@@ -253,11 +255,10 @@ def draft_project(prompt, source, provider_for, deadline, save_image=None):
         return files
     # Workers create drafts in memory. They cannot concurrently modify the sandbox.
     client = getattr(planner, 'client', None)
-    with ThreadPoolExecutor(max_workers=3 + len(images), thread_name_prefix='genesys-builder') as pool:
+    with ThreadPoolExecutor(max_workers=4 + len(images), thread_name_prefix='genesys-builder') as pool:
         for image in images if client else ():
             pool.submit(copy_context().run, produce_image, client, image, save_image)
-        ui = pool.submit(copy_context().run, worker, 'openai', ['src/App.jsx'] + primary,
-            'Build the responsive UI. Import logic from ./projectLogic and styles from ./styles.css. '
+        ui_role = ('Build the responsive UI. Import logic from ./projectLogic and styles from ./styles.css. '
             'Use static named imports of the exact shared exports. If the contract uses a React hook, call it unconditionally at component top level. '
             'For canvas games initialize the shared engine after canvas mount and keep a single simulation owner; do not reimplement simulation or run duplicate animation loops in App. '
             + ('Style with Tailwind utilities and the component kit. Import the planned secondaryFiles by their exact exports; another worker writes them. ' if modern else
@@ -289,8 +290,11 @@ def draft_project(prompt, source, provider_for, deadline, save_image=None):
             'Follow the presentationContract and pageComposition: public websites need a composed hero, '
             'navigation, varied purposeful sections, content details and footer. Keep management tools '
             'in a separate view when requested; do not lead with tables, data-entry forms or admin buttons. '
-            'with alt text, responsive dimensions and clear sample labeling.',
+            'with alt text, responsive dimensions and clear sample labeling.')
+        ui = pool.submit(copy_context().run, worker, 'openai', ['src/App.jsx'] + primary[:half], ui_role,
             ('public/logo.svg', 'index.html'))
+        pages = pool.submit(copy_context().run, worker, 'openai', primary[half:], ui_role + ' Another worker writes '
+            'src/App.jsx and the other planned files. Use the exact named exports the shared plan gives each file.') if primary[half:] else None
         logic = pool.submit(copy_context().run, worker, os.getenv('GENESYS_PARALLEL_LOGIC_PROVIDER', 'openai'), ['src/projectLogic.js'],
             'Implement the exact shared logic interface, state, validation and requested actions. '
             'Preserve reload persistence using the supplied usePersistentState hook. No JSX or CSS.')
@@ -303,7 +307,7 @@ def draft_project(prompt, source, provider_for, deadline, save_image=None):
             'Provide deliberate desktop and phone compositions, readable focus/disabled/selected/result states, '
             'safe grid/flex sizing and space for fixed navigation. Respect reduced motion. No JSX or application logic.')
         files, failures = {}, []
-        for future in (ui, logic, styles):
+        for future in (ui, logic, styles, *([pages] if pages else [])):
             try:
                 files.update(future.result())
             except Exception as error:

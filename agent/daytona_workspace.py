@@ -1461,27 +1461,38 @@ for name, contents in files.items():
     def run_build(
         self,
     ) -> dict[str, Any]:
+        from .build_repair import BUILD_KILLED, default_import_fix
         from .react_preflight import HOOK_PREFLIGHT
 
         # Reused sandboxes may have lost node_modules. Install locked
         # dependencies only when Vite is missing, then capture install and
         # build errors together for logs and self-repair.
-        result = self.sandbox.process.exec(
-            (
-                "if [ ! -x node_modules/.bin/vite ]; then "
-                "echo 'Vite is missing; installing locked dependencies'; "
-                "npm ci || exit $?; "
-                "fi; "
-                + 'node -e ' + shlex.quote(HOOK_PREFLIGHT) + ' 2>&1 || exit $?; '
-                + "npm run build 2>&1"
-            ),
-            cwd=REMOTE_PROJECT_ROOT,
-            timeout=300,
-        )
+        # A killed process and a wrong import style are not source problems a
+        # model should spend a repair attempt on, so settle them here.
+        killed = False
+        for _ in range(6):
+            result = self.sandbox.process.exec(
+                (
+                    "if [ ! -x node_modules/.bin/vite ]; then "
+                    "echo 'Vite is missing; installing locked dependencies'; "
+                    "npm ci || exit $?; "
+                    "fi; "
+                    + 'node -e ' + shlex.quote(HOOK_PREFLIGHT) + ' 2>&1 || exit $?; '
+                    + "npm run build 2>&1"
+                ),
+                cwd=REMOTE_PROJECT_ROOT,
+                timeout=300,
+            )
 
-        output = (
-            result.result or ""
-        )
+            output = (
+                result.result or ""
+            )
+            if result.exit_code == BUILD_KILLED and not killed:
+                killed = True
+                continue
+            fix = default_import_fix(output, lambda path: self.read_file(path).get('content', '')) if result.exit_code else None
+            if not fix or self.write_file(*fix).get('status') != 'success':
+                break
 
         # Compiler warnings that predict a runtime throw must enter repair,
         # even when Vite exits zero. Ordinary optimization warnings remain warnings.
