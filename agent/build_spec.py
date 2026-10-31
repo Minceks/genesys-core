@@ -168,14 +168,14 @@ def validate_regression_evidence(spec,sources,request,require_evidence=False):
     return spec
 
 
-def prepare_build_spec(workspace, prompt, brief, provider):
+def prepare_build_spec(workspace, prompt, brief, provider, restore_foundation=False):
     request_hash = hashlib.sha256(prompt.encode()).hexdigest()
     replacing = brief.get('buildIntent') in {'replace-product', 'new-product'}
     previous = {}
     from .game_foundation import survival_foundation_fits
     if survival_foundation_fits(prompt, brief):
         starter = workspace.read_file('src/App.jsx').get('content','')
-        if replacing or 'Your project is ready' in starter:
+        if replacing or restore_foundation or 'Your project is ready' in starter:
             from .game_playtests import foundation_contract
             spec = foundation_contract(prompt)
             saved = workspace.write_file(SPEC_PATH,json.dumps(spec,ensure_ascii=False,indent=2))

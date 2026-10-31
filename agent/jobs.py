@@ -2,6 +2,7 @@
 import json
 import logging
 import os
+import re
 import sqlite3
 import threading
 import time
@@ -14,6 +15,28 @@ from .progress import progress_callback
 from .logging_config import request_id_context
 
 logger = logging.getLogger(__name__)
+
+
+RECHECK = re.compile(
+    r'(?:please\s+)?(?:'
+    r'(?:do|run|redo|repeat|rerun|retry|try)\s+(?:all\s+)?(?:the\s+)?(?:checks?|tests?|verification|verify)(?:\s+(?:again|agian|once\s+more))?'
+    r'|(?:check|checks|test|tests|verify|verification)\s+(?:it\s+)?(?:again|agian|once\s+more)'
+    r'|re-?(?:check|test|verify)(?:\s+it)?)', re.I)
+
+
+def recheck_request(prompt):
+    """A plain request to repeat the checks, which must never become a change request."""
+    from .builder_modes import parse_mode
+    mode, plain = parse_mode(str(prompt))
+    return mode in {None, 'build'} and bool(RECHECK.fullmatch(plain.strip().rstrip('.!?').strip()))
+
+
+def recheck_source(history):
+    """The latest real request, if its saved build only needs its checks repeated."""
+    for job in reversed(history or []):
+        if not recheck_request(job.get('prompt', '')):
+            return job if saved_build_retry(job, job.get('prompt')) else None
+    return None
 
 
 def saved_build_retry(previous, prompt):
@@ -83,7 +106,7 @@ class JobManager:
         finally:
             db.close()
 
-    def submit(self, project_id, request_id, prompt="", history=None, reservation=None, user_id=None, verification_retry=None, implementation_retry=None):
+    def submit(self, project_id, request_id, prompt="", history=None, reservation=None, user_id=None, verification_retry=None, verification_recheck=False, implementation_retry=None):
         job_id = uuid.uuid4().hex
         now = time.time()
         payload = {"jobId": job_id, "projectId": project_id, "prompt": prompt,
@@ -91,6 +114,7 @@ class JobManager:
                    "state": "running", "stage": "Waiting for a worker", "restartCount": 0}
         payload['verificationRetry'] = verification_retry
         payload['verificationRetryVerified'] = bool(verification_retry)
+        payload['verificationRecheck'] = bool(verification_recheck)
         payload['implementationRetry'] = implementation_retry
         with self.connection() as db:
             db.execute("BEGIN IMMEDIATE")
@@ -167,7 +191,7 @@ class JobManager:
                     "browser verification can run again. Report what was retained, completed, and verified. "
                     "Last recorded stage (informational, not proof of completion): " + job.get('previousStage', 'unknown'))
             if job.get('verificationRetry') and job.get('verificationRetryVerified'):
-                recovery = {'verificationRetry': job['verificationRetry']}
+                recovery = {'verificationRetry': job['verificationRetry'], **({'functionalRecheck': True} if job.get('verificationRecheck') else {})}
             elif job.get('implementationRetry'):
                 recovery = job['implementationRetry']
             elif job.get('verificationRetry'):

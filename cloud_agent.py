@@ -701,12 +701,15 @@ def start_agent_job():
     except UsageLimited as error:
         return limit_response(error)
     try:
-        previous = jobs.latest(project_id)
+        from agent.jobs import implementation_retry_context, recheck_request, recheck_source
+        recheck = recheck_source(jobs.conversation(project_id)) if recheck_request(prompt) else None
+        if recheck:
+            prompt = recheck['prompt']
+        previous = recheck or jobs.latest(project_id)
         verification_retry = saved_build_retry(previous, prompt)
-        from agent.jobs import implementation_retry_context
         job_id = jobs.submit(project_id, request_id_context.get(),
             prompt=prompt, history=history, reservation=reservation,
-            verification_retry=verification_retry,
+            verification_retry=verification_retry, verification_recheck=bool(recheck),
             implementation_retry=implementation_retry_context(previous,prompt),
             user_id=g.user["id"] if getattr(g, "user", None) else None)
     except ValueError as error:

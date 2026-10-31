@@ -1,4 +1,6 @@
-from agent.jobs import saved_build_retry
+import pytest
+
+from agent.jobs import JobManager, recheck_request, recheck_source, saved_build_retry
 
 
 def test_verified_build_failure_preserves_fingerprint():
@@ -47,3 +49,57 @@ def test_incomplete_verification_preserves_compiled_source_for_retry():
     assert implementation_retry_context(previous,'Zombie game') is None
     previous['result']['verification']['failed']=['Actual movement handler is broken']
     assert saved_build_retry(previous,'Zombie game') is None
+
+
+@pytest.mark.parametrize('prompt', ['do the check agian', 'do the check again', 'Run the tests again.', 'check again', 'recheck',
+                                    're-verify', 'verify again', 'please run all the checks', '/build retry the verification'])
+def test_plain_recheck_wording_is_recognised(prompt):
+    assert recheck_request(prompt)
+
+
+@pytest.mark.parametrize('prompt', ['check again that the cart works and fix it', 'Add tests for the cart', 'make the zombies faster',
+                                    'check the header', '/plan check again', '/discuss recheck'])
+def test_real_requests_are_never_treated_as_a_recheck(prompt):
+    assert not recheck_request(prompt)
+
+
+def saved(prompt='/build Create a zombie game', **result):
+    return {'state': 'failed', 'prompt': prompt, 'result': {'buildPassed': True, 'errorType': 'verification_incomplete',
+        'verification': {'failed': [], 'incomplete': ['Design note']}, 'buildFingerprint': 'saved', **result}}
+
+
+def test_recheck_finds_the_real_request_behind_earlier_rechecks():
+    original = saved()
+    history = [original, saved('do the check again'), saved('/build check again')]
+    assert recheck_source(history) is original
+
+
+def test_recheck_never_skips_a_later_change_or_a_build_with_real_failures():
+    change = {'state': 'completed', 'prompt': 'Make it faster', 'result': {'buildPassed': True}}
+    assert recheck_source([saved(), change]) is None
+    assert recheck_source([saved(verification={'failed': ['Cart is broken'], 'incomplete': []})]) is None
+    assert recheck_source([]) is None
+
+
+def test_recheck_reaches_the_agent_as_a_test_only_run(tmp_path, monkeypatch):
+    monkeypatch.setenv('GENESYS_JOB_DB', str(tmp_path / 'jobs.sqlite3'))
+    monkeypatch.delenv('RAILWAY_ENVIRONMENT_ID', raising=False)
+    manager = JobManager()
+    job_id = manager.submit('project', 'request', prompt='Build', verification_retry='saved', verification_recheck=True)
+    with manager.connection() as db:
+        db.execute("UPDATE jobs SET state='running',owner=?,attempts=1 WHERE id=?", (manager.owner, job_id))
+    seen = []
+    manager.execute = lambda prompt, project, history, reservation, recovery: seen.append(recovery) or {'status': 'success'}
+    manager.run(manager.get(job_id, 'project'), [], None, 1)
+    assert seen == [{'verificationRetry': 'saved', 'functionalRecheck': True}]
+
+
+def test_recheck_restores_the_trusted_game_contract_over_a_rewritten_one():
+    from types import SimpleNamespace
+    from agent.build_spec import prepare_build_spec
+    written = {}
+    workspace = SimpleNamespace(read_file=lambda _: {'content': 'export default function App(){return <main>Zombies</main>}'},
+        write_file=lambda path, content: written.update({path: content}) or {'status': 'success'})
+    brief = {'productType': 'game', 'buildIntent': 'modify', 'originalRequest': 'Create a top-down zombie wave survival shooter'}
+    spec = prepare_build_spec(workspace, brief['originalRequest'], brief, None, restore_foundation=True)
+    assert spec['foundationContractVersion'] == 1 and written

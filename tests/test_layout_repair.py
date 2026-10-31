@@ -176,7 +176,7 @@ def test_actual_coordinator_supplies_measured_parent_excerpt_on_layout_repair(mo
     monkeypatch.setattr('agent.builder_controls.get_controls',lambda _: {})
     monkeypatch.setattr('agent.version_history.operate',lambda *_,**__: {'status':'success'})
     monkeypatch.setattr('agent.product_design.prepare_design',lambda *_: {'productType':'app','subtype':'app','presentationContract':{'mode':'workflow-app'}})
-    monkeypatch.setattr('agent.build_spec.prepare_build_spec',lambda *_: {'requirements':[{'id':'A','name':'Action','scope':'browser','acceptance':'Use action and check outcome'}]})
+    monkeypatch.setattr('agent.build_spec.prepare_build_spec',lambda *_,**__: {'requirements':[{'id':'A','name':'Action','scope':'browser','acceptance':'Use action and check outcome'}]})
     monkeypatch.setattr(orchestrator,'_compact_messages',lambda messages:messages)
     monkeypatch.setattr(orchestrator,'scan_project',lambda *_,**__: {'status':'success','sourceFiles':['src/App.jsx']})
     monkeypatch.setattr(orchestrator,'build_project_context',lambda _: 'Existing source')

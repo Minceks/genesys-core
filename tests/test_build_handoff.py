@@ -171,7 +171,7 @@ def agent_at_visual_review(monkeypatch,reserve_seconds,polish_error,workflow_rev
     monkeypatch.setattr('agent.builder_controls.get_controls',lambda _: {})
     monkeypatch.setattr('agent.version_history.operate',lambda *_,**__:{'status':'success'})
     monkeypatch.setattr('agent.product_design.prepare_design',lambda *_:{'productType':'app','subtype':'app'})
-    monkeypatch.setattr('agent.build_spec.prepare_build_spec',lambda *_:{})
+    monkeypatch.setattr('agent.build_spec.prepare_build_spec',lambda *_,**__:{})
     monkeypatch.setattr(orchestrator,'_compact_messages',lambda messages:messages)
     monkeypatch.setattr(orchestrator,'scan_project',lambda *_,**__: {'status':'success','sourceFiles':['src/App.jsx']})
     monkeypatch.setattr(orchestrator,'build_project_context',lambda _: 'CURRENT INSPECTED SOURCE CONTEXT')

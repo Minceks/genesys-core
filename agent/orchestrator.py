@@ -1893,6 +1893,8 @@ def _run_agent(
     from .builder_controls import get_controls, controls_guidance
     mode, prompt = parse_mode(prompt)
     verification_retry = recovery_context.get('verificationRetry') if isinstance(recovery_context, dict) else None
+    # A requested recheck only tests the saved build: no drafting, polish or edits.
+    functional_recheck = bool(verification_retry and recovery_context.get('functionalRecheck'))
     if isinstance(recovery_context, dict):
         recovery_context = None
 
@@ -2032,8 +2034,8 @@ def _run_agent(
                     saved_spec = validate_current_spec(json.loads(workspace.read_file(SPEC_PATH).get('content', '{}')))
                 except (ValueError, TypeError, AttributeError, FileNotFoundError):
                     narrow_edit = False
-            product_brief['buildSpecification'] = saved_spec or prepare_build_spec(workspace, prompt, product_brief, provider)
-            if verification_retry and not same_build_requirements(previous_requirements, product_brief['buildSpecification']):
+            product_brief['buildSpecification'] = saved_spec or prepare_build_spec(workspace, prompt, product_brief, provider, restore_foundation=functional_recheck)
+            if verification_retry and not functional_recheck and not same_build_requirements(previous_requirements, product_brief['buildSpecification']):
                 verification_retry = None
                 report_progress('Reconciling the saved application with updated requirements')
         except Exception as exc:
@@ -3483,7 +3485,7 @@ def _run_agent(
                 if project_id != PROJECT_ID_DEFAULT:
                     report_progress("Checking visual layout")
                     quality = get_browser(project_id).visual_quality(
-                        vision_loop=visual_polish if (not narrow_edit and (not verification_retry or game_production) and os.getenv('GENESYS_VISUAL_REVIEW','1')!='0') else None,
+                        vision_loop=visual_polish if (not narrow_edit and not functional_recheck and (not verification_retry or game_production) and os.getenv('GENESYS_VISUAL_REVIEW','1')!='0') else None,
                         design_brief=product_brief,
                         reference=(product_brief or {}).get('referenceAnalysis'),
                         public_website=(product_brief or {}).get('presentationContract', {}).get('mode') == 'public-website',
@@ -3504,7 +3506,7 @@ def _run_agent(
                         visual_checks.append('Desktop and phone: rendered content, headline hierarchy and no horizontal overflow (not subjective aesthetic quality).')
                         if all(item.get('brandVisual') and item.get('favicon') for item in quality.get('snapshots', [])):
                             visual_checks.append('Visible header logo and configured favicon.')
-                    workflow_review_enabled = not narrow_edit and os.getenv('GENESYS_VISUAL_REVIEW','1')!='0'
+                    workflow_review_enabled = not narrow_edit and not functional_recheck and os.getenv('GENESYS_VISUAL_REVIEW','1')!='0'
                     content_result = get_browser(project_id).content_checks(prompt, provider, preverified=visual_checks,
                         capture_workflows=workflow_review_enabled)
                     if workflow_review_enabled and content_result.get('status') == 'success' and not content_result.get('unverifiedCore'):
