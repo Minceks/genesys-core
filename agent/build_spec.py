@@ -168,10 +168,11 @@ def validate_regression_evidence(spec,sources,request,require_evidence=False):
     return spec
 
 
-# What the fixed game tests assert. An edit naming these may change it on purpose.
+# What the fixed game tests assert, or a new feature that needs mandatory checks of its own.
 FOUNDATION_TOUCHES = re.compile(r'\b(?:health|hp|lives?|score|retry|waves?|levels?|sectors?|start|title|menu|buttons?|labels?'
     r'|rename|remove|delete|restart|joystick|touch|mobile|phone|controls?|keyboard|fire|firing|weapons?|skills?|dash|pulse'
-    r'|upgrades?|slower|easier|pause|save|progress|settings?|reduced.motion|redesign|rewrite|rebuild)\b', re.I)
+    r'|upgrades?|slower|easier|pause|save|progress|settings?|reduced.motion|redesign|rewrite|rebuild'
+    r'|add(?!\s+(?:more|extra)\b)|adding|new|implement|create|feature|boss(?:es)?)\b', re.I)
 
 
 def keeps_foundation_tests(previous, prompt, brief):

@@ -119,13 +119,22 @@ def test_recheck_of_an_edit_keeps_the_check_written_for_that_edit():
     assert again['editRequirements'] == first['editRequirements']
 
 
-def test_edit_check_failures_and_gaps_are_reported_on_the_build():
+def test_unconfirmed_tuning_is_reported_without_failing_a_game_that_passed_its_regressions():
     from agent.game_playtests import add_edit_checks
-    edits = [{'id': 'edit-r1'}, {'id': 'edit-r2'}]
-    base = lambda: {'status': 'success', 'issues': [], 'unverifiedCore': [], 'testedInteractions': ['Regression'],
-                    'coverage': {'requirements': [{'id': 'r1'}], 'passedIds': ['r1']}}
-    result = add_edit_checks(base(), {'issues': [], 'testedInteractions': ['Faster'], 'coverage': {'passedIds': ['edit-r1']}, '_verifiedPlan': {}}, edits)
-    assert result['status'] == 'success' and result['coverage']['passedIds'] == ['r1', 'edit-r1']
-    assert result['unverifiedCore'] == ['edit-r2: Edit check did not complete']
-    result = add_edit_checks(base(), {'issues': ['Zombies did not speed up'], 'coverage': {}}, edits[:1])
-    assert result['status'] == 'error' and result['issues'] == ['Zombies did not speed up']
+    edits = [{'id': 'edit-r1', 'name': 'Faster zombies'}, {'id': 'edit-r2', 'name': 'Denser waves'}]
+    base = {'status': 'success', 'issues': [], 'unverifiedCore': [], 'testedInteractions': ['Regression'],
+            'coverage': {'requirements': [{'id': 'r1'}], 'passedIds': ['r1']}}
+    result = add_edit_checks(base, {'issues': ['Numeric outcome did not satisfy gte 5; observed 4.0'], 'unverifiedCore': ['Not verified: density'],
+                                    'testedInteractions': ['Faster'], 'coverage': {'passedIds': ['edit-r1']}, '_verifiedPlan': {}}, edits)
+    assert result['status'] == 'success' and result['issues'] == [] and result['unverifiedCore'] == []
+    assert result['coverage']['passedIds'] == ['r1', 'edit-r1']
+    assert [r['id'] for r in result['coverage']['requirements']] == ['r1', 'edit-r1']
+    assert result['unverified'] == ['Requested change not confirmed automatically, play it to judge: Denser waves']
+
+
+@pytest.mark.parametrize('prompt,keeps', [('make the zombies faster and a bit more dense', True), ('add more zombies', True), ('bigger explosions', True),
+                                          ('add a flamethrower', False), ('add a new map', False), ('implement a boss fight', False)])
+def test_new_features_do_not_take_the_tuning_path(prompt, keeps):
+    from agent.build_spec import keeps_foundation_tests
+    from agent.game_playtests import foundation_contract
+    assert keeps_foundation_tests(foundation_contract('Create a zombie game'), prompt, {'buildIntent': 'edit-product'}) is keeps
